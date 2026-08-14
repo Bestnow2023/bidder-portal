@@ -19,6 +19,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(biddersPage, /<PortalApp \/>/);
   assert.match(layout, /Bidder Work Portal/);
   assert.match(layout, /favicon\.png/);
+  assert.match(layout, /cryptomus: "a364d755"/);
   assert.match(portalApp, /digniware-logo-dark\.png/);
   assert.match(portalApp, /digniware-logo-light\.png/);
   assert.match(portalApp, /Email and password sign-in/);

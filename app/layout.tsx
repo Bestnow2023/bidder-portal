@@ -9,6 +9,9 @@ export const metadata: Metadata = {
     shortcut: "/favicon.png",
     apple: "/favicon.png",
   },
+  other: {
+    cryptomus: "a364d755",
+  },
 };
 
 export default function RootLayout({
