@@ -3,11 +3,12 @@ import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 test("keeps the bidder portal as the primary screen", async () => {
-  const [page, operationsPage, chatPage, biddersPage, layout, portalApp, packageJson] = await Promise.all([
+  const [page, operationsPage, chatPage, biddersPage, billingPage, layout, portalApp, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/operations/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/bidders/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/billing/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -17,6 +18,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(operationsPage, /<PortalApp \/>/);
   assert.match(chatPage, /<PortalApp \/>/);
   assert.match(biddersPage, /<PortalApp \/>/);
+  assert.match(billingPage, /<PortalApp \/>/);
   assert.match(layout, /Bidder Work Portal/);
   assert.match(layout, /favicon\.png/);
   assert.match(layout, /cryptomus: "a364d755"/);
@@ -74,6 +76,12 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Frequency/);
   assert.match(portalApp, /Weekday/);
   assert.match(portalApp, /Save paid payment/);
+  assert.match(portalApp, /Billing/);
+  assert.match(portalApp, /Release Payment/);
+  assert.match(portalApp, /Release payment/);
+  assert.match(portalApp, /Payout coin/);
+  assert.match(portalApp, /Bidder payout wallet/);
+  assert.match(portalApp, /Tip/);
   assert.match(portalApp, /Escrow History/);
   assert.match(portalApp, /Credit Wallet/);
   assert.match(portalApp, /Create Cryptomus invoice/);
@@ -116,6 +124,13 @@ test("declares the requested frontend records", async () => {
     "Unpaid Work Totals",
     "Payment Method",
     "Payment History",
+    "Billing",
+    "Release Payment",
+    "Release payment",
+    "Bidder payout wallet",
+    "Payout coin",
+    "Wallet address",
+    "Tip",
     "Credit Wallet",
     "Create Cryptomus invoice",
     "Credit notifications",
@@ -153,6 +168,7 @@ test("declares the requested frontend records", async () => {
     "createCreditDeposit",
     "addManualCredit",
     "markNotificationsRead",
+    "releasePayment",
     "savePaymentMethod",
     "saveWorkLog",
     "deleteWorkLog",
@@ -185,6 +201,10 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /DepositList/);
   assert.match(portalApp, /DepositRecord/);
   assert.match(portalApp, /PortalNotification/);
+  assert.match(portalApp, /payoutCurrencies/);
+  assert.match(portalApp, /payoutNetworks/);
+  assert.match(portalApp, /payoutMethodLabel/);
+  assert.match(portalApp, /estimateForUserInRange/);
   assert.match(portalApp, /adminNotifications/);
   assert.match(portalApp, /unreadAdminNotifications/);
   assert.match(portalApp, /creditBalanceForClient/);
@@ -214,6 +234,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /\/profile/);
   assert.match(portalApp, /\/clients/);
   assert.match(portalApp, /\/bidders/);
+  assert.match(portalApp, /\/billing/);
   assert.match(portalApp, /aria-haspopup="menu"/);
   assert.match(portalApp, /fixed z-50/);
   assert.match(portalApp, /portal-nav/);
@@ -248,6 +269,7 @@ test("declares the requested frontend records", async () => {
     "profile/page.tsx",
     "clients/page.tsx",
     "bidders/page.tsx",
+    "billing/page.tsx",
     "people/page.tsx",
     "bidder-settings/page.tsx",
     "work/page.tsx",

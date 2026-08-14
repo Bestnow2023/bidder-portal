@@ -1,6 +1,6 @@
 export type Role = "super_admin" | "client" | "admin" | "bidder" | "developer";
 export type UserStatus = "pending" | "approved" | "paused";
-export type PaymentStatus = "scheduled" | "paid";
+export type PaymentStatus = "scheduled" | "processing" | "paid" | "failed";
 export type PaymentFrequency = "" | "weekly" | "biweekly" | "monthly";
 export type PaymentWeekday = "" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday";
 
@@ -54,6 +54,8 @@ export type PaymentMethod = {
   id: string;
   userId: string;
   method: string;
+  currency?: string;
+  network?: string;
   address: string;
   isPrimary: boolean;
   createdAt: string;
@@ -80,10 +82,20 @@ export type PaymentRecord = {
   periodEnd: string;
   scheduledDate: string;
   amount: number;
+  baseAmount?: number;
+  tipAmount?: number;
   creditAmountUsed?: number;
   status: PaymentStatus;
   paymentLink: string;
   memo: string;
+  payoutOrderId?: string;
+  payoutUuid?: string;
+  payoutStatus?: string;
+  payoutCurrency?: string;
+  payoutNetwork?: string;
+  payoutAddress?: string;
+  payoutTxid?: string;
+  payoutError?: string;
   createdAt: string;
   updatedAt: string;
 };

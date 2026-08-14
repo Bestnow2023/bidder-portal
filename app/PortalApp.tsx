@@ -21,9 +21,10 @@ import type {
 } from "./portal-types";
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
-type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "people" | "bidderSettings" | "work" | "payments" | "chat";
+type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "people" | "bidderSettings" | "work" | "billing" | "payments" | "chat";
 
-const paymentMethods = ["Payoneer", "BEP20", "Wise", "PayPal", "Bank transfer", "USDT TRC20", "Other"];
+const payoutCurrencies = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB"];
+const payoutNetworks = ["TRON", "BSC", "ETH", "BTC", "LTC", "TRX"];
 const paymentFrequencies: { value: PaymentFrequency; label: string }[] = [
   { value: "weekly", label: "Weekly" },
   { value: "biweekly", label: "Biweekly" },
@@ -90,6 +91,7 @@ const viewRoutes: Record<PortalView, string> = {
   people: "/people",
   bidderSettings: "/bidder-settings",
   work: "/work",
+  billing: "/billing",
   payments: "/payments",
   chat: "/chat",
 };
@@ -102,6 +104,7 @@ const routeViews: Record<string, PortalView> = {
   "/people": "people",
   "/bidder-settings": "bidderSettings",
   "/work": "work",
+  "/billing": "billing",
   "/payments": "payments",
   "/chat": "chat",
 };
@@ -135,6 +138,10 @@ function money(value: number) {
     currency: "USD",
     maximumFractionDigits: 2,
   }).format(value || 0);
+}
+
+function payoutMethodLabel(method: PaymentMethod) {
+  return [method.currency || method.method, method.network].filter(Boolean).join(" ");
 }
 
 function shortDate(value: string) {
@@ -324,6 +331,7 @@ function viewTitle(view: string) {
     people: "People",
     bidderSettings: "Bidder Settings",
     work: "Work Logs",
+    billing: "Billing",
     payments: "Payments",
     chat: "Inbox",
   };
@@ -346,6 +354,7 @@ function viewSubtitle(view: string, isAdmin: boolean) {
     people: "Manage user accounts, approval status, roles, passwords, and email verification.",
     bidderSettings: "Set bidder rates, interview bonuses, payment dates, and schedules.",
     work: "Review bidder work logs and Google Sheet links.",
+    billing: "Deposit credits and release bidder payouts through Cryptomus.",
     payments: "Record payouts, review payment methods, and track client escrow.",
     chat: "Direct member messaging with super admin monitoring.",
   };
@@ -359,7 +368,7 @@ function viewsForUser(user: PortalUser): PortalView[] {
   }
 
   if (isClientRole(user.role)) {
-    return ["overview", "profile", "bidders", "work", "payments", "chat"];
+    return ["overview", "profile", "bidders", "work", "billing", "chat"];
   }
 
   if (user.role === "bidder") {
@@ -391,9 +400,25 @@ function estimateForUser(user: PortalUser, logs: WorkLog[]) {
     );
 }
 
+function estimateForUserInRange(user: PortalUser, logs: WorkLog[], periodStart: string, periodEnd: string) {
+  return logs
+    .filter((log) => log.userId === user.id && log.workDate >= periodStart && log.workDate <= periodEnd)
+    .reduce(
+      (total, log) =>
+        total +
+        log.appliedJobs * user.ratePerApplication +
+        log.interviewsScheduled * user.bonusPerInterview,
+      0
+    );
+}
+
+function isCreditSpentPayment(payment: PaymentRecord) {
+  return payment.status === "paid" || payment.status === "processing";
+}
+
 function paidForUser(userId: string, payments: PaymentRecord[]) {
   return payments
-    .filter((payment) => payment.userId === userId && payment.status === "paid")
+    .filter((payment) => payment.userId === userId && isCreditSpentPayment(payment))
     .reduce((total, payment) => total + payment.amount, 0);
 }
 
@@ -411,7 +436,7 @@ function creditsDepositedForClient(clientId: string, deposits: DepositRecord[]) 
 
 function creditsSpentForClient(clientId: string, payments: PaymentRecord[]) {
   return payments
-    .filter((payment) => payment.clientId === clientId && payment.status === "paid")
+    .filter((payment) => payment.clientId === clientId && isCreditSpentPayment(payment))
     .reduce((total, payment) => total + payment.amount, 0);
 }
 
@@ -798,7 +823,7 @@ function isWorkLogPaid(log: WorkLog, payments: PaymentRecord[]) {
   }
 
   return payments.some((payment) => {
-    if (payment.userId !== log.userId || payment.status !== "paid") {
+    if (payment.userId !== log.userId || !isCreditSpentPayment(payment)) {
       return false;
     }
 
@@ -1533,7 +1558,7 @@ export default function PortalApp() {
             {safeView === "bidderSettings" && isSuperAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
             {safeView === "work" ? <WorkView data={data} busy={busy} onSave={postAction} /> : null}
-            {safeView === "payments" ? <PaymentsView data={data} busy={busy} onAction={postAction} /> : null}
+            {safeView === "billing" || safeView === "payments" ? <PaymentsView data={data} busy={busy} onAction={postAction} /> : null}
             {safeView === "chat" ? (
               <ChatView
                 data={data}
@@ -3240,15 +3265,19 @@ function PaymentMethodForm({
   editingMethod?: PaymentMethod | null;
   onCancelEdit?: () => void;
 }) {
-  const [method, setMethod] = useState(editingMethod?.method || "Payoneer");
+  const [currency, setCurrency] = useState(editingMethod?.currency || "USDT");
+  const [network, setNetwork] = useState(editingMethod?.network || "TRON");
   const [address, setAddress] = useState(editingMethod?.address || "");
   const isEditing = Boolean(editingMethod);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const method = `${currency} ${network}`.trim();
     const nextData = await onSave("savePaymentMethod", {
       methodId: editingMethod?.id,
       method,
+      currency,
+      network,
       address,
     });
     if (nextData) {
@@ -3260,16 +3289,24 @@ function PaymentMethodForm({
   return (
     <form className="form-grid" onSubmit={submit}>
       <label className="field">
-        <span>Payment method</span>
-        <select value={method} onChange={(event) => setMethod(event.target.value)}>
-          {paymentMethods.map((option) => (
+        <span>Payout coin</span>
+        <select value={currency} onChange={(event) => setCurrency(event.target.value)}>
+          {payoutCurrencies.map((option) => (
             <option key={option} value={option}>{option}</option>
           ))}
         </select>
       </label>
       <label className="field">
-        <span>Address</span>
-        <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Wallet, email, account, or address" required />
+        <span>Network</span>
+        <select value={network} onChange={(event) => setNetwork(event.target.value)}>
+          {payoutNetworks.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </label>
+      <label className="field full">
+        <span>Wallet address</span>
+        <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Crypto wallet address for Cryptomus payout" required />
       </label>
       <div className="actions full">
         <button className="primary-button" type="submit" disabled={busy}>
@@ -3301,8 +3338,8 @@ function PaymentMethodList({
       {methods.map((method) => (
         <div className="method-row" key={method.id}>
           <div>
-            <strong>{method.method}</strong>
-            <span className="muted">Address: {method.address}</span>
+            <strong>{payoutMethodLabel(method)}</strong>
+            <span className="muted">Wallet: {method.address}</span>
           </div>
           <div className="method-actions">
             {method.isPrimary ? <span className="badge bidder">Primary</span> : null}
@@ -3337,7 +3374,7 @@ function UserPayments({
         <div className="panel-header">
           <div>
             <h2>Payment Method</h2>
-            <p>Manual payout details only; no payment processor is connected.</p>
+            <p>Select the crypto coin and wallet address clients will use for Cryptomus payouts.</p>
           </div>
         </div>
         <PaymentMethodForm
@@ -3406,7 +3443,8 @@ function AdminPayments({
     isWorkerUser(user) &&
     (isSuperAdminRole(data.currentUser.role) || user.assignedAdminId === data.currentUser.id)
   );
-  const canRecordPayments = isSuperAdminRole(data.currentUser.role) || isClientRole(data.currentUser.role);
+  const canAddManualPayment = isSuperAdminRole(data.currentUser.role);
+  const canReleasePayments = isClientRole(data.currentUser.role);
   const canModifyPayments = isSuperAdminRole(data.currentUser.role);
   const [draft, setDraft] = useState({
     userId: payableUsers[0]?.id || "",
@@ -3415,6 +3453,14 @@ function AdminPayments({
     scheduledDate: payableUsers[0]?.nextPaymentDate || today(),
     amount: "",
     paymentLink: "",
+    memo: "",
+  });
+  const [releaseDraft, setReleaseDraft] = useState({
+    userId: payableUsers[0]?.id || "",
+    periodStart: today(),
+    periodEnd: today(),
+    tipAmount: "",
+    paymentMethodId: "",
     memo: "",
   });
   const creditClients = isSuperAdminRole(data.currentUser.role) ? clientUsers(data.users) : [data.currentUser].filter((user) => isClientRole(user.role));
@@ -3433,14 +3479,23 @@ function AdminPayments({
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
 
   const selectedUser = payableUsers.find((user) => user.id === draft.userId);
+  const selectedReleaseUser = payableUsers.find((user) => user.id === releaseDraft.userId);
+  const releaseMethods = data.paymentMethods.filter((method) => method.userId === releaseDraft.userId && method.address);
+  const selectedReleaseMethodId = releaseDraft.paymentMethodId || releaseMethods.find((method) => method.isPrimary)?.id || releaseMethods[0]?.id || "";
   const paymentClientId = isSuperAdminRole(data.currentUser.role)
     ? selectedUser?.assignedAdminId || depositDraft.clientId
     : data.currentUser.id;
   const depositClientId = isSuperAdminRole(data.currentUser.role) ? depositDraft.clientId : data.currentUser.id;
   const creditBalance = paymentClientId ? creditBalanceForClient(paymentClientId, data.deposits || [], data.payments) : 0;
+  const releaseCreditBalance = depositClientId ? creditBalanceForClient(depositClientId, data.deposits || [], data.payments) : 0;
   const depositAmount = Number(depositDraft.amount) || 0;
   const depositFee = Math.round(depositAmount * 0.05 * 100) / 100;
   const depositCredit = Math.max(0, Math.round((depositAmount - depositFee) * 100) / 100);
+  const releaseBaseAmount = selectedReleaseUser
+    ? estimateForUserInRange(selectedReleaseUser, data.workLogs, releaseDraft.periodStart, releaseDraft.periodEnd)
+    : 0;
+  const releaseTipAmount = Number(releaseDraft.tipAmount) || 0;
+  const releaseTotalAmount = Math.max(0, Math.round((releaseBaseAmount + releaseTipAmount) * 100) / 100);
   const suggestedAmount = selectedUser
     ? Math.max(0, estimateForUser(selectedUser, data.workLogs) - paidForUser(selectedUser.id, data.payments))
     : 0;
@@ -3510,6 +3565,21 @@ function AdminPayments({
     }
   }
 
+  async function submitReleasePayment(event: FormEvent) {
+    event.preventDefault();
+    const nextData = await onAction("releasePayment", {
+      userId: releaseDraft.userId,
+      periodStart: releaseDraft.periodStart,
+      periodEnd: releaseDraft.periodEnd,
+      tipAmount: Number(releaseDraft.tipAmount),
+      paymentMethodId: selectedReleaseMethodId,
+      memo: releaseDraft.memo,
+    });
+    if (nextData) {
+      setReleaseDraft({ ...releaseDraft, tipAmount: "", memo: "" });
+    }
+  }
+
   async function submitDeposit(event: FormEvent) {
     event.preventDefault();
     const nextData = await onAction("createCreditDeposit", {
@@ -3542,11 +3612,85 @@ function AdminPayments({
     setDraft({ ...draft, userId, scheduledDate: nextUser?.nextPaymentDate || draft.scheduledDate || today() });
   }
 
+  function handleReleaseUserChange(userId: string) {
+    setReleaseDraft({ ...releaseDraft, userId, paymentMethodId: "" });
+  }
+
   return (
     <div className="two-column">
       <PaydayReminder reminders={paydayReminders} />
 
-      {canRecordPayments ? (
+      {canReleasePayments ? (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Release Payment</h2>
+              <p>Select a date range, add an optional tip, and pay the bidder wallet through Cryptomus.</p>
+            </div>
+            <span className="badge paid">{money(releaseCreditBalance)} credits</span>
+          </div>
+          <form className="form-grid" onSubmit={submitReleasePayment}>
+            <label className="field full">
+              <span>Bidder</span>
+              <select value={releaseDraft.userId} onChange={(event) => handleReleaseUserChange(event.target.value)} required>
+                {payableUsers.map((user) => (
+                  <option key={user.id} value={user.id}>{user.name} - {roleLabel(user.role)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Period start</span>
+              <input type="date" value={releaseDraft.periodStart} onChange={(event) => setReleaseDraft({ ...releaseDraft, periodStart: event.target.value })} required />
+            </label>
+            <label className="field">
+              <span>Period end</span>
+              <input type="date" value={releaseDraft.periodEnd} onChange={(event) => setReleaseDraft({ ...releaseDraft, periodEnd: event.target.value })} required />
+            </label>
+            <label className="field full">
+              <span>Bidder payout wallet</span>
+              <select
+                value={selectedReleaseMethodId}
+                onChange={(event) => setReleaseDraft({ ...releaseDraft, paymentMethodId: event.target.value })}
+                required
+              >
+                {!releaseMethods.length ? <option value="">Bidder needs a crypto payout method</option> : null}
+                {releaseMethods.map((method) => (
+                  <option key={method.id} value={method.id}>
+                    {payoutMethodLabel(method)} - {method.address}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Work amount</span>
+              <input value={money(releaseBaseAmount)} readOnly />
+            </label>
+            <label className="field">
+              <span>Tip</span>
+              <input type="number" min="0" step="0.01" value={releaseDraft.tipAmount} onChange={(event) => setReleaseDraft({ ...releaseDraft, tipAmount: event.target.value })} placeholder="$0.00" />
+            </label>
+            <label className="field">
+              <span>Total release</span>
+              <input value={money(releaseTotalAmount)} readOnly />
+            </label>
+            <label className="field full">
+              <span>Memo</span>
+              <textarea value={releaseDraft.memo} onChange={(event) => setReleaseDraft({ ...releaseDraft, memo: event.target.value })} />
+            </label>
+            <div className="actions full">
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={busy || !payableUsers.length || !selectedReleaseMethodId || releaseTotalAmount <= 0 || releaseTotalAmount > releaseCreditBalance}
+              >
+                Release payment
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      {canAddManualPayment ? (
         <section className="panel">
         <div className="panel-header">
           <div>
@@ -3733,7 +3877,7 @@ function AdminPayments({
                 <div className="method-row" key={user.id}>
                   <div>
                     <strong>{user.name}</strong>
-                    <span className="muted">{primary ? `${primary.method}: ${primary.address}` : "No method saved"}</span>
+                    <span className="muted">{primary ? `${payoutMethodLabel(primary)}: ${primary.address}` : "No method saved"}</span>
                   </div>
                   <span className={`badge ${user.status}`}>{statusLabel(user.status)}</span>
                 </div>
@@ -3985,14 +4129,19 @@ function PaymentTable({
         <tbody>
           {payments.map((payment) => {
             const user = userById(users, payment.userId);
+            const linkValue = payment.paymentLink || payment.payoutTxid || payment.payoutUuid || "";
+            const isWebLink = /^https?:\/\//i.test(linkValue);
             return (
               <tr key={payment.id}>
                 <td>{user?.name || "Unknown"}</td>
                 <td>{shortDate(payment.periodStart)} - {shortDate(payment.periodEnd)}</td>
                 <td>{shortDate(payment.scheduledDate)}</td>
-                <td>{money(payment.amount)}</td>
-                <td><span className={`badge ${payment.status === "paid" ? "bidder" : "pending"}`}>{titleCase(payment.status)}</span></td>
-                <td>{payment.paymentLink ? <a href={payment.paymentLink} target="_blank" rel="noreferrer">Open link</a> : "-"}</td>
+                <td>
+                  {money(payment.amount)}
+                  {payment.tipAmount ? <span className="table-subtext">Tip: {money(payment.tipAmount)}</span> : null}
+                </td>
+                <td><span className={`badge ${payment.status === "paid" ? "bidder" : payment.status === "failed" ? "paused" : "pending"}`}>{titleCase(payment.status)}</span></td>
+                <td>{linkValue ? (isWebLink ? <a href={linkValue} target="_blank" rel="noreferrer">Open link</a> : <span>{linkValue}</span>) : "-"}</td>
                 <td>{payment.memo || "-"}</td>
                 {onEdit || onDelete ? (
                   <td>
