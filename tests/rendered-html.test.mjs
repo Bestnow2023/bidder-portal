@@ -24,8 +24,10 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Sign up/);
   assert.match(portalApp, /Requested role/);
   assert.match(portalApp, /Super Admin/);
-  assert.match(portalApp, /Assigned admin/);
+  assert.match(portalApp, /Assigned client/);
   assert.match(portalApp, /Dashboard/);
+  assert.match(portalApp, /My Profile/);
+  assert.match(portalApp, /Client Search/);
   assert.match(portalApp, /Work Summary/);
   assert.match(portalApp, /Bidder Settings/);
   assert.match(portalApp, /All Work Logs/);
@@ -58,6 +60,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Frequency/);
   assert.match(portalApp, /Weekday/);
   assert.match(portalApp, /Save paid payment/);
+  assert.match(portalApp, /Save escrow/);
+  assert.match(portalApp, /Escrow History/);
   assert.match(portalApp, /Edit Payment/);
   assert.match(portalApp, /Edit User/);
   assert.match(portalApp, /Edit Bidder Settings/);
@@ -80,13 +84,18 @@ test("declares the requested frontend records", async () => {
   for (const label of [
     "User Management",
     "Manage accounts, approval status, roles, passwords, and email verification.",
+    "My Profile",
+    "Client Search",
+    "Assigned client",
     "Bidder Settings",
     "Work Summary",
     "Daily Bidder Log",
     "Unpaid Work Totals",
     "Payment Method",
     "Payment History",
+    "Escrow History",
     "Save paid payment",
+    "Save escrow",
     "Edit Payment",
     "Edit User",
     "Edit Bidder Settings",
@@ -96,7 +105,7 @@ test("declares the requested frontend records", async () => {
     "Group Chat",
     "Bidder Group",
     "Local ",
-    "Admin ",
+    "Client time ",
   ]) {
     assert.match(portalApp, new RegExp(label));
   }
@@ -112,6 +121,8 @@ test("declares the requested frontend records", async () => {
     "deleteUser",
     "requestEmailVerification",
     "signUp",
+    "saveProfile",
+    "addEscrow",
     "savePaymentMethod",
     "saveWorkLog",
     "deleteWorkLog",
@@ -135,6 +146,10 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /isWorkLogPaid/);
   assert.match(portalApp, /NEXT_PUBLIC_ADMIN_TIME_ZONE/);
   assert.match(portalApp, /assignedAdminId/);
+  assert.match(portalApp, /profileCompletedAt/);
+  assert.match(portalApp, /clientStats/);
+  assert.match(portalApp, /clientUsers/);
+  assert.match(portalApp, /EscrowTable/);
   assert.match(portalApp, /isAdminRole/);
   assert.match(portalApp, /isWorkerUser/);
   assert.match(portalApp, /Notification/);
@@ -148,6 +163,8 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /navigateToView/);
   assert.match(portalApp, /\/bidder-settings/);
   assert.match(portalApp, /\/payments/);
+  assert.match(portalApp, /\/profile/);
+  assert.match(portalApp, /\/clients/);
   assert.match(portalApp, /aria-haspopup="menu"/);
   assert.match(portalApp, /fixed z-50/);
   assert.match(portalApp, /hover:bg-white\/80/);
@@ -175,6 +192,8 @@ test("declares the requested frontend records", async () => {
   for (const routePage of [
     "operations/page.tsx",
     "dashboard/page.tsx",
+    "profile/page.tsx",
+    "clients/page.tsx",
     "people/page.tsx",
     "bidder-settings/page.tsx",
     "work/page.tsx",

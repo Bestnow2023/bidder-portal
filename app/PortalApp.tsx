@@ -6,6 +6,7 @@ import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "
 import type {
   ChatAttachment,
   ChatMessage,
+  EscrowRecord,
   PaymentFrequency,
   PaymentMethod,
   PaymentRecord,
@@ -18,7 +19,7 @@ import type {
 } from "./portal-types";
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
-type PortalView = "overview" | "dashboard" | "people" | "bidderSettings" | "work" | "payments" | "chat";
+type PortalView = "overview" | "dashboard" | "profile" | "clients" | "people" | "bidderSettings" | "work" | "payments" | "chat";
 
 const paymentMethods = ["Payoneer", "BEP20", "Wise", "PayPal", "Bank transfer", "USDT TRC20", "Other"];
 const paymentFrequencies: { value: PaymentFrequency; label: string }[] = [
@@ -54,13 +55,15 @@ const maxChatAttachmentBytes = 2 * 1024 * 1024;
 const demoPassword = "demo1234";
 
 const demoAccounts = [
-  { label: "Admin", email: "admin@portal.local", name: "Admin Owner" },
+  { label: "Super admin", email: "admin@portal.local", name: "Super Admin Owner" },
   { label: "Approved bidder", email: "maya.bidder@example.com", name: "Maya Bidder" },
   { label: "Pending bidder", email: "pending.bidder@example.com", name: "Pending Bidder" },
 ];
 const viewRoutes: Record<PortalView, string> = {
   overview: "/operations",
   dashboard: "/dashboard",
+  profile: "/profile",
+  clients: "/clients",
   people: "/people",
   bidderSettings: "/bidder-settings",
   work: "/work",
@@ -70,6 +73,8 @@ const viewRoutes: Record<PortalView, string> = {
 const routeViews: Record<string, PortalView> = {
   "/operations": "overview",
   "/dashboard": "dashboard",
+  "/profile": "profile",
+  "/clients": "clients",
   "/people": "people",
   "/bidder-settings": "bidderSettings",
   "/work": "work",
@@ -235,7 +240,7 @@ function paymentScheduleLabel(frequencyInput?: string, weekdayInput?: string) {
 
 function roleLabel(role: Role) {
   if (role === "super_admin") return "Super Admin";
-  if (role === "admin") return "Admin";
+  if (role === "admin") return "Client";
   if (role === "developer") return "Developer";
   return "Bidder";
 }
@@ -256,6 +261,8 @@ function viewTitle(view: string) {
   const titles: Record<string, string> = {
     dashboard: "Dashboard",
     overview: "Operations",
+    profile: "Profile",
+    clients: "Clients",
     people: "People",
     bidderSettings: "Bidder Settings",
     work: "Work Logs",
@@ -267,15 +274,19 @@ function viewTitle(view: string) {
 
 function viewSubtitle(view: string, isAdmin: boolean) {
   if (!isAdmin) {
+    if (view === "clients") return "Search client profiles and review payment history signals.";
+    if (view === "profile") return "Complete your public profile so matched people understand who they are working with.";
     return "Log your bidder activity and keep payment details current.";
   }
 
   const subtitles: Record<string, string> = {
     overview: "Review operations, recent work, and payment snapshots.",
+    profile: "Complete your public profile and escrow readiness.",
+    clients: "Review client profiles and hiring signals.",
     people: "Manage user accounts, approval status, roles, passwords, and email verification.",
     bidderSettings: "Set bidder rates, interview bonuses, payment dates, and schedules.",
     work: "Review bidder work logs and Google Sheet links.",
-    payments: "Schedule payouts, record payment history, and review payment methods.",
+    payments: "Record payouts, review payment methods, and track client escrow.",
     chat: "Coordinate with bidders in the group chat.",
   };
 
@@ -284,14 +295,14 @@ function viewSubtitle(view: string, isAdmin: boolean) {
 
 function viewsForUser(user: PortalUser): PortalView[] {
   if (isAdminRole(user.role)) {
-    return ["overview", "people", "bidderSettings", "work", "payments", "chat"];
+    return ["overview", "profile", "people", "bidderSettings", "work", "payments", "chat"];
   }
 
   if (user.role === "bidder") {
-    return ["dashboard", "work", "payments", "chat"];
+    return ["dashboard", "profile", "clients", "work", "payments", "chat"];
   }
 
-  return ["payments", "chat"];
+  return ["profile", "payments", "chat"];
 }
 
 function safeViewForUser(user: PortalUser, view: PortalView) {
@@ -332,12 +343,24 @@ function userById(users: PortalUser[], userId: string) {
   return users.find((user) => user.id === userId);
 }
 
-function assignedAdminName(users: PortalUser[], user: PortalUser) {
+function assignedClientName(users: PortalUser[], user: PortalUser) {
   if (user.role !== "bidder") {
     return "-";
   }
 
   return userById(users, user.assignedAdminId || "")?.name || "Unassigned";
+}
+
+function profileSkillsText(user: PortalUser) {
+  return (user.profileSkills || []).join(", ");
+}
+
+function isProfileComplete(user: PortalUser) {
+  return Boolean(user.profileCompletedAt);
+}
+
+function clientUsers(users: PortalUser[]) {
+  return users.filter((user) => user.role === "admin" && user.status === "approved");
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -1064,7 +1087,7 @@ export default function PortalApp() {
               <h1>Bidder Work Portal</h1>
               <p>
                 Sign in with email, log bidder work, keep payment method details in one place,
-                and let admin manage approvals, rates, next payout dates, history, and chat.
+                and let clients manage approvals, rates, next payout dates, history, and chat.
               </p>
             </div>
 
@@ -1106,7 +1129,7 @@ export default function PortalApp() {
             <h1>Bidder Work Portal</h1>
             <p>
               Sign in with email, log bidder work, keep payment method details in one place,
-              and let admin manage approvals, rates, next payout dates, history, and chat.
+              and let clients manage approvals, rates, next payout dates, history, and chat.
             </p>
           </div>
 
@@ -1114,7 +1137,7 @@ export default function PortalApp() {
             <h2>{authMode === "signUp" ? "Sign up" : authMode === "resetPassword" ? "Reset password" : "Email and password sign-in"}</h2>
             <p>
               {authMode === "signUp"
-                ? "New users enter as pending bidders until admin approval."
+                ? "New users enter as pending until approval. Clients must be approved by a super admin."
                 : authMode === "resetPassword"
                   ? "Create a new password from your reset email."
                   : "Use your approved email and password to enter the portal."}
@@ -1196,7 +1219,7 @@ export default function PortalApp() {
                   <span>Requested role</span>
                   <select value={signupRole} onChange={(event) => setSignupRole(event.target.value as Role)}>
                     <option value="bidder">Bidder</option>
-                    <option value="admin">Admin</option>
+                    <option value="admin">Client</option>
                     <option value="developer">Developer</option>
                   </select>
                 </label>
@@ -1309,6 +1332,8 @@ export default function PortalApp() {
         ) : (
           <>
             {safeView === "overview" && isAdmin ? <AdminOverview data={data} /> : null}
+            {safeView === "profile" ? <ProfileView data={data} busy={busy} onSave={postAction} /> : null}
+            {safeView === "clients" ? <ClientDirectoryView data={data} /> : null}
             {safeView === "people" && isAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "bidderSettings" && isAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
@@ -1421,6 +1446,279 @@ function AdminOverview({ data }: { data: PortalData }) {
   );
 }
 
+function ProfileView({
+  data,
+  busy,
+  onSave,
+}: {
+  data: PortalData;
+  busy: boolean;
+  onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
+  const user = data.currentUser;
+  const [draft, setDraft] = useState({
+    profileTitle: user.profileTitle || "",
+    profileBio: user.profileBio || "",
+    profileSkills: profileSkillsText(user),
+    profileLocation: user.profileLocation || "",
+    profileTimeZone: user.profileTimeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+  });
+  const relatedProfiles = data.users.filter((profileUser) => {
+    if (profileUser.id === user.id || !isProfileComplete(profileUser)) {
+      return false;
+    }
+    if (user.role === "bidder") {
+      return profileUser.role === "admin";
+    }
+    if (isAdminRole(user.role)) {
+      return profileUser.role === "bidder";
+    }
+    return profileUser.role === "admin";
+  });
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSave("saveProfile", draft);
+  }
+
+  return (
+    <div className="dashboard-stack">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>My Profile</h2>
+            <p>Complete the profile that matched clients and bidders can view.</p>
+          </div>
+          <span className={`badge ${isProfileComplete(user) ? "approved" : "pending"}`}>
+            {isProfileComplete(user) ? "Complete" : "Incomplete"}
+          </span>
+        </div>
+
+        <form className="form-grid" onSubmit={submit}>
+          <label className="field">
+            <span>Profile title</span>
+            <input
+              value={draft.profileTitle}
+              onChange={(event) => setDraft({ ...draft, profileTitle: event.target.value })}
+              placeholder={user.role === "admin" ? "Hiring client for remote bidder work" : "Technical bidder for web projects"}
+            />
+          </label>
+          <label className="field">
+            <span>Location</span>
+            <input
+              value={draft.profileLocation}
+              onChange={(event) => setDraft({ ...draft, profileLocation: event.target.value })}
+              placeholder="City, country"
+            />
+          </label>
+          <label className="field">
+            <span>Timezone</span>
+            <input
+              value={draft.profileTimeZone}
+              onChange={(event) => setDraft({ ...draft, profileTimeZone: event.target.value })}
+              placeholder="America/New_York"
+            />
+          </label>
+          <label className="field">
+            <span>Skills / focus</span>
+            <input
+              value={draft.profileSkills}
+              onChange={(event) => setDraft({ ...draft, profileSkills: event.target.value })}
+              placeholder="Upwork, LinkedIn, React, Backend"
+            />
+          </label>
+          <label className="field full">
+            <span>Profile bio</span>
+            <textarea
+              value={draft.profileBio}
+              onChange={(event) => setDraft({ ...draft, profileBio: event.target.value })}
+              placeholder="Summarize the work style, expectations, skills, and preferred communication."
+            />
+          </label>
+          <div className="actions full">
+            <button className="primary-button" type="submit" disabled={busy}>
+              Save profile
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <h2>Visible Profiles</h2>
+            <p>{user.role === "bidder" ? "Client profiles available to bidders." : "Bidder profiles assigned to this client view."}</p>
+          </div>
+        </div>
+        <ProfileCardGrid users={relatedProfiles} />
+      </section>
+    </div>
+  );
+}
+
+function ProfileCardGrid({ users }: { users: PortalUser[] }) {
+  if (!users.length) {
+    return <div className="empty-state">No completed profiles are visible yet.</div>;
+  }
+
+  return (
+    <div className="profile-grid">
+      {users.map((user) => (
+        <article className="profile-card" key={user.id}>
+          <div className="person-title">
+            <div>
+              <h3>{user.name}</h3>
+              <span className="table-subtext">{roleLabel(user.role)} - {user.profileLocation || "Location not set"}</span>
+            </div>
+            <span className={`badge ${user.role}`}>{roleLabel(user.role)}</span>
+          </div>
+          <strong>{user.profileTitle || "Profile title not set"}</strong>
+          <p>{user.profileBio || "No profile bio yet."}</p>
+          <div className="badge-row">
+            {(user.profileSkills || []).map((skill) => (
+              <span className="badge" key={skill}>{skill}</span>
+            ))}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function ClientDirectoryView({ data }: { data: PortalData }) {
+  const [filters, setFilters] = useState({
+    joinedAfter: "",
+    minMoneyPaid: "",
+    minRating: "",
+    maxBidRate: "",
+    minBonus: "",
+    onlyOpenClients: false,
+    sortBy: "joinedDate",
+  });
+  const clients = clientUsers(data.users)
+    .filter((client) => {
+      const stats = client.clientStats;
+      const joinedAfter = filters.joinedAfter ? new Date(`${filters.joinedAfter}T00:00:00`) : null;
+      const joinedDate = new Date(client.createdAt);
+      const moneyPaid = stats?.moneyPaid || 0;
+      const rating = stats?.bidderRating || 0;
+      const averageBidRate = stats?.averageBidRate || 0;
+      const averageBonusGiven = stats?.averageBonusGiven || 0;
+
+      return (
+        (!joinedAfter || joinedDate >= joinedAfter) &&
+        (!filters.minMoneyPaid || moneyPaid >= Number(filters.minMoneyPaid)) &&
+        (!filters.minRating || rating >= Number(filters.minRating)) &&
+        (!filters.maxBidRate || averageBidRate <= Number(filters.maxBidRate)) &&
+        (!filters.minBonus || averageBonusGiven >= Number(filters.minBonus)) &&
+        (!filters.onlyOpenClients || Boolean(stats?.flaggedNoHires))
+      );
+    })
+    .sort((left, right) => {
+      const leftStats = left.clientStats;
+      const rightStats = right.clientStats;
+      if (filters.sortBy === "moneyPaid") return (rightStats?.moneyPaid || 0) - (leftStats?.moneyPaid || 0);
+      if (filters.sortBy === "bidderRating") return (rightStats?.bidderRating || 0) - (leftStats?.bidderRating || 0);
+      if (filters.sortBy === "averageBidRate") return (leftStats?.averageBidRate || 0) - (rightStats?.averageBidRate || 0);
+      if (filters.sortBy === "averageBonusGiven") return (rightStats?.averageBonusGiven || 0) - (leftStats?.averageBonusGiven || 0);
+      return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+    });
+
+  return (
+    <section className="panel">
+      <div className="section-heading">
+        <div>
+          <h2>Client Search</h2>
+          <p>Find clients by hiring status, joined date, payment history, rating, bid rate, and bonuses.</p>
+        </div>
+      </div>
+
+      <div className="filter-bar">
+        <label className="field">
+          <span>Joined after</span>
+          <input type="date" value={filters.joinedAfter} onChange={(event) => setFilters({ ...filters, joinedAfter: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Min money paid</span>
+          <input type="number" min="0" value={filters.minMoneyPaid} onChange={(event) => setFilters({ ...filters, minMoneyPaid: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Min bidder rating</span>
+          <input type="number" min="0" max="5" step="0.1" value={filters.minRating} onChange={(event) => setFilters({ ...filters, minRating: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Max average bid rate</span>
+          <input type="number" min="0" step="0.01" value={filters.maxBidRate} onChange={(event) => setFilters({ ...filters, maxBidRate: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Min average bonus</span>
+          <input type="number" min="0" step="0.01" value={filters.minBonus} onChange={(event) => setFilters({ ...filters, minBonus: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Sort by</span>
+          <select value={filters.sortBy} onChange={(event) => setFilters({ ...filters, sortBy: event.target.value })}>
+            <option value="joinedDate">Joined date</option>
+            <option value="moneyPaid">Money paid</option>
+            <option value="bidderRating">Bidder rating</option>
+            <option value="averageBidRate">Average bid rate</option>
+            <option value="averageBonusGiven">Average bonus given</option>
+          </select>
+        </label>
+        <label className="check-field">
+          <input
+            type="checkbox"
+            checked={filters.onlyOpenClients}
+            onChange={(event) => setFilters({ ...filters, onlyOpenClients: event.target.checked })}
+          />
+          <span>Flagged clients only</span>
+        </label>
+      </div>
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Client</th>
+              <th>Joined</th>
+              <th>Money paid</th>
+              <th>Bidder rating</th>
+              <th>Average bid rate</th>
+              <th>Average bonus</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {clients.map((client) => {
+              const stats = client.clientStats;
+              return (
+                <tr key={client.id}>
+                  <td>
+                    <strong>{client.name}</strong>
+                    <span className="table-subtext">{client.profileTitle || client.email}</span>
+                  </td>
+                  <td>{shortDate(client.createdAt.slice(0, 10))}</td>
+                  <td>{money(stats?.moneyPaid || 0)}</td>
+                  <td>{(stats?.bidderRating || 0).toFixed(1)}</td>
+                  <td>{money(stats?.averageBidRate || 0)}</td>
+                  <td>{money(stats?.averageBonusGiven || 0)}</td>
+                  <td>
+                    {stats?.flaggedNoHires ? (
+                      <span className="badge pending">No bidders hired</span>
+                    ) : (
+                      <span className="badge approved">{stats?.assignedBidderCount || 0} hired</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {!clients.length ? <div className="empty-state">No clients match these filters.</div> : null}
+    </section>
+  );
+}
+
 function PeopleView({
   data,
   busy,
@@ -1472,7 +1770,7 @@ function PeopleView({
               <th>User</th>
               <th>Role</th>
               <th>Status</th>
-              <th>Assigned admin</th>
+              <th>Assigned client</th>
               <th>Password</th>
               <th>Email</th>
               <th>Updated</th>
@@ -1488,7 +1786,7 @@ function PeopleView({
                 </td>
                 <td><span className={`badge ${user.role}`}>{roleLabel(user.role)}</span></td>
                 <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
-                <td>{assignedAdminName(data.users, user)}</td>
+                <td>{assignedClientName(data.users, user)}</td>
                 <td>{user.passwordSet ? "Set" : "Not set"}</td>
                 <td>{user.emailVerifiedAt ? "Verified" : "Not verified"}</td>
                 <td>{optionalDateTime(user.passwordUpdatedAt)}</td>
@@ -1634,12 +1932,12 @@ function UserEditModal({
               {draft.role === "super_admin" ? <option value="super_admin">Super Admin</option> : null}
               <option value="bidder">Bidder</option>
               <option value="developer">Developer</option>
-              <option value="admin">Admin</option>
+              <option value="admin">Client</option>
             </select>
           </label>
           {draft.role === "bidder" ? (
             <label className="field">
-              <span>Assigned admin</span>
+              <span>Assigned client</span>
               <select
                 value={draft.assignedAdminId}
                 disabled={!canManageRoles}
@@ -2527,7 +2825,7 @@ function UserPayments({
         <div className="panel-header">
           <div>
             <h2>Payment History</h2>
-            <p>Admin-added payout records and receipt links.</p>
+            <p>Client-added payout records and receipt links.</p>
           </div>
         </div>
         <PaymentTable payments={data.payments} users={[user]} />
@@ -2555,9 +2853,19 @@ function AdminPayments({
     paymentLink: "",
     memo: "",
   });
+  const escrowClients = clientUsers(data.users);
+  const [escrowDraft, setEscrowDraft] = useState({
+    clientId: data.currentUser.role === "super_admin" ? escrowClients[0]?.id || "" : data.currentUser.id,
+    amount: "",
+    receiptLink: "",
+    memo: "",
+  });
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
 
   const selectedUser = payableUsers.find((user) => user.id === draft.userId);
+  const escrowAmount = Number(escrowDraft.amount) || 0;
+  const escrowFee = Math.round(escrowAmount * 0.05 * 100) / 100;
+  const escrowNet = Math.max(0, Math.round((escrowAmount - escrowFee) * 100) / 100);
   const suggestedAmount = selectedUser
     ? Math.max(0, estimateForUser(selectedUser, data.workLogs) - paidForUser(selectedUser.id, data.payments))
     : 0;
@@ -2626,6 +2934,19 @@ function AdminPayments({
     }
   }
 
+  async function submitEscrow(event: FormEvent) {
+    event.preventDefault();
+    const nextData = await onAction("addEscrow", {
+      clientId: escrowDraft.clientId,
+      amount: Number(escrowDraft.amount),
+      receiptLink: escrowDraft.receiptLink,
+      memo: escrowDraft.memo,
+    });
+    if (nextData) {
+      setEscrowDraft({ ...escrowDraft, amount: "", receiptLink: "", memo: "" });
+    }
+  }
+
   function handleUserChange(userId: string) {
     const nextUser = payableUsers.find((user) => user.id === userId);
     setDraft({ ...draft, userId, scheduledDate: nextUser?.nextPaymentDate || draft.scheduledDate || today() });
@@ -2690,8 +3011,54 @@ function AdminPayments({
         <section className="panel">
           <div className="panel-header">
             <div>
+              <h2>Escrow</h2>
+              <p>Record client escrow manually. Platform escrow fee is 5%.</p>
+            </div>
+          </div>
+          <form className="form-grid" onSubmit={submitEscrow}>
+            {data.currentUser.role === "super_admin" ? (
+              <label className="field full">
+                <span>Client</span>
+                <select value={escrowDraft.clientId} onChange={(event) => setEscrowDraft({ ...escrowDraft, clientId: event.target.value })} required>
+                  {escrowClients.map((client) => (
+                    <option key={client.id} value={client.id}>{client.name}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <label className="field">
+              <span>Escrow amount</span>
+              <input type="number" min="0" step="0.01" value={escrowDraft.amount} onChange={(event) => setEscrowDraft({ ...escrowDraft, amount: event.target.value })} required />
+            </label>
+            <label className="field">
+              <span>5% fee</span>
+              <input value={money(escrowFee)} readOnly />
+            </label>
+            <label className="field">
+              <span>Net escrow</span>
+              <input value={money(escrowNet)} readOnly />
+            </label>
+            <label className="field">
+              <span>Escrow link</span>
+              <input value={escrowDraft.receiptLink} onChange={(event) => setEscrowDraft({ ...escrowDraft, receiptLink: event.target.value })} placeholder="Receipt or escrow proof link" />
+            </label>
+            <label className="field full">
+              <span>Memo</span>
+              <textarea value={escrowDraft.memo} onChange={(event) => setEscrowDraft({ ...escrowDraft, memo: event.target.value })} />
+            </label>
+            <div className="actions full">
+              <button className="primary-button" type="submit" disabled={busy || !escrowClients.length}>
+                Save escrow
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
               <h2>Payment Methods</h2>
-              <p>Saved payout destinations from non-admin users.</p>
+              <p>Saved payout destinations from bidders and developers.</p>
             </div>
           </div>
           <div className="payment-method-list">
@@ -2720,6 +3087,16 @@ function AdminPayments({
           </div>
         </div>
         <PaymentTable payments={data.payments} users={data.users} onEdit={setEditingPayment} onDelete={deletePayment} />
+      </section>
+
+      <section className="panel" style={{ gridColumn: "1 / -1" }}>
+        <div className="panel-header">
+          <div>
+            <h2>Escrow History</h2>
+            <p>Client escrow records with the 5% fee and net funded amount.</p>
+          </div>
+        </div>
+        <EscrowTable escrows={data.escrows || []} users={data.users} />
       </section>
 
       {editingPayment ? (
@@ -2958,6 +3335,46 @@ function PaymentTable({
                     />
                   </td>
                 ) : null}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function EscrowTable({ escrows, users }: { escrows: EscrowRecord[]; users: PortalUser[] }) {
+  if (!escrows.length) {
+    return <div className="empty-state">No escrow records yet.</div>;
+  }
+
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Client</th>
+            <th>Date</th>
+            <th>Gross</th>
+            <th>5% fee</th>
+            <th>Net escrow</th>
+            <th>Link</th>
+            <th>Memo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {escrows.map((escrow) => {
+            const client = userById(users, escrow.clientId);
+            return (
+              <tr key={escrow.id}>
+                <td>{client?.name || "Unknown client"}</td>
+                <td>{shortDate(escrow.createdAt.slice(0, 10))}</td>
+                <td>{money(escrow.amount)}</td>
+                <td>{money(escrow.feeAmount)}</td>
+                <td>{money(escrow.netAmount)}</td>
+                <td>{escrow.receiptLink ? <a href={escrow.receiptLink} target="_blank" rel="noreferrer">Open link</a> : "-"}</td>
+                <td>{escrow.memo || "-"}</td>
               </tr>
             );
           })}
@@ -3227,7 +3644,7 @@ function ChatView({
 
                 <div className="message-footer">
                   <span>Local {dateTimeInZone(message.createdAt, message.authorTimeZone || userTimeZone)}</span>
-                  <span>Admin {dateTimeInZone(message.createdAt, adminTimeZone)}</span>
+                  <span>Client time {dateTimeInZone(message.createdAt, adminTimeZone)}</span>
                   {message.editedAt ? <span>Edited</span> : null}
                   {canManage ? (
                     <ActionMenu
@@ -3317,8 +3734,8 @@ function PendingView({
         <h2>Account pending approval</h2>
         <p>
           {user.role === "admin"
-            ? "A super admin must approve admin accounts before management tools are available."
-            : "Admin can approve your account, set your bidder rate, set your interview bonus, and schedule your next payment."}
+            ? "A super admin must approve client accounts before management tools are available."
+            : "A client can approve your account, set your bidder rate, set your interview bonus, and schedule your next payment."}
         </p>
       </div>
 
@@ -3338,7 +3755,7 @@ function PendingView({
           <div className="panel-header">
             <div>
               <h2>Saved Details</h2>
-              <p>Admin will see the selected method and address.</p>
+              <p>Your assigned client will see the selected method and address.</p>
             </div>
           </div>
           <PaymentMethodList methods={methods} />

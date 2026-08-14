@@ -11,6 +11,29 @@ export type PortalUser = {
   role: Role;
   status: UserStatus;
   assignedAdminId?: string;
+  profileTitle?: string;
+  profileBio?: string;
+  profileSkills?: string[];
+  profileLocation?: string;
+  profileTimeZone?: string;
+  profileCompletedAt?: string;
+  clientRating?: number;
+  clientStats?: {
+    assignedBidderCount: number;
+    flaggedNoHires: boolean;
+    moneyPaid: number;
+    bidderRating: number;
+    averageBidRate: number;
+    averageBonusGiven: number;
+    escrowTotal: number;
+    escrowFeeTotal: number;
+    escrowNetTotal: number;
+  };
+  bidderStats?: {
+    totalApplied: number;
+    totalInterviews: number;
+    totalEarned: number;
+  };
   ratePerApplication: number;
   bonusPerInterview: number;
   nextPaymentDate: string;
@@ -62,6 +85,19 @@ export type PaymentRecord = {
   updatedAt: string;
 };
 
+export type EscrowRecord = {
+  id: string;
+  clientId: string;
+  amount: number;
+  feeAmount: number;
+  netAmount: number;
+  status: "funded";
+  receiptLink: string;
+  memo: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ChatAttachment = {
   id: string;
   name: string;
@@ -93,5 +129,6 @@ export type PortalData = {
   paymentMethods: PaymentMethod[];
   workLogs: WorkLog[];
   payments: PaymentRecord[];
+  escrows: EscrowRecord[];
   chatMessages: ChatMessage[];
 };

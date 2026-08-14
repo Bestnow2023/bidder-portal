@@ -540,6 +540,21 @@ button:disabled {
   width: fit-content;
 }
 
+.check-field {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #394745;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.check-field input {
+  width: 18px;
+  min-height: 18px;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -639,6 +654,29 @@ td > strong {
   align-items: end;
   border-top: 1px solid var(--line);
   padding-top: 14px;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.profile-card {
+  min-height: 220px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.profile-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
 }
 
 .empty-state {
