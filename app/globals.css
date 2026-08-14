@@ -439,6 +439,11 @@ button:disabled {
   color: var(--blue);
 }
 
+.badge.super_admin {
+  background: #eef2ff;
+  color: #4338ca;
+}
+
 .badge.bidder {
   background: #e8f6ee;
   color: var(--success);

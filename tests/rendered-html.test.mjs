@@ -22,6 +22,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Email and password sign-in/);
   assert.match(portalApp, /Password/);
   assert.match(portalApp, /Sign up/);
+  assert.match(portalApp, /Requested role/);
+  assert.match(portalApp, /Super Admin/);
+  assert.match(portalApp, /Assigned admin/);
   assert.match(portalApp, /Dashboard/);
   assert.match(portalApp, /Work Summary/);
   assert.match(portalApp, /Bidder Settings/);
@@ -131,6 +134,9 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /selectedUserId/);
   assert.match(portalApp, /isWorkLogPaid/);
   assert.match(portalApp, /NEXT_PUBLIC_ADMIN_TIME_ZONE/);
+  assert.match(portalApp, /assignedAdminId/);
+  assert.match(portalApp, /isAdminRole/);
+  assert.match(portalApp, /isWorkerUser/);
   assert.match(portalApp, /Notification/);
   assert.match(portalApp, /FileReader/);
   assert.match(portalApp, /authorTimeZone/);

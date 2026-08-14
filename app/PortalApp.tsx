@@ -234,9 +234,18 @@ function paymentScheduleLabel(frequencyInput?: string, weekdayInput?: string) {
 }
 
 function roleLabel(role: Role) {
+  if (role === "super_admin") return "Super Admin";
   if (role === "admin") return "Admin";
   if (role === "developer") return "Developer";
   return "Bidder";
+}
+
+function isAdminRole(role: Role) {
+  return role === "admin" || role === "super_admin";
+}
+
+function isWorkerUser(user: PortalUser) {
+  return !isAdminRole(user.role);
 }
 
 function statusLabel(status: UserStatus) {
@@ -274,7 +283,7 @@ function viewSubtitle(view: string, isAdmin: boolean) {
 }
 
 function viewsForUser(user: PortalUser): PortalView[] {
-  if (user.role === "admin") {
+  if (isAdminRole(user.role)) {
     return ["overview", "people", "bidderSettings", "work", "payments", "chat"];
   }
 
@@ -321,6 +330,14 @@ function scheduledForUser(userId: string, payments: PaymentRecord[]) {
 
 function userById(users: PortalUser[], userId: string) {
   return users.find((user) => user.id === userId);
+}
+
+function assignedAdminName(users: PortalUser[], user: PortalUser) {
+  if (user.role !== "bidder") {
+    return "-";
+  }
+
+  return userById(users, user.assignedAdminId || "")?.name || "Unassigned";
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -665,6 +682,7 @@ export default function PortalApp() {
   });
   const [loginName, setLoginName] = useState("");
   const [loginPassword, setLoginPassword] = useState(isLiveMode ? "" : demoPassword);
+  const [signupRole, setSignupRole] = useState<Role>("bidder");
   const [resetToken, setResetToken] = useState("");
   const [authNotice, setAuthNotice] = useState("");
   const [verificationPendingEmail, setVerificationPendingEmail] = useState("");
@@ -1008,7 +1026,7 @@ export default function PortalApp() {
       return;
     }
 
-    await postAction(authMode, { name: loginName });
+    await postAction(authMode, { name: loginName, role: authMode === "signUp" ? signupRole : undefined });
   }
 
   function switchAuthMode(nextAuthMode: AuthMode) {
@@ -1173,6 +1191,16 @@ export default function PortalApp() {
                 />
               </label>
               ) : null}
+              {authMode === "signUp" ? (
+                <label className="field full">
+                  <span>Requested role</span>
+                  <select value={signupRole} onChange={(event) => setSignupRole(event.target.value as Role)}>
+                    <option value="bidder">Bidder</option>
+                    <option value="admin">Admin</option>
+                    <option value="developer">Developer</option>
+                  </select>
+                </label>
+              ) : null}
             </div>
 
             <div className="actions" style={{ marginTop: 18 }}>
@@ -1200,7 +1228,7 @@ export default function PortalApp() {
   }
 
   const currentUser = data.currentUser;
-  const isAdmin = currentUser.role === "admin";
+  const isAdmin = isAdminRole(currentUser.role);
   const availableViews = viewsForUser(currentUser);
   const safeView = availableViews.includes(activeView) ? activeView : availableViews[0];
 
@@ -1276,7 +1304,7 @@ export default function PortalApp() {
 
         {error ? <div className="error" style={{ marginBottom: 16 }}>{error}</div> : null}
 
-        {!isAdmin && currentUser.status !== "approved" ? (
+        {currentUser.status !== "approved" ? (
           <PendingView data={data} busy={busy} onSaveMethod={postAction} />
         ) : (
           <>
@@ -1304,7 +1332,7 @@ export default function PortalApp() {
 
 function AdminOverview({ data }: { data: PortalData }) {
   const pendingUsers = data.users.filter((user) => user.status === "pending").length;
-  const nonAdmins = data.users.filter((user) => user.role !== "admin");
+  const nonAdmins = data.users.filter(isWorkerUser);
   const totalApplied = data.workLogs.reduce((total, log) => total + log.appliedJobs, 0);
   const totalInterviews = data.workLogs.reduce((total, log) => total + log.interviewsScheduled, 0);
   const scheduled = data.payments
@@ -1403,13 +1431,17 @@ function PeopleView({
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
   const [editingUser, setEditingUser] = useState<PortalUser | null>(null);
+  const canManageRoles = data.currentUser.role === "super_admin";
+  const adminUsers = data.users.filter((user) => user.role === "admin" && user.status === "approved");
+  const visibleUsers = canManageRoles ? data.users : data.users.filter(isWorkerUser);
 
-  async function updateUser(user: PortalUser, changes: Partial<Pick<PortalUser, "name" | "role" | "status">>) {
+  async function updateUser(user: PortalUser, changes: Partial<Pick<PortalUser, "name" | "role" | "status" | "assignedAdminId">>) {
     await onSave("updateUser", {
       targetUserId: user.id,
       name: changes.name ?? user.name,
       role: changes.role ?? user.role,
       status: changes.status ?? user.status,
+      assignedAdminId: changes.assignedAdminId ?? user.assignedAdminId ?? "",
     });
   }
 
@@ -1440,6 +1472,7 @@ function PeopleView({
               <th>User</th>
               <th>Role</th>
               <th>Status</th>
+              <th>Assigned admin</th>
               <th>Password</th>
               <th>Email</th>
               <th>Updated</th>
@@ -1447,7 +1480,7 @@ function PeopleView({
             </tr>
           </thead>
           <tbody>
-            {data.users.map((user) => (
+            {visibleUsers.map((user) => (
               <tr key={user.id}>
                 <td>
                   <strong>{user.name}</strong>
@@ -1455,6 +1488,7 @@ function PeopleView({
                 </td>
                 <td><span className={`badge ${user.role}`}>{roleLabel(user.role)}</span></td>
                 <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
+                <td>{assignedAdminName(data.users, user)}</td>
                 <td>{user.passwordSet ? "Set" : "Not set"}</td>
                 <td>{user.emailVerifiedAt ? "Verified" : "Not verified"}</td>
                 <td>{optionalDateTime(user.passwordUpdatedAt)}</td>
@@ -1501,6 +1535,8 @@ function PeopleView({
         <UserEditModal
           key={editingUser.id}
           user={editingUser}
+          admins={adminUsers}
+          canManageRoles={canManageRoles}
           busy={busy}
           onClose={() => setEditingUser(null)}
           onSave={async (action, payload) => {
@@ -1518,11 +1554,15 @@ function PeopleView({
 
 function UserEditModal({
   user,
+  admins,
+  canManageRoles,
   busy,
   onClose,
   onSave,
 }: {
   user: PortalUser;
+  admins: PortalUser[];
+  canManageRoles: boolean;
   busy: boolean;
   onClose: () => void;
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
@@ -1531,6 +1571,7 @@ function UserEditModal({
     name: user.name,
     role: user.role,
     status: user.status,
+    assignedAdminId: user.assignedAdminId || "",
   });
   const [passwordDraft, setPasswordDraft] = useState("");
 
@@ -1541,6 +1582,7 @@ function UserEditModal({
       name: draft.name,
       role: draft.role,
       status: draft.status,
+      assignedAdminId: draft.role === "bidder" ? draft.assignedAdminId : "",
     });
   }
 
@@ -1584,12 +1626,32 @@ function UserEditModal({
           </label>
           <label className="field">
             <span>Role</span>
-            <select value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value as Role })}>
+            <select
+              value={draft.role}
+              disabled={!canManageRoles}
+              onChange={(event) => setDraft({ ...draft, role: event.target.value as Role })}
+            >
+              {draft.role === "super_admin" ? <option value="super_admin">Super Admin</option> : null}
               <option value="bidder">Bidder</option>
               <option value="developer">Developer</option>
               <option value="admin">Admin</option>
             </select>
           </label>
+          {draft.role === "bidder" ? (
+            <label className="field">
+              <span>Assigned admin</span>
+              <select
+                value={draft.assignedAdminId}
+                disabled={!canManageRoles}
+                onChange={(event) => setDraft({ ...draft, assignedAdminId: event.target.value })}
+              >
+                <option value="">Unassigned</option>
+                {admins.map((adminUser) => (
+                  <option key={adminUser.id} value={adminUser.id}>{adminUser.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label className="field">
             <span>Status</span>
             <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as UserStatus })}>
@@ -1905,7 +1967,7 @@ function WorkView({
   busy: boolean;
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
-  if (data.currentUser.role === "admin") {
+  if (isAdminRole(data.currentUser.role)) {
     return <AdminWorkLogs data={data} />;
   }
 
@@ -2071,7 +2133,7 @@ function BidderWorkLog({
 function AdminWorkLogs({ data }: { data: PortalData }) {
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
   const [selectedUserId, setSelectedUserId] = useState("all");
-  const logUsers = data.users.filter((user) => user.role !== "admin");
+  const logUsers = data.users.filter(isWorkerUser);
   const userFilteredLogs = data.workLogs.filter((log) => selectedUserId === "all" || log.userId === selectedUserId);
   const logs = filterWorkLogsByDate(userFilteredLogs, dateRange);
 
@@ -2336,7 +2398,7 @@ function PaymentsView({
   busy: boolean;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
-  if (data.currentUser.role === "admin") {
+  if (isAdminRole(data.currentUser.role)) {
     return <AdminPayments data={data} busy={busy} onAction={onAction} />;
   }
 
@@ -2483,7 +2545,7 @@ function AdminPayments({
   busy: boolean;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
-  const payableUsers = data.users.filter((user) => user.role !== "admin");
+  const payableUsers = data.users.filter(isWorkerUser);
   const [draft, setDraft] = useState({
     userId: payableUsers[0]?.id || "",
     periodStart: today(),
@@ -3123,7 +3185,7 @@ function ChatView({
         {data.chatMessages.map((message) => {
           const deleted = Boolean(message.deletedAt);
           const isMine = message.userId === currentUser.id;
-          const canManage = !deleted && (isMine || currentUser.role === "admin");
+          const canManage = !deleted && (isMine || isAdminRole(currentUser.role));
           const isEditing = editingMessageId === message.id;
           const messageAttachments = message.attachments || [];
 
@@ -3247,18 +3309,21 @@ function PendingView({
 }) {
   const user = data.currentUser;
   const methods = data.paymentMethods.filter((method) => method.userId === user.id);
+  const canSavePaymentMethod = !isAdminRole(user.role);
 
   return (
     <div className="pending-box">
       <div className="status-strip">
         <h2>Account pending approval</h2>
         <p>
-          Admin can approve your account, set your bidder rate, set your interview bonus,
-          and schedule your next payment.
+          {user.role === "admin"
+            ? "A super admin must approve admin accounts before management tools are available."
+            : "Admin can approve your account, set your bidder rate, set your interview bonus, and schedule your next payment."}
         </p>
       </div>
 
-      <div className="two-column">
+      {canSavePaymentMethod ? (
+        <div className="two-column">
         <section className="panel">
           <div className="panel-header">
             <div>
@@ -3278,7 +3343,8 @@ function PendingView({
           </div>
           <PaymentMethodList methods={methods} />
         </section>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

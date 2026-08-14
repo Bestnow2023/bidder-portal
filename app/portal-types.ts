@@ -1,4 +1,4 @@
-export type Role = "admin" | "bidder" | "developer";
+export type Role = "super_admin" | "admin" | "bidder" | "developer";
 export type UserStatus = "pending" | "approved" | "paused";
 export type PaymentStatus = "scheduled" | "paid";
 export type PaymentFrequency = "" | "weekly" | "biweekly" | "monthly";
@@ -10,6 +10,7 @@ export type PortalUser = {
   name: string;
   role: Role;
   status: UserStatus;
+  assignedAdminId?: string;
   ratePerApplication: number;
   bonusPerInterview: number;
   nextPaymentDate: string;
