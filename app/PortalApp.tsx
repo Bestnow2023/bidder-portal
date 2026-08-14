@@ -5,9 +5,10 @@ import type { ChangeEvent, KeyboardEvent } from "react";
 import type {
   ChatAttachment,
   ChatMessage,
+  PaymentFrequency,
   PaymentMethod,
   PaymentRecord,
-  PaymentStatus,
+  PaymentWeekday,
   PortalData,
   PortalUser,
   Role,
@@ -18,6 +19,26 @@ import type {
 type AuthMode = "signIn" | "signUp" | "resetPassword";
 
 const paymentMethods = ["Payoneer", "BEP20", "Wise", "PayPal", "Bank transfer", "USDT TRC20", "Other"];
+const paymentFrequencies: { value: PaymentFrequency; label: string }[] = [
+  { value: "weekly", label: "Weekly" },
+  { value: "biweekly", label: "Biweekly" },
+  { value: "monthly", label: "Monthly" },
+];
+const paymentWeekdays: { value: PaymentWeekday; label: string }[] = [
+  { value: "monday", label: "Monday" },
+  { value: "tuesday", label: "Tuesday" },
+  { value: "wednesday", label: "Wednesday" },
+  { value: "thursday", label: "Thursday" },
+  { value: "friday", label: "Friday" },
+];
+const weekdayIndex: Record<PaymentWeekday, number> = {
+  "": -1,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+};
 const defaultApiBaseUrl =
   process.env.NODE_ENV === "development" ? "http://localhost:4000" : "https://bidder-portal-be.vercel.app";
 const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || defaultApiBaseUrl).replace(/\/$/, "");
@@ -135,6 +156,42 @@ function titleCase(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function normalizePaymentFrequency(value?: string): PaymentFrequency {
+  return value === "weekly" || value === "biweekly" || value === "monthly" ? value : "";
+}
+
+function normalizePaymentWeekday(value?: string): PaymentWeekday {
+  return value === "monday" || value === "tuesday" || value === "wednesday" || value === "thursday" || value === "friday"
+    ? value
+    : "";
+}
+
+function parsePaymentSchedule(value?: string) {
+  const schedule = (value || "").toLowerCase();
+  const frequency: PaymentFrequency = schedule.includes("biweekly")
+    ? "biweekly"
+    : schedule.includes("monthly")
+      ? "monthly"
+      : schedule.includes("weekly")
+        ? "weekly"
+        : "";
+  const weekday = paymentWeekdays.find((day) => schedule.includes(day.value))?.value || "";
+
+  return { frequency, weekday };
+}
+
+function paymentScheduleLabel(frequencyInput?: string, weekdayInput?: string) {
+  const frequency = normalizePaymentFrequency(frequencyInput);
+  const weekday = normalizePaymentWeekday(weekdayInput);
+  if (!frequency || !weekday) {
+    return "";
+  }
+
+  const frequencyLabel = paymentFrequencies.find((item) => item.value === frequency)?.label || titleCase(frequency);
+  const weekdayLabel = paymentWeekdays.find((item) => item.value === weekday)?.label || titleCase(weekday);
+  return `${frequencyLabel} on ${weekdayLabel}`;
+}
+
 function roleLabel(role: Role) {
   if (role === "admin") return "Admin";
   if (role === "developer") return "Developer";
@@ -212,6 +269,68 @@ function dateAtMidnight(value: string) {
   }
 
   return new Date(year, month - 1, day);
+}
+
+function dateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function addMonths(date: Date, months: number) {
+  const next = new Date(date);
+  const day = next.getDate();
+  next.setDate(1);
+  next.setMonth(next.getMonth() + months);
+  const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+  next.setDate(Math.min(day, lastDay));
+  return next;
+}
+
+function nextWeekdayOnOrAfter(date: Date, weekdayInput: PaymentWeekday) {
+  const weekday = normalizePaymentWeekday(weekdayInput);
+  if (!weekday) {
+    return null;
+  }
+
+  const offset = (weekdayIndex[weekday] - date.getDay() + 7) % 7;
+  return addDays(date, offset);
+}
+
+function nextPaymentDateFromSchedule(frequencyInput?: string, weekdayInput?: string, baseDateInput = today(), advance = false) {
+  const frequency = normalizePaymentFrequency(frequencyInput);
+  const weekday = normalizePaymentWeekday(weekdayInput);
+  const baseDate = dateAtMidnight(baseDateInput) || dateAtMidnight(today());
+  if (!frequency || !weekday || !baseDate) {
+    return "";
+  }
+
+  let searchDate = baseDate;
+  if (advance) {
+    if (frequency === "weekly") {
+      searchDate = addDays(baseDate, 1);
+    } else if (frequency === "biweekly") {
+      searchDate = addDays(baseDate, 14);
+    } else {
+      searchDate = addMonths(baseDate, 1);
+    }
+  }
+
+  const nextDate = nextWeekdayOnOrAfter(searchDate, weekday);
+  return nextDate ? dateInputValue(nextDate) : "";
+}
+
+function paymentDateMatchesWeekday(value: string, weekdayInput?: string) {
+  const date = dateAtMidnight(value);
+  const weekday = normalizePaymentWeekday(weekdayInput);
+  return Boolean(date && weekday && date.getDay() === weekdayIndex[weekday]);
 }
 
 function daysUntil(value: string) {
@@ -1117,12 +1236,22 @@ function BidderSettingsEditor({
   busy: boolean;
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
+  const existingSchedule = parsePaymentSchedule(user.paymentSchedule);
   const [draft, setDraft] = useState({
     ratePerApplication: String(user.ratePerApplication),
     bonusPerInterview: String(user.bonusPerInterview),
-    nextPaymentDate: user.nextPaymentDate,
-    paymentSchedule: user.paymentSchedule,
+    paymentFrequency: normalizePaymentFrequency(user.paymentFrequency) || existingSchedule.frequency,
+    paymentWeekday: normalizePaymentWeekday(user.paymentWeekday) || existingSchedule.weekday,
   });
+  const nextPaymentDate =
+    draft.paymentFrequency && draft.paymentWeekday
+      ? nextPaymentDateFromSchedule(
+          draft.paymentFrequency,
+          draft.paymentWeekday,
+          user.nextPaymentDate && paymentDateMatchesWeekday(user.nextPaymentDate, draft.paymentWeekday) ? user.nextPaymentDate : today()
+        )
+      : "";
+  const scheduleLabel = paymentScheduleLabel(draft.paymentFrequency, draft.paymentWeekday);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -1133,8 +1262,10 @@ function BidderSettingsEditor({
       status: user.status,
       ratePerApplication: Number(draft.ratePerApplication),
       bonusPerInterview: Number(draft.bonusPerInterview),
-      nextPaymentDate: draft.nextPaymentDate,
-      paymentSchedule: draft.paymentSchedule,
+      nextPaymentDate,
+      paymentFrequency: draft.paymentFrequency,
+      paymentWeekday: draft.paymentWeekday,
+      paymentSchedule: scheduleLabel,
     });
   }
 
@@ -1169,20 +1300,38 @@ function BidderSettingsEditor({
           />
         </label>
         <label className="field">
+          <span>Frequency</span>
+          <select
+            value={draft.paymentFrequency}
+            onChange={(event) => setDraft({ ...draft, paymentFrequency: event.target.value as PaymentFrequency })}
+            required
+          >
+            <option value="">Select frequency</option>
+            {paymentFrequencies.map((frequency) => (
+              <option key={frequency.value} value={frequency.value}>{frequency.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Weekday</span>
+          <select
+            value={draft.paymentWeekday}
+            onChange={(event) => setDraft({ ...draft, paymentWeekday: event.target.value as PaymentWeekday })}
+            required
+          >
+            <option value="">Select weekday</option>
+            {paymentWeekdays.map((weekday) => (
+              <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
           <span>Next payment</span>
-          <input
-            type="date"
-            value={draft.nextPaymentDate}
-            onChange={(event) => setDraft({ ...draft, nextPaymentDate: event.target.value })}
-          />
+          <input type="date" value={nextPaymentDate} readOnly />
         </label>
         <label className="field">
           <span>Payment schedule</span>
-          <input
-            value={draft.paymentSchedule}
-            onChange={(event) => setDraft({ ...draft, paymentSchedule: event.target.value })}
-            placeholder="Weekly on Friday, biweekly, monthly..."
-          />
+          <input value={scheduleLabel} readOnly placeholder="Select frequency and weekday" />
         </label>
       </div>
       <div className="actions">
@@ -1707,12 +1856,12 @@ function AdminPayments({
     userId: payableUsers[0]?.id || "",
     periodStart: today(),
     periodEnd: today(),
-    scheduledDate: today(),
+    scheduledDate: payableUsers[0]?.nextPaymentDate || today(),
     amount: "",
-    status: "scheduled" as PaymentStatus,
     paymentLink: "",
     memo: "",
   });
+  const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
 
   const selectedUser = payableUsers.find((user) => user.id === draft.userId);
   const suggestedAmount = selectedUser
@@ -1762,13 +1911,17 @@ function AdminPayments({
       periodEnd: draft.periodEnd,
       scheduledDate: draft.scheduledDate,
       amount: Number(draft.amount),
-      status: draft.status,
       paymentLink: draft.paymentLink,
       memo: draft.memo,
     });
     if (nextData) {
       setDraft({ ...draft, amount: "", paymentLink: "", memo: "" });
     }
+  }
+
+  function handleUserChange(userId: string) {
+    const nextUser = payableUsers.find((user) => user.id === userId);
+    setDraft({ ...draft, userId, scheduledDate: nextUser?.nextPaymentDate || draft.scheduledDate || today() });
   }
 
   return (
@@ -1779,13 +1932,13 @@ function AdminPayments({
         <div className="panel-header">
           <div>
             <h2>Add Payment Record</h2>
-            <p>Set schedule, status, amount, and the payment link after payout.</p>
+            <p>Record paid payouts with the receipt or transfer link.</p>
           </div>
         </div>
         <form className="form-grid" onSubmit={submit}>
           <label className="field full">
             <span>User</span>
-            <select value={draft.userId} onChange={(event) => setDraft({ ...draft, userId: event.target.value })} required>
+            <select value={draft.userId} onChange={(event) => handleUserChange(event.target.value)} required>
               {payableUsers.map((user) => (
                 <option key={user.id} value={user.id}>{user.name} - {roleLabel(user.role)}</option>
               ))}
@@ -1800,7 +1953,7 @@ function AdminPayments({
             <input type="date" value={draft.periodEnd} onChange={(event) => setDraft({ ...draft, periodEnd: event.target.value })} required />
           </label>
           <label className="field">
-            <span>Scheduled date</span>
+            <span>Paid date</span>
             <input type="date" value={draft.scheduledDate} onChange={(event) => setDraft({ ...draft, scheduledDate: event.target.value })} required />
           </label>
           <label className="field">
@@ -1808,22 +1961,15 @@ function AdminPayments({
             <input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} placeholder={money(suggestedAmount)} required />
           </label>
           <label className="field">
-            <span>Status</span>
-            <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as PaymentStatus })}>
-              <option value="scheduled">Scheduled</option>
-              <option value="paid">Paid</option>
-            </select>
-          </label>
-          <label className="field">
             <span>Payment link</span>
-            <input value={draft.paymentLink} onChange={(event) => setDraft({ ...draft, paymentLink: event.target.value })} placeholder="Receipt or transfer link" />
+            <input value={draft.paymentLink} onChange={(event) => setDraft({ ...draft, paymentLink: event.target.value })} placeholder="Receipt or transfer link" required />
           </label>
           <label className="field full">
             <span>Memo</span>
             <textarea value={draft.memo} onChange={(event) => setDraft({ ...draft, memo: event.target.value })} />
           </label>
           <div className="actions full">
-            <button className="primary-button" type="submit" disabled={busy || !payableUsers.length}>Save payment</button>
+            <button className="primary-button" type="submit" disabled={busy || !payableUsers.length}>Save paid payment</button>
             <button className="ghost-button" type="button" onClick={() => setDraft({ ...draft, amount: String(suggestedAmount.toFixed(2)) })}>
               Use estimate
             </button>
@@ -1863,11 +2009,27 @@ function AdminPayments({
         <div className="panel-header">
           <div>
             <h2>Payment History</h2>
-            <p>All scheduled and paid records.</p>
+            <p>Paid records and receipt links.</p>
           </div>
         </div>
-        <PaymentTable payments={data.payments} users={data.users} />
+        <PaymentTable payments={data.payments} users={data.users} onEdit={setEditingPayment} />
       </section>
+
+      {editingPayment ? (
+        <PaymentEditModal
+          key={editingPayment.id}
+          payment={editingPayment}
+          users={payableUsers}
+          busy={busy}
+          onClose={() => setEditingPayment(null)}
+          onSave={async (payload) => {
+            const nextData = await onAction("editPayment", payload);
+            if (nextData) {
+              setEditingPayment(null);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1936,7 +2098,116 @@ function UpcomingPaymentsPanel({ payments }: { payments: UpcomingPaymentItem[] }
   );
 }
 
-function PaymentTable({ payments, users }: { payments: PaymentRecord[]; users: PortalUser[] }) {
+function PaymentEditModal({
+  payment,
+  users,
+  busy,
+  onClose,
+  onSave,
+}: {
+  payment: PaymentRecord;
+  users: PortalUser[];
+  busy: boolean;
+  onClose: () => void;
+  onSave: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState({
+    userId: payment.userId,
+    periodStart: payment.periodStart,
+    periodEnd: payment.periodEnd,
+    scheduledDate: payment.scheduledDate,
+    amount: String(payment.amount),
+    paymentLink: payment.paymentLink,
+    memo: payment.memo,
+  });
+
+  function handleUserChange(userId: string) {
+    const nextUser = users.find((user) => user.id === userId);
+    setDraft({ ...draft, userId, scheduledDate: nextUser?.nextPaymentDate || draft.scheduledDate || today() });
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSave({
+      paymentId: payment.id,
+      userId: draft.userId,
+      periodStart: draft.periodStart,
+      periodEnd: draft.periodEnd,
+      scheduledDate: draft.scheduledDate,
+      amount: Number(draft.amount),
+      paymentLink: draft.paymentLink,
+      memo: draft.memo,
+    });
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="edit-payment-title">
+        <div className="panel-header">
+          <div>
+            <h2 id="edit-payment-title">Edit Payment</h2>
+            <p>Update the paid payout record and receipt link.</p>
+          </div>
+          <button className="ghost-button compact-button" type="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <form className="form-grid" onSubmit={submit}>
+          <label className="field full">
+            <span>User</span>
+            <select value={draft.userId} onChange={(event) => handleUserChange(event.target.value)} required>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>{user.name} - {roleLabel(user.role)}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Period start</span>
+            <input type="date" value={draft.periodStart} onChange={(event) => setDraft({ ...draft, periodStart: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Period end</span>
+            <input type="date" value={draft.periodEnd} onChange={(event) => setDraft({ ...draft, periodEnd: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Paid date</span>
+            <input type="date" value={draft.scheduledDate} onChange={(event) => setDraft({ ...draft, scheduledDate: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Amount</span>
+            <input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} required />
+          </label>
+          <label className="field full">
+            <span>Payment link</span>
+            <input value={draft.paymentLink} onChange={(event) => setDraft({ ...draft, paymentLink: event.target.value })} placeholder="Receipt or transfer link" required />
+          </label>
+          <label className="field full">
+            <span>Memo</span>
+            <textarea value={draft.memo} onChange={(event) => setDraft({ ...draft, memo: event.target.value })} />
+          </label>
+          <div className="actions full">
+            <button className="primary-button" type="submit" disabled={busy}>
+              Save edit
+            </button>
+            <button className="ghost-button" type="button" onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function PaymentTable({
+  payments,
+  users,
+  onEdit,
+}: {
+  payments: PaymentRecord[];
+  users: PortalUser[];
+  onEdit?: (payment: PaymentRecord) => void;
+}) {
   if (!payments.length) {
     return <div className="empty-state">No payment history yet.</div>;
   }
@@ -1948,11 +2219,12 @@ function PaymentTable({ payments, users }: { payments: PaymentRecord[]; users: P
           <tr>
             <th>User</th>
             <th>Period</th>
-            <th>Scheduled</th>
+            <th>Paid date</th>
             <th>Amount</th>
             <th>Status</th>
             <th>Link</th>
             <th>Memo</th>
+            {onEdit ? <th>Action</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -1967,6 +2239,13 @@ function PaymentTable({ payments, users }: { payments: PaymentRecord[]; users: P
                 <td><span className={`badge ${payment.status === "paid" ? "bidder" : "pending"}`}>{titleCase(payment.status)}</span></td>
                 <td>{payment.paymentLink ? <a href={payment.paymentLink} target="_blank" rel="noreferrer">Open link</a> : "-"}</td>
                 <td>{payment.memo || "-"}</td>
+                {onEdit ? (
+                  <td>
+                    <button className="ghost-button compact-button" type="button" onClick={() => onEdit(payment)}>
+                      Edit
+                    </button>
+                  </td>
+                ) : null}
               </tr>
             );
           })}

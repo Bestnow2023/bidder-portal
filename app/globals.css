@@ -849,6 +849,27 @@ td {
   color: #695034;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 20, 19, 0.52);
+  padding: 20px;
+}
+
+.modal-panel {
+  width: min(100%, 720px);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 28px 80px rgba(12, 20, 19, 0.24);
+  padding: 20px;
+}
+
 .developer-note {
   border-left: 4px solid var(--blue);
   border-radius: 8px;

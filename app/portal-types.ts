@@ -1,6 +1,8 @@
 export type Role = "admin" | "bidder" | "developer";
 export type UserStatus = "pending" | "approved" | "paused";
 export type PaymentStatus = "scheduled" | "paid";
+export type PaymentFrequency = "" | "weekly" | "biweekly" | "monthly";
+export type PaymentWeekday = "" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday";
 
 export type PortalUser = {
   id: string;
@@ -12,6 +14,8 @@ export type PortalUser = {
   bonusPerInterview: number;
   nextPaymentDate: string;
   paymentSchedule: string;
+  paymentFrequency?: PaymentFrequency;
+  paymentWeekday?: PaymentWeekday;
   passwordSet?: boolean;
   passwordUpdatedAt?: string;
   passwordResetSentAt?: string;

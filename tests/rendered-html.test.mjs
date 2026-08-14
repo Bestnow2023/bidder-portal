@@ -33,6 +33,10 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Forgot password/);
   assert.match(portalApp, /Send verification/);
   assert.match(portalApp, /Set password/);
+  assert.match(portalApp, /Frequency/);
+  assert.match(portalApp, /Weekday/);
+  assert.match(portalApp, /Save paid payment/);
+  assert.match(portalApp, /Edit Payment/);
   assert.doesNotMatch(portalApp, /Roles ready|Work logging|No Stripe|set payment rates/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.doesNotMatch(`${page}\n${layout}\n${portalApp}`, /codex-preview|Your site is taking shape/i);
@@ -56,6 +60,9 @@ test("declares the requested frontend records", async () => {
     "Unpaid Work Totals",
     "Payment Method",
     "Payment History",
+    "Save paid payment",
+    "Edit Payment",
+    "Payment link",
     "Group Chat",
     "Local ",
     "Admin ",
@@ -76,6 +83,7 @@ test("declares the requested frontend records", async () => {
     "savePaymentMethod",
     "saveWorkLog",
     "addPayment",
+    "editPayment",
     "addChatMessage",
     "editChatMessage",
     "deleteChatMessage",
@@ -95,6 +103,10 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /authorTimeZone/);
   assert.match(portalApp, /sessionToken/);
   assert.match(portalApp, /workLogId/);
+  assert.match(portalApp, /paymentFrequency/);
+  assert.match(portalApp, /paymentWeekday/);
+  assert.match(portalApp, /nextPaymentDateFromSchedule/);
+  assert.match(portalApp, /modal-panel/);
   assert.match(portalApp, /Cancel edit/);
   assert.match(portalApp, /audio controls/);
   assert.match(portalApp, /img src/);
