@@ -333,6 +333,37 @@ function paymentDateMatchesWeekday(value: string, weekdayInput?: string) {
   return Boolean(date && weekday && date.getDay() === weekdayIndex[weekday]);
 }
 
+type ActionMenuItem = {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+};
+
+function ActionMenu({ label = "Actions", items }: { label?: string; items: ActionMenuItem[] }) {
+  return (
+    <details className="action-menu">
+      <summary>{label}</summary>
+      <div className="action-menu-list">
+        {items.map((item) => (
+          <button
+            key={item.label}
+            type="button"
+            disabled={item.disabled}
+            className={item.danger ? "danger" : ""}
+            onClick={(event) => {
+              event.currentTarget.closest("details")?.removeAttribute("open");
+              item.onClick();
+            }}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function daysUntil(value: string) {
   const target = dateAtMidnight(value);
   const current = dateAtMidnight(today());
@@ -443,6 +474,8 @@ export default function PortalApp() {
   const [loginPassword, setLoginPassword] = useState(isLiveMode ? "" : demoPassword);
   const [resetToken, setResetToken] = useState("");
   const [authNotice, setAuthNotice] = useState("");
+  const [verificationPendingEmail, setVerificationPendingEmail] = useState("");
+  const [verificationSuccessEmail, setVerificationSuccessEmail] = useState("");
   const [sessionToken, setSessionToken] = useState(() => {
     if (typeof window === "undefined") {
       return "";
@@ -491,6 +524,12 @@ export default function PortalApp() {
           window.localStorage.setItem("bidderPortalSessionToken", nextData.sessionToken);
         }
         window.localStorage.setItem("bidderPortalEmail", nextData.currentUser.email);
+      } else if (action === "verifyEmail") {
+        const verifiedEmail = String(payload.email || nextData.email || loginEmail);
+        setVerificationPendingEmail("");
+        setVerificationSuccessEmail(verifiedEmail);
+        setLoginEmail(verifiedEmail);
+        setAuthMode("signIn");
       } else {
         setAuthNotice(payload.successMessage || nextData.message || "Done.");
       }
@@ -699,6 +738,20 @@ export default function PortalApp() {
         throw new Error(nextData.error || "Action failed.");
       }
 
+      if (!nextData.currentUser) {
+        if (action === "signUp" && nextData.needsEmailVerification) {
+          const nextEmail = nextData.email || email || loginEmail;
+          setVerificationPendingEmail(nextEmail);
+          setVerificationSuccessEmail("");
+          setLoginEmail(nextEmail);
+          setLoginPassword("");
+          setAuthNotice(nextData.message || "Check your email to verify your account before signing in.");
+        } else {
+          setAuthNotice(nextData.message || "Done.");
+        }
+        return undefined;
+      }
+
       setData(nextData);
       setLoginEmail(nextData.currentUser.email);
       if (nextData.sessionToken) {
@@ -723,6 +776,8 @@ export default function PortalApp() {
     setActiveView("overview");
     setChatUnreadCount(0);
     latestChatMessageIdRef.current = "";
+    setVerificationPendingEmail("");
+    setVerificationSuccessEmail("");
     setError("");
   }
 
@@ -741,6 +796,8 @@ export default function PortalApp() {
     setLoginPassword(nextAuthMode === "signIn" && !isLiveMode ? demoPassword : "");
     setResetToken("");
     setAuthNotice("");
+    setVerificationPendingEmail("");
+    setVerificationSuccessEmail("");
     setError("");
   }
 
@@ -757,6 +814,52 @@ export default function PortalApp() {
   }
 
   if (!data) {
+    if (verificationPendingEmail || verificationSuccessEmail) {
+      const verified = Boolean(verificationSuccessEmail);
+      const email = verificationSuccessEmail || verificationPendingEmail;
+
+      return (
+        <main className="app login-page">
+          <section className="login-card">
+            <div className="login-story">
+              <div className="brand-mark">BP</div>
+              <h1>Bidder Work Portal</h1>
+              <p>
+                Sign in with email, log bidder work, keep payment method details in one place,
+                and let admin manage approvals, rates, next payout dates, history, and chat.
+              </p>
+            </div>
+
+            <section className="login-form verification-card">
+              <h2>{verified ? "Email verified successfully" : "Check your email"}</h2>
+              <p>
+                {verified
+                  ? "Your email is verified. You can now sign in with your password."
+                  : "We sent a verification link. Open your email and click the link before signing in."}
+              </p>
+              <div className={`status-strip compact ${verified ? "success" : ""}`}>
+                {email}
+              </div>
+              <div className="actions" style={{ marginTop: 18 }}>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("signIn");
+                    setVerificationPendingEmail("");
+                    setVerificationSuccessEmail("");
+                    setAuthNotice("");
+                  }}
+                >
+                  Continue to sign in
+                </button>
+              </div>
+            </section>
+          </section>
+        </main>
+      );
+    }
+
     return (
       <main className="app login-page">
         <section className="login-card">
@@ -1065,6 +1168,17 @@ function PeopleView({
   busy: boolean;
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
+  const [editingUser, setEditingUser] = useState<PortalUser | null>(null);
+
+  async function updateUser(user: PortalUser, changes: Partial<Pick<PortalUser, "name" | "role" | "status">>) {
+    await onSave("updateUser", {
+      targetUserId: user.id,
+      name: changes.name ?? user.name,
+      role: changes.role ?? user.role,
+      status: changes.status ?? user.status,
+    });
+  }
+
   return (
     <section className="panel">
       <div className="section-heading">
@@ -1073,22 +1187,93 @@ function PeopleView({
           <p>Manage accounts, approval status, roles, passwords, and email verification.</p>
         </div>
       </div>
-      <div className="people-list">
-        {data.users.map((user) => (
-          <UserEditor key={user.id} user={user} busy={busy} onSave={onSave} />
-        ))}
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Password</th>
+              <th>Email</th>
+              <th>Updated</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.users.map((user) => (
+              <tr key={user.id}>
+                <td>
+                  <strong>{user.name}</strong>
+                  <span className="table-subtext">{user.email}</span>
+                </td>
+                <td><span className={`badge ${user.role}`}>{roleLabel(user.role)}</span></td>
+                <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
+                <td>{user.passwordSet ? "Set" : "Not set"}</td>
+                <td>{user.emailVerifiedAt ? "Verified" : "Not verified"}</td>
+                <td>{optionalDateTime(user.passwordUpdatedAt)}</td>
+                <td>
+                  <ActionMenu
+                    items={[
+                      { label: "Edit", onClick: () => setEditingUser(user) },
+                      {
+                        label: "Approve",
+                        disabled: busy || user.status === "approved",
+                        onClick: () => updateUser(user, { status: "approved" }),
+                      },
+                      {
+                        label: "Activate",
+                        disabled: busy || user.status === "approved",
+                        onClick: () => updateUser(user, { status: "approved" }),
+                      },
+                      {
+                        label: "Disable",
+                        disabled: busy || user.status === "paused",
+                        onClick: () => updateUser(user, { status: "paused" }),
+                      },
+                      {
+                        label: "Send verification",
+                        disabled: busy || Boolean(user.emailVerifiedAt),
+                        onClick: () => onSave("requestEmailVerification", { targetUserId: user.id }),
+                      },
+                    ]}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+
+      {editingUser ? (
+        <UserEditModal
+          key={editingUser.id}
+          user={editingUser}
+          busy={busy}
+          onClose={() => setEditingUser(null)}
+          onSave={async (action, payload) => {
+            const nextData = await onSave(action, payload);
+            if (nextData && action === "updateUser") {
+              setEditingUser(null);
+            }
+            return nextData;
+          }}
+        />
+      ) : null}
     </section>
   );
 }
 
-function UserEditor({
+function UserEditModal({
   user,
   busy,
+  onClose,
   onSave,
 }: {
   user: PortalUser;
   busy: boolean;
+  onClose: () => void;
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
   const [draft, setDraft] = useState({
@@ -1124,76 +1309,74 @@ function UserEditor({
   }
 
   return (
-    <div className="person-editor">
-      <div className="person-title">
-        <div>
-          <h3>{user.name}</h3>
-          <p>{user.email}</p>
-          <div className="account-meta">
-            <span>Password: {user.passwordSet ? "Set" : "Not set"}</span>
-            <span>Updated: {optionalDateTime(user.passwordUpdatedAt)}</span>
-            <span>Email: {user.emailVerifiedAt ? "Verified" : "Not verified"}</span>
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="edit-user-title">
+        <div className="panel-header">
+          <div>
+            <h2 id="edit-user-title">Edit User</h2>
+            <p>{user.email}</p>
+            <div className="account-meta">
+              <span>Password: {user.passwordSet ? "Set" : "Not set"}</span>
+              <span>Updated: {optionalDateTime(user.passwordUpdatedAt)}</span>
+              <span>Email: {user.emailVerifiedAt ? "Verified" : "Not verified"}</span>
+            </div>
           </div>
-        </div>
-        <div className="badge-row">
-          <span className={`badge ${user.role}`}>{roleLabel(user.role)}</span>
-          <span className={`badge ${user.status}`}>{statusLabel(user.status)}</span>
-          <span className={`badge ${user.emailVerifiedAt ? "bidder" : "pending"}`}>
-            {user.emailVerifiedAt ? "Email verified" : "Email pending"}
-          </span>
-        </div>
-      </div>
-
-      <form className="form-grid" onSubmit={submit}>
-        <label className="field">
-          <span>Name</span>
-          <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
-        </label>
-        <label className="field">
-          <span>Role</span>
-          <select value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value as Role })}>
-            <option value="bidder">Bidder</option>
-            <option value="developer">Developer</option>
-            <option value="admin">Admin</option>
-          </select>
-        </label>
-        <label className="field">
-          <span>Status</span>
-          <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as UserStatus })}>
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="paused">Paused</option>
-          </select>
-        </label>
-        <div className="actions full">
-          <button className="primary-button" type="submit" disabled={busy}>
-            Save account
-          </button>
-          <button className="ghost-button" type="button" disabled={busy || Boolean(user.emailVerifiedAt)} onClick={sendVerificationEmail}>
-            Send verification
+          <button className="ghost-button compact-button" type="button" onClick={onClose}>
+            Close
           </button>
         </div>
-      </form>
 
-      <form className="form-grid account-tools" onSubmit={submitPassword}>
-        <label className="field">
-          <span>Temporary password</span>
-          <input
-            type="password"
-            value={passwordDraft}
-            minLength={8}
-            onChange={(event) => setPasswordDraft(event.target.value)}
-            placeholder="At least 8 characters"
-            required
-          />
-        </label>
-        <button className="secondary-button" type="submit" disabled={busy || passwordDraft.length < 8}>
-          Set password
-        </button>
-        <div className="muted full">
-          Passwords are encrypted and cannot be viewed after they are saved.
-        </div>
-      </form>
+        <form className="form-grid" onSubmit={submit}>
+          <label className="field">
+            <span>Name</span>
+            <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+          </label>
+          <label className="field">
+            <span>Role</span>
+            <select value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value as Role })}>
+              <option value="bidder">Bidder</option>
+              <option value="developer">Developer</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Status</span>
+            <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as UserStatus })}>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="paused">Paused</option>
+            </select>
+          </label>
+          <div className="actions full">
+            <button className="primary-button" type="submit" disabled={busy}>
+              Save account
+            </button>
+            <button className="ghost-button" type="button" disabled={busy || Boolean(user.emailVerifiedAt)} onClick={sendVerificationEmail}>
+              Send verification
+            </button>
+          </div>
+        </form>
+
+        <form className="form-grid account-tools" onSubmit={submitPassword}>
+          <label className="field">
+            <span>Temporary password</span>
+            <input
+              type="password"
+              value={passwordDraft}
+              minLength={8}
+              onChange={(event) => setPasswordDraft(event.target.value)}
+              placeholder="At least 8 characters"
+              required
+            />
+          </label>
+          <button className="secondary-button" type="submit" disabled={busy || passwordDraft.length < 8}>
+            Set password
+          </button>
+          <div className="muted full">
+            Passwords are encrypted and cannot be viewed after they are saved.
+          </div>
+        </form>
+      </section>
     </div>
   );
 }
@@ -1208,6 +1391,7 @@ function BidderSettingsView({
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
   const bidders = data.users.filter((user) => user.role === "bidder");
+  const [editingBidder, setEditingBidder] = useState<PortalUser | null>(null);
 
   return (
     <section className="panel">
@@ -1217,23 +1401,72 @@ function BidderSettingsView({
           <p>Manage bidder rates, bonuses, and payment schedules separately from user accounts.</p>
         </div>
       </div>
-      <div className="people-list">
-        {bidders.map((user) => (
-          <BidderSettingsEditor key={user.id} user={user} busy={busy} onSave={onSave} />
-        ))}
-        {!bidders.length ? <div className="empty-state">No bidders yet.</div> : null}
-      </div>
+      {bidders.length ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Bidder</th>
+                <th>Rate</th>
+                <th>Bonus</th>
+                <th>Schedule</th>
+                <th>Next payment</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bidders.map((user) => (
+                <tr key={user.id}>
+                  <td>
+                    <strong>{user.name}</strong>
+                    <span className="table-subtext">{user.email}</span>
+                  </td>
+                  <td>{money(user.ratePerApplication)}</td>
+                  <td>{money(user.bonusPerInterview)}</td>
+                  <td>{user.paymentSchedule || "Not set"}</td>
+                  <td>{shortDate(user.nextPaymentDate)}</td>
+                  <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
+                  <td>
+                    <ActionMenu items={[{ label: "Edit", onClick: () => setEditingBidder(user) }]} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="empty-state">No bidders yet.</div>
+      )}
+
+      {editingBidder ? (
+        <BidderSettingsModal
+          key={editingBidder.id}
+          user={editingBidder}
+          busy={busy}
+          onClose={() => setEditingBidder(null)}
+          onSave={async (action, payload) => {
+            const nextData = await onSave(action, payload);
+            if (nextData) {
+              setEditingBidder(null);
+            }
+            return nextData;
+          }}
+        />
+      ) : null}
     </section>
   );
 }
 
-function BidderSettingsEditor({
+function BidderSettingsModal({
   user,
   busy,
+  onClose,
   onSave,
 }: {
   user: PortalUser;
   busy: boolean;
+  onClose: () => void;
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
   const existingSchedule = parsePaymentSchedule(user.paymentSchedule);
@@ -1270,76 +1503,86 @@ function BidderSettingsEditor({
   }
 
   return (
-    <form className="person-editor" onSubmit={submit}>
-      <div className="person-title">
-        <div>
-          <h3>{user.name}</h3>
-          <p>{user.email}</p>
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="edit-bidder-settings-title">
+        <div className="panel-header">
+          <div>
+            <h2 id="edit-bidder-settings-title">Edit Bidder Settings</h2>
+            <p>{user.name} - {user.email}</p>
+          </div>
+          <button className="ghost-button compact-button" type="button" onClick={onClose}>
+            Close
+          </button>
         </div>
-        <span className={`badge ${user.status}`}>{statusLabel(user.status)}</span>
-      </div>
-      <div className="form-grid">
-        <label className="field">
-          <span>Rate per applied job</span>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={draft.ratePerApplication}
-            onChange={(event) => setDraft({ ...draft, ratePerApplication: event.target.value })}
-          />
-        </label>
-        <label className="field">
-          <span>Interview bonus</span>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={draft.bonusPerInterview}
-            onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })}
-          />
-        </label>
-        <label className="field">
-          <span>Frequency</span>
-          <select
-            value={draft.paymentFrequency}
-            onChange={(event) => setDraft({ ...draft, paymentFrequency: event.target.value as PaymentFrequency })}
-            required
-          >
-            <option value="">Select frequency</option>
-            {paymentFrequencies.map((frequency) => (
-              <option key={frequency.value} value={frequency.value}>{frequency.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Weekday</span>
-          <select
-            value={draft.paymentWeekday}
-            onChange={(event) => setDraft({ ...draft, paymentWeekday: event.target.value as PaymentWeekday })}
-            required
-          >
-            <option value="">Select weekday</option>
-            {paymentWeekdays.map((weekday) => (
-              <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Next payment</span>
-          <input type="date" value={nextPaymentDate} readOnly />
-        </label>
-        <label className="field">
-          <span>Payment schedule</span>
-          <input value={scheduleLabel} readOnly placeholder="Select frequency and weekday" />
-        </label>
-      </div>
-      <div className="actions">
-        <button className="primary-button" type="submit" disabled={busy}>
-          Save bidder settings
-        </button>
-      </div>
-    </form>
+
+        <form onSubmit={submit}>
+          <div className="form-grid">
+            <label className="field">
+              <span>Rate per applied job</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={draft.ratePerApplication}
+                onChange={(event) => setDraft({ ...draft, ratePerApplication: event.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span>Interview bonus</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={draft.bonusPerInterview}
+                onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span>Frequency</span>
+              <select
+                value={draft.paymentFrequency}
+                onChange={(event) => setDraft({ ...draft, paymentFrequency: event.target.value as PaymentFrequency })}
+                required
+              >
+                <option value="">Select frequency</option>
+                {paymentFrequencies.map((frequency) => (
+                  <option key={frequency.value} value={frequency.value}>{frequency.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Weekday</span>
+              <select
+                value={draft.paymentWeekday}
+                onChange={(event) => setDraft({ ...draft, paymentWeekday: event.target.value as PaymentWeekday })}
+                required
+              >
+                <option value="">Select weekday</option>
+                {paymentWeekdays.map((weekday) => (
+                  <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Next payment</span>
+              <input type="date" value={nextPaymentDate} readOnly />
+            </label>
+            <label className="field">
+              <span>Payment schedule</span>
+              <input value={scheduleLabel} readOnly placeholder="Select frequency and weekday" />
+            </label>
+          </div>
+          <div className="actions" style={{ marginTop: 14 }}>
+            <button className="primary-button" type="submit" disabled={busy}>
+              Save bidder settings
+            </button>
+            <button className="ghost-button" type="button" onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }
 
@@ -1442,7 +1685,7 @@ function BidderWorkLog({
     interviewsScheduled: "",
     notes: "",
   });
-  const [editingWorkLogId, setEditingWorkLogId] = useState("");
+  const [editingWorkLog, setEditingWorkLog] = useState<WorkLog | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
 
   const user = data.currentUser;
@@ -1454,7 +1697,6 @@ function BidderWorkLog({
   async function submit(event: FormEvent) {
     event.preventDefault();
     const nextData = await onSave("saveWorkLog", {
-      workLogId: editingWorkLogId,
       workDate: draft.workDate,
       sheetLink: draft.sheetLink,
       appliedJobs: Number(draft.appliedJobs),
@@ -1463,24 +1705,15 @@ function BidderWorkLog({
     });
     if (nextData) {
       setDraft({ workDate: today(), sheetLink: "", appliedJobs: "", interviewsScheduled: "", notes: "" });
-      setEditingWorkLogId("");
     }
   }
 
-  function startEditingWorkLog(log: WorkLog) {
-    setEditingWorkLogId(log.id);
-    setDraft({
-      workDate: log.workDate,
-      sheetLink: log.sheetLink,
-      appliedJobs: String(log.appliedJobs),
-      interviewsScheduled: String(log.interviewsScheduled),
-      notes: log.notes,
-    });
-  }
+  async function deleteWorkLog(log: WorkLog) {
+    if (!window.confirm("Delete this unpaid work log?")) {
+      return;
+    }
 
-  function cancelEditingWorkLog() {
-    setEditingWorkLogId("");
-    setDraft({ workDate: today(), sheetLink: "", appliedJobs: "", interviewsScheduled: "", notes: "" });
+    await onSave("deleteWorkLog", { workLogId: log.id });
   }
 
   return (
@@ -1488,8 +1721,8 @@ function BidderWorkLog({
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>{editingWorkLogId ? "Edit Work Log" : "Daily Bidder Log"}</h2>
-            <p>{editingWorkLogId ? "Update this unpaid work log before it is paid." : "Attach the Google Sheet and enter daily totals."}</p>
+            <h2>Daily Bidder Log</h2>
+            <p>Attach the Google Sheet and enter daily totals.</p>
           </div>
         </div>
         <form className="form-grid" onSubmit={submit}>
@@ -1515,13 +1748,8 @@ function BidderWorkLog({
           </label>
           <div className="actions full">
             <button className="primary-button" type="submit" disabled={busy}>
-              {editingWorkLogId ? "Save changes" : "Save daily log"}
+              Save daily log
             </button>
-            {editingWorkLogId ? (
-              <button className="ghost-button" type="button" onClick={cancelEditingWorkLog}>
-                Cancel edit
-              </button>
-            ) : null}
           </div>
         </form>
       </section>
@@ -1566,9 +1794,25 @@ function BidderWorkLog({
           logs={logs}
           users={[user]}
           emptyMessage="No unpaid work logs match this date filter."
-          onEditLog={startEditingWorkLog}
+          onEditLog={setEditingWorkLog}
+          onDeleteLog={deleteWorkLog}
         />
       </section>
+
+      {editingWorkLog ? (
+        <WorkLogEditModal
+          key={editingWorkLog.id}
+          log={editingWorkLog}
+          busy={busy}
+          onClose={() => setEditingWorkLog(null)}
+          onSave={async (payload) => {
+            const nextData = await onSave("saveWorkLog", payload);
+            if (nextData) {
+              setEditingWorkLog(null);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1630,6 +1874,84 @@ function DateRangeFilter({
   );
 }
 
+function WorkLogEditModal({
+  log,
+  busy,
+  onClose,
+  onSave,
+}: {
+  log: WorkLog;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState({
+    workDate: log.workDate,
+    sheetLink: log.sheetLink,
+    appliedJobs: String(log.appliedJobs),
+    interviewsScheduled: String(log.interviewsScheduled),
+    notes: log.notes,
+  });
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSave({
+      workLogId: log.id,
+      workDate: draft.workDate,
+      sheetLink: draft.sheetLink,
+      appliedJobs: Number(draft.appliedJobs),
+      interviewsScheduled: Number(draft.interviewsScheduled),
+      notes: draft.notes,
+    });
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="edit-work-log-title">
+        <div className="panel-header">
+          <div>
+            <h2 id="edit-work-log-title">Edit Work Log</h2>
+            <p>Update this unpaid work log before it is paid.</p>
+          </div>
+          <button className="ghost-button compact-button" type="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <form className="form-grid" onSubmit={submit}>
+          <label className="field">
+            <span>Date</span>
+            <input type="date" value={draft.workDate} onChange={(event) => setDraft({ ...draft, workDate: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Applied jobs</span>
+            <input type="number" min="0" value={draft.appliedJobs} onChange={(event) => setDraft({ ...draft, appliedJobs: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Interviews scheduled</span>
+            <input type="number" min="0" value={draft.interviewsScheduled} onChange={(event) => setDraft({ ...draft, interviewsScheduled: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Google Sheet link</span>
+            <input type="url" value={draft.sheetLink} onChange={(event) => setDraft({ ...draft, sheetLink: event.target.value })} required />
+          </label>
+          <label className="field full">
+            <span>Notes</span>
+            <textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
+          </label>
+          <div className="actions full">
+            <button className="primary-button" type="submit" disabled={busy}>
+              Save changes
+            </button>
+            <button className="ghost-button" type="button" onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function WorkLogTable({
   logs,
   users,
@@ -1637,6 +1959,7 @@ function WorkLogTable({
   showPaymentStatus = false,
   emptyMessage = "No work logs yet.",
   onEditLog,
+  onDeleteLog,
 }: {
   logs: WorkLog[];
   users: PortalUser[];
@@ -1644,6 +1967,7 @@ function WorkLogTable({
   showPaymentStatus?: boolean;
   emptyMessage?: string;
   onEditLog?: (log: WorkLog) => void;
+  onDeleteLog?: (log: WorkLog) => void;
 }) {
   if (!logs.length) {
     return <div className="empty-state">{emptyMessage}</div>;
@@ -1661,7 +1985,7 @@ function WorkLogTable({
             <th>Interviews</th>
             {showPaymentStatus ? <th>Status</th> : null}
             <th>Notes</th>
-            {onEditLog ? <th>Actions</th> : null}
+            {onEditLog || onDeleteLog ? <th>Actions</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -1679,11 +2003,14 @@ function WorkLogTable({
                   <td><span className={`badge ${paid ? "bidder" : "pending"}`}>{paid ? "Paid" : "Unpaid"}</span></td>
                 ) : null}
                 <td>{log.notes || "-"}</td>
-                {onEditLog ? (
+                {onEditLog || onDeleteLog ? (
                   <td>
-                    <button className="ghost-button compact-button" type="button" onClick={() => onEditLog(log)}>
-                      Edit
-                    </button>
+                    <ActionMenu
+                      items={[
+                        ...(onEditLog ? [{ label: "Edit", onClick: () => onEditLog(log) }] : []),
+                        ...(onDeleteLog ? [{ label: "Delete", danger: true, onClick: () => onDeleteLog(log) }] : []),
+                      ]}
+                    />
                   </td>
                 ) : null}
               </tr>

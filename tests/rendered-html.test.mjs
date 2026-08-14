@@ -33,10 +33,16 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Forgot password/);
   assert.match(portalApp, /Send verification/);
   assert.match(portalApp, /Set password/);
+  assert.match(portalApp, /Check your email/);
+  assert.match(portalApp, /Email verified successfully/);
+  assert.match(portalApp, /Continue to sign in/);
   assert.match(portalApp, /Frequency/);
   assert.match(portalApp, /Weekday/);
   assert.match(portalApp, /Save paid payment/);
   assert.match(portalApp, /Edit Payment/);
+  assert.match(portalApp, /Edit User/);
+  assert.match(portalApp, /Edit Bidder Settings/);
+  assert.match(portalApp, /Delete/);
   assert.doesNotMatch(portalApp, /Roles ready|Work logging|No Stripe|set payment rates/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.doesNotMatch(`${page}\n${layout}\n${portalApp}`, /codex-preview|Your site is taking shape/i);
@@ -62,6 +68,9 @@ test("declares the requested frontend records", async () => {
     "Payment History",
     "Save paid payment",
     "Edit Payment",
+    "Edit User",
+    "Edit Bidder Settings",
+    "Actions",
     "Payment link",
     "Group Chat",
     "Local ",
@@ -82,6 +91,7 @@ test("declares the requested frontend records", async () => {
     "signUp",
     "savePaymentMethod",
     "saveWorkLog",
+    "deleteWorkLog",
     "addPayment",
     "editPayment",
     "addChatMessage",
@@ -103,11 +113,14 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /authorTimeZone/);
   assert.match(portalApp, /sessionToken/);
   assert.match(portalApp, /workLogId/);
+  assert.match(portalApp, /ActionMenu/);
+  assert.match(portalApp, /verificationPendingEmail/);
+  assert.match(portalApp, /verificationSuccessEmail/);
   assert.match(portalApp, /paymentFrequency/);
   assert.match(portalApp, /paymentWeekday/);
   assert.match(portalApp, /nextPaymentDateFromSchedule/);
   assert.match(portalApp, /modal-panel/);
-  assert.match(portalApp, /Cancel edit/);
+  assert.match(portalApp, /Cancel/);
   assert.match(portalApp, /audio controls/);
   assert.match(portalApp, /img src/);
   assert.match(envExample, /NEXT_PUBLIC_API_BASE_URL/);
