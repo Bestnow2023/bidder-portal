@@ -30,6 +30,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /My Profile/);
   assert.match(portalApp, /Client Search/);
   assert.match(portalApp, /Search clients/);
+  assert.match(portalApp, /Client Work History/);
+  assert.match(portalApp, /Message client/);
+  assert.match(portalApp, /Allow clients and bidders to contact me directly/);
   assert.match(portalApp, /Search bidders/);
   assert.match(portalApp, /Work Summary/);
   assert.match(portalApp, /Bidder Settings/);
@@ -169,6 +172,10 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /chatContacts/);
   assert.match(portalApp, /recipientId/);
   assert.match(portalApp, /conversation-list/);
+  assert.match(portalApp, /conversation-badge/);
+  assert.match(portalApp, /readReceipts/);
+  assert.match(portalApp, /allowDirectMessages/);
+  assert.match(portalApp, /requestedRecipientId/);
   assert.match(portalApp, /methodId/);
   assert.match(portalApp, /sessionToken/);
   assert.match(portalApp, /workLogId/);

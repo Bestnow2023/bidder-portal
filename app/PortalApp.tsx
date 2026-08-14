@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import type {
   ChatAttachment,
@@ -216,6 +216,31 @@ function chatNotificationText(message: ChatMessage) {
   const body = message.body?.trim();
   const attachmentText = attachmentSummary(message.attachments || []);
   return `${message.authorName}: ${body || attachmentText || "New message"}`;
+}
+
+function chatReadStorageKey(userId: string) {
+  return `bidderPortalChatRead:${userId}`;
+}
+
+function loadChatReadReceipts(userId: string): Record<string, string> {
+  if (typeof window === "undefined" || !userId) {
+    return {};
+  }
+
+  try {
+    const stored = window.localStorage.getItem(chatReadStorageKey(userId));
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveChatReadReceipts(userId: string, receipts: Record<string, string>) {
+  if (typeof window === "undefined" || !userId) {
+    return;
+  }
+
+  window.localStorage.setItem(chatReadStorageKey(userId), JSON.stringify(receipts));
 }
 
 function titleCase(value: string) {
@@ -793,6 +818,13 @@ export default function PortalApp() {
   const [activeView, setActiveView] = useState<PortalView>(() =>
     typeof window === "undefined" ? "overview" : viewFromPath(window.location.pathname)
   );
+  const [chatRecipientId, setChatRecipientId] = useState(() => {
+    if (typeof window === "undefined" || window.location.pathname !== viewRoutes.chat) {
+      return "";
+    }
+
+    return new URLSearchParams(window.location.search).get("recipient") || "";
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
@@ -896,7 +928,10 @@ export default function PortalApp() {
       return;
     }
 
-    const handlePopState = () => setActiveView(viewFromPath(window.location.pathname));
+    const handlePopState = () => {
+      setActiveView(viewFromPath(window.location.pathname));
+      setChatRecipientId(new URLSearchParams(window.location.search).get("recipient") || "");
+    };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
@@ -1369,9 +1404,23 @@ export default function PortalApp() {
     }
 
     setActiveView(view);
+    setChatRecipientId("");
     if (view === "chat") {
       setChatUnreadCount(0);
     }
+  }
+
+  function openInboxForUser(userId: string) {
+    const nextPath = `${viewRoutes.chat}?recipient=${encodeURIComponent(userId)}`;
+
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", nextPath);
+    }
+
+    setChatRecipientId(userId);
+    setActiveView("chat");
+    setChatUnreadCount(0);
+    setPortalNavVisible(true);
   }
 
   return (
@@ -1405,17 +1454,13 @@ export default function PortalApp() {
           </nav>
 
           <div className="portal-account">
-            <div className="user-card">
+            <div className="portal-user">
               <strong>{currentUser.name}</strong>
-              <span>{currentUser.email}</span>
-              <div className="badge-row">
-                <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
-                <span className={`badge ${currentUser.status}`}>{statusLabel(currentUser.status)}</span>
-              </div>
-              <button className="ghost-button" type="button" onClick={signOut}>
-                Sign out
-              </button>
+              <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
             </div>
+            <button className="ghost-button compact-button" type="button" onClick={signOut}>
+              Sign out
+            </button>
           </div>
         </div>
       </header>
@@ -1440,7 +1485,7 @@ export default function PortalApp() {
           <>
             {safeView === "overview" && canViewManaged ? <AdminOverview data={data} /> : null}
             {safeView === "profile" ? <ProfileView data={data} busy={busy} onSave={postAction} /> : null}
-            {safeView === "clients" ? <ClientDirectoryView data={data} /> : null}
+            {safeView === "clients" ? <ClientDirectoryView data={data} onMessageClient={openInboxForUser} /> : null}
             {safeView === "people" && isSuperAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "bidderSettings" && isSuperAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
@@ -1453,6 +1498,7 @@ export default function PortalApp() {
                 notificationsEnabled={notificationsEnabled}
                 onEnableNotifications={enableChatNotifications}
                 onSend={postAction}
+                requestedRecipientId={chatRecipientId}
               />
             ) : null}
           </>
@@ -1569,6 +1615,7 @@ function ProfileView({
     profileSkills: profileSkillsText(user),
     profileLocation: user.profileLocation || "",
     profileTimeZone: user.profileTimeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    allowDirectMessages: user.allowDirectMessages !== false,
   });
   const profileTimeZoneOptions = timeZoneOptions.includes(draft.profileTimeZone)
     ? timeZoneOptions
@@ -1648,6 +1695,14 @@ function ProfileView({
               placeholder="Summarize the work style, expectations, skills, and preferred communication."
             />
           </label>
+          <label className="check-field full">
+            <input
+              type="checkbox"
+              checked={draft.allowDirectMessages}
+              onChange={(event) => setDraft({ ...draft, allowDirectMessages: event.target.checked })}
+            />
+            <span>Allow clients and bidders to contact me directly</span>
+          </label>
           <div className="actions full">
             <button className="primary-button" type="submit" disabled={busy}>
               Save profile
@@ -1698,7 +1753,14 @@ function ProfileCardGrid({ users }: { users: PortalUser[] }) {
   );
 }
 
-function ClientDirectoryView({ data }: { data: PortalData }) {
+function ClientDirectoryView({
+  data,
+  onMessageClient,
+}: {
+  data: PortalData;
+  onMessageClient: (clientId: string) => void;
+}) {
+  const [selectedClient, setSelectedClient] = useState<PortalUser | null>(null);
   const [filters, setFilters] = useState({
     query: "",
     joinedAfter: "",
@@ -1738,6 +1800,24 @@ function ClientDirectoryView({ data }: { data: PortalData }) {
       if (filters.sortBy === "averageBonusGiven") return (rightStats?.averageBonusGiven || 0) - (leftStats?.averageBonusGiven || 0);
       return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
     });
+  const selectedClientWorkers = selectedClient
+    ? data.users.filter((user) => user.assignedAdminId === selectedClient.id)
+    : [];
+  const selectedClientWorkerIds = new Set(selectedClientWorkers.map((user) => user.id));
+  if (selectedClient?.id && data.currentUser.assignedAdminId === selectedClient.id) {
+    selectedClientWorkerIds.add(data.currentUser.id);
+  }
+  const selectedClientWorkLogs = selectedClient
+    ? data.workLogs.filter((log) => selectedClientWorkerIds.has(log.userId)).slice(0, 8)
+    : [];
+  const selectedClientPayments = selectedClient
+    ? data.payments.filter((payment) => selectedClientWorkerIds.has(payment.userId)).slice(0, 8)
+    : [];
+
+  function messageSelectedClient(client: PortalUser) {
+    setSelectedClient(null);
+    onMessageClient(client.id);
+  }
 
   return (
     <section className="panel">
@@ -1804,13 +1884,14 @@ function ClientDirectoryView({ data }: { data: PortalData }) {
               <th>Average bid rate</th>
               <th>Average bonus</th>
               <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {clients.map((client) => {
               const stats = client.clientStats;
               return (
-                <tr key={client.id}>
+                <tr className="clickable-row" key={client.id} onClick={() => setSelectedClient(client)}>
                   <td>
                     <strong>{client.name}</strong>
                     <span className="table-subtext">{client.profileTitle || client.email}</span>
@@ -1827,6 +1908,18 @@ function ClientDirectoryView({ data }: { data: PortalData }) {
                       <span className="badge approved">{stats?.assignedBidderCount || 0} hired</span>
                     )}
                   </td>
+                  <td>
+                    <button
+                      className="ghost-button compact-button"
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedClient(client);
+                      }}
+                    >
+                      View
+                    </button>
+                  </td>
                 </tr>
               );
             })}
@@ -1834,6 +1927,110 @@ function ClientDirectoryView({ data }: { data: PortalData }) {
         </table>
       </div>
       {!clients.length ? <div className="empty-state">No clients match these filters.</div> : null}
+
+      {selectedClient ? (
+        <div className="modal-backdrop">
+          <section className="modal-panel client-detail-modal" role="dialog" aria-modal="true" aria-labelledby="client-detail-title">
+            <div className="modal-header">
+              <div>
+                <h2 id="client-detail-title">{selectedClient.name}</h2>
+                <p>{selectedClient.email}</p>
+              </div>
+              <button className="ghost-button compact-button" type="button" onClick={() => setSelectedClient(null)}>
+                Close
+              </button>
+            </div>
+
+            <div className="profile-detail-grid">
+              <article className="profile-card">
+                <h3>Profile Info</h3>
+                <strong>{selectedClient.profileTitle || "Profile title not set"}</strong>
+                <p>{selectedClient.profileBio || "No profile bio yet."}</p>
+                <p className="muted">{selectedClient.profileLocation || "Location not set"} - {selectedClient.profileTimeZone || "Timezone not set"}</p>
+                <p className="muted">
+                  {selectedClient.allowDirectMessages === false
+                    ? "Direct messages are turned off."
+                    : "Direct messages are allowed."}
+                </p>
+                <div className="badge-row">
+                  {(selectedClient.profileSkills || []).map((skill) => (
+                    <span className="badge" key={skill}>{skill}</span>
+                  ))}
+                  {!selectedClient.profileSkills?.length ? <span className="badge">No skills listed</span> : null}
+                </div>
+              </article>
+
+              <article className="profile-card">
+                <h3>Client Signals</h3>
+                <div className="mini-metrics">
+                  <span><strong>{money(selectedClient.clientStats?.moneyPaid || 0)}</strong> paid</span>
+                  <span><strong>{(selectedClient.clientStats?.bidderRating || 0).toFixed(1)}</strong> rating</span>
+                  <span><strong>{money(selectedClient.clientStats?.averageBidRate || 0)}</strong> avg bid</span>
+                  <span><strong>{money(selectedClient.clientStats?.averageBonusGiven || 0)}</strong> avg bonus</span>
+                </div>
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={selectedClient.allowDirectMessages === false}
+                  onClick={() => messageSelectedClient(selectedClient)}
+                >
+                  {selectedClient.allowDirectMessages === false ? "Messages off" : "Message client"}
+                </button>
+              </article>
+            </div>
+
+            <div className="two-column">
+              <section className="panel nested-panel">
+                <div className="panel-header">
+                  <div>
+                    <h2>Client Work History</h2>
+                    <p>Recent logs tied to bidders assigned to this client.</p>
+                  </div>
+                </div>
+                <div className="payment-method-list">
+                  {selectedClientWorkLogs.map((log) => {
+                    const user = userById(data.users, log.userId);
+                    return (
+                      <div className="log-row" key={log.id}>
+                        <div>
+                          <strong>{user?.name || "Unknown bidder"}</strong>
+                          <span className="muted">{shortDate(log.workDate)} - {log.appliedJobs} applied - {log.interviewsScheduled} interviews</span>
+                        </div>
+                        {log.sheetLink ? <a href={log.sheetLink} target="_blank" rel="noreferrer">Sheet</a> : null}
+                      </div>
+                    );
+                  })}
+                  {!selectedClientWorkLogs.length ? <div className="empty-state compact">No visible work history yet.</div> : null}
+                </div>
+              </section>
+
+              <section className="panel nested-panel">
+                <div className="panel-header">
+                  <div>
+                    <h2>Payment History</h2>
+                    <p>Recent payment records tied to assigned bidders.</p>
+                  </div>
+                </div>
+                <div className="payment-method-list">
+                  {selectedClientPayments.map((payment) => {
+                    const user = userById(data.users, payment.userId);
+                    return (
+                      <div className="payment-row" key={payment.id}>
+                        <div>
+                          <strong>{money(payment.amount)} - {titleCase(payment.status)}</strong>
+                          <span className="muted">{user?.name || "Unknown bidder"} - {shortDate(payment.scheduledDate)}</span>
+                        </div>
+                        {payment.paymentLink ? <a href={payment.paymentLink} target="_blank" rel="noreferrer">Receipt</a> : null}
+                      </div>
+                    );
+                  })}
+                  {!selectedClientPayments.length ? <div className="empty-state compact">No visible payment history yet.</div> : null}
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -3608,12 +3805,14 @@ function ChatView({
   notificationsEnabled,
   onEnableNotifications,
   onSend,
+  requestedRecipientId,
 }: {
   data: PortalData;
   busy: boolean;
   notificationsEnabled: boolean;
   onEnableNotifications: () => Promise<void>;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  requestedRecipientId: string;
 }) {
   const [body, setBody] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachmentDraft[]>([]);
@@ -3621,6 +3820,7 @@ function ChatView({
   const [editingMessageId, setEditingMessageId] = useState("");
   const [editBody, setEditBody] = useState("");
   const [selectedConversationId, setSelectedConversationId] = useState("");
+  const [readReceipts, setReadReceipts] = useState<Record<string, string>>(() => loadChatReadReceipts(data.currentUser.id));
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const currentUser = data.currentUser;
@@ -3631,22 +3831,48 @@ function ChatView({
   [currentUser, ...data.users, ...(data.chatContacts || [])].forEach((user) => {
     membersById.set(user.id, user);
   });
-  const contactUsers = (data.chatContacts || []).filter((user) => user.id !== currentUser.id);
+  const contactUsers = (data.chatContacts || []).filter((user) => {
+    if (user.id === currentUser.id) {
+      return false;
+    }
+
+    const conversationId = inboxConversationId(currentUser.id, user.id);
+    const hasConversation = data.chatMessages.some((message) => chatConversationIdForMessage(message) === conversationId);
+    const isRequestedRecipient = user.id === requestedRecipientId;
+
+    if (currentUser.role === "bidder" && !isClientRole(user.role)) {
+      return false;
+    }
+
+    return hasConversation || isRequestedRecipient;
+  });
   const directConversations = contactUsers.map((contact) => {
     const conversationId = inboxConversationId(currentUser.id, contact.id);
     const messages = data.chatMessages.filter((message) => chatConversationIdForMessage(message) === conversationId);
     const latestMessage = messages[messages.length - 1];
+    const unreadCount = messages.filter(
+      (message) =>
+        message.userId !== currentUser.id &&
+        !message.deletedAt &&
+        (!readReceipts[conversationId] || message.createdAt > readReceipts[conversationId])
+    ).length;
 
     return {
       id: `direct:${contact.id}`,
       conversationId,
       recipientId: contact.id,
+      recipientAllowsContact: contact.allowDirectMessages !== false,
       title: contact.name,
       subtitle: `${roleLabel(contact.role)} - ${contact.email}`,
       preview: latestMessage?.deletedAt ? "Message deleted" : latestMessage?.body || latestMessage?.attachments?.[0]?.name || "No messages yet",
       avatar: initialsForName(contact.name),
+      unreadCount,
       monitored: false,
     };
+  }).sort((left, right) => {
+    if (left.recipientId === requestedRecipientId) return -1;
+    if (right.recipientId === requestedRecipientId) return 1;
+    return right.unreadCount - left.unreadCount;
   });
   const directConversationIds = new Set(directConversations.map((conversation) => conversation.conversationId));
   const monitoredConversations = isSuperAdminRole(currentUser.role)
@@ -3664,10 +3890,12 @@ function ChatView({
             id: `monitor:${conversationId}`,
             conversationId,
             recipientId: "",
+            recipientAllowsContact: false,
             title: participantNames.join(" / ") || "Monitored conversation",
             subtitle: "Monitored conversation",
             preview: latestMessage?.deletedAt ? "Message deleted" : latestMessage?.body || latestMessage?.attachments?.[0]?.name || "No messages yet",
             avatar: "SA",
+            unreadCount: 0,
             monitored: true,
           };
         })
@@ -3675,19 +3903,49 @@ function ChatView({
   const conversations = [...directConversations, ...monitoredConversations];
   const activeConversation =
     conversations.find((conversation) => conversation.id === selectedConversationId) || conversations[0];
-  const activeMessages = activeConversation
-    ? data.chatMessages.filter((message) => chatConversationIdForMessage(message) === activeConversation.conversationId)
-    : [];
+  const activeConversationId = activeConversation?.conversationId || "";
+  const activeMessages = useMemo(
+    () =>
+      activeConversationId
+        ? data.chatMessages.filter((message) => chatConversationIdForMessage(message) === activeConversationId)
+        : [],
+    [activeConversationId, data.chatMessages]
+  );
   const canSubmit =
     canSend &&
     Boolean(activeConversation) &&
     !activeConversation.monitored &&
+    activeConversation.recipientAllowsContact &&
     Boolean(activeConversation.recipientId) &&
     Boolean(body.trim() || attachments.length);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
   }, [activeConversation?.id, activeMessages.length]);
+
+  useEffect(() => {
+    const conversationId = activeConversationId;
+    if (!conversationId || !activeMessages.length) {
+      return;
+    }
+
+    const latestIncomingMessage = [...activeMessages]
+      .reverse()
+      .find((message) => message.userId !== currentUser.id && !message.deletedAt);
+    if (!latestIncomingMessage || readReceipts[conversationId] === latestIncomingMessage.createdAt) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setReadReceipts((current) => {
+        const nextReceipts = { ...current, [conversationId]: latestIncomingMessage.createdAt };
+        saveChatReadReceipts(currentUser.id, nextReceipts);
+        return nextReceipts;
+      });
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeConversationId, activeMessages, currentUser.id, readReceipts]);
 
   function selectConversation(conversationId: string) {
     setSelectedConversationId(conversationId);
@@ -3845,6 +4103,7 @@ function ChatView({
                 <strong>{conversation.title}</strong>
                 <small>{conversation.preview}</small>
               </span>
+              {conversation.unreadCount ? <span className="conversation-badge">{conversation.unreadCount}</span> : null}
             </button>
           ))}
           {!conversations.length ? (
@@ -3938,7 +4197,7 @@ function ChatView({
           <button
             className="ghost-button compact-button"
             type="button"
-            disabled={!canSend || !activeConversation || activeConversation.monitored || attachments.length >= chatAttachmentLimit}
+            disabled={!canSend || !activeConversation || activeConversation.monitored || !activeConversation.recipientAllowsContact || attachments.length >= chatAttachmentLimit}
             onClick={() => fileInputRef.current?.click()}
           >
             Attach
@@ -3949,7 +4208,7 @@ function ChatView({
             value={body}
             onChange={(event) => setBody(event.target.value)}
             onKeyDown={handleComposerKeyDown}
-            disabled={!canSend || !activeConversation || activeConversation.monitored}
+            disabled={!canSend || !activeConversation || activeConversation.monitored || !activeConversation.recipientAllowsContact}
             required={!attachments.length}
           />
           <button className="primary-button" type="submit" disabled={busy || !canSubmit}>
@@ -3962,11 +4221,14 @@ function ChatView({
           className="file-input"
           type="file"
           multiple
-          disabled={!canSend || !activeConversation || activeConversation.monitored}
+          disabled={!canSend || !activeConversation || activeConversation.monitored || !activeConversation.recipientAllowsContact}
           onChange={handleFileSelection}
         />
         {!canSend ? <span className="muted">Approval is required before sending inbox messages.</span> : null}
         {activeConversation?.monitored ? <span className="muted">Monitoring conversation. Select a direct inbox contact to send.</span> : null}
+        {activeConversation && !activeConversation.monitored && !activeConversation.recipientAllowsContact ? (
+          <span className="muted">This member is not accepting direct messages.</span>
+        ) : null}
         {!activeConversation && canSend ? <span className="muted">No approved inbox contacts are available yet.</span> : null}
         {chatError ? <div className="error full">{chatError}</div> : null}
       </form>

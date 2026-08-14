@@ -17,6 +17,7 @@ export type PortalUser = {
   profileLocation?: string;
   profileTimeZone?: string;
   profileCompletedAt?: string;
+  allowDirectMessages?: boolean;
   clientRating?: number;
   clientStats?: {
     assignedBidderCount: number;

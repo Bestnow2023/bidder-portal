@@ -320,13 +320,13 @@ button:disabled {
 
 .portal-nav-inner {
   width: min(100%, 1720px);
-  min-height: 76px;
+  min-height: 60px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 18px;
+  gap: 14px;
   align-items: center;
   margin: 0 auto;
-  padding: 12px 28px;
+  padding: 8px 28px;
 }
 
 .portal-brand {
@@ -341,7 +341,7 @@ button:disabled {
 }
 
 .sidebar-title span,
-.user-card span,
+.portal-user span,
 .mini-label {
   color: var(--muted);
   font-size: 12px;
@@ -357,16 +357,16 @@ button:disabled {
 
 .nav-button {
   width: auto;
-  min-height: 42px;
+  min-height: 34px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 999px;
   background: transparent;
   color: #33413f;
-  padding: 10px 12px;
+  padding: 7px 12px;
   text-align: left;
   font-weight: 800;
   cursor: pointer;
@@ -396,37 +396,28 @@ button:disabled {
 }
 
 .portal-account {
-  min-width: 260px;
-}
-
-.user-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 5px 10px;
+  display: flex;
+  gap: 8px;
   align-items: center;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(242, 247, 245, 0.86);
-  box-shadow: 0 12px 30px rgba(18, 32, 30, 0.05);
 }
 
-.user-card strong,
-.user-card span {
+.portal-user {
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.portal-user strong {
+  max-width: 170px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.user-card .badge-row {
-  grid-column: 1 / -1;
-}
-
-.user-card .ghost-button {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  min-height: 34px;
-  padding: 7px 10px;
+.portal-account .ghost-button {
+  min-height: 32px;
+  padding: 6px 10px;
 }
 
 .content {
@@ -434,7 +425,7 @@ button:disabled {
   width: 100%;
   max-width: 1720px;
   margin: 0 auto;
-  padding: 112px 28px 28px;
+  padding: 82px 28px 28px;
 }
 
 .topbar {
@@ -637,6 +628,10 @@ tbody tr:hover {
   background: rgba(242, 247, 245, 0.72);
 }
 
+.clickable-row {
+  cursor: pointer;
+}
+
 td > strong {
   display: block;
 }
@@ -721,6 +716,41 @@ td > strong {
   margin: 0;
   color: var(--muted);
   line-height: 1.55;
+}
+
+.profile-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.7fr);
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.profile-card h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.mini-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mini-metrics span {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(242, 247, 245, 0.7);
+  padding: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mini-metrics strong {
+  color: var(--foreground);
+  font-size: 18px;
 }
 
 .empty-state {
@@ -873,7 +903,7 @@ td > strong {
   width: 100%;
   min-height: 68px;
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   border: 1px solid transparent;
@@ -914,6 +944,18 @@ td > strong {
   background: var(--accent);
   color: #ffffff;
   font-size: 13px;
+  font-weight: 900;
+}
+
+.conversation-badge {
+  min-width: 24px;
+  min-height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 12px;
   font-weight: 900;
 }
 
@@ -1152,6 +1194,15 @@ td > strong {
   padding: 20px;
 }
 
+.client-detail-modal {
+  width: min(100%, 1080px);
+}
+
+.nested-panel {
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.72);
+}
+
 .developer-note {
   border-left: 4px solid var(--blue);
   border-radius: 8px;
@@ -1180,10 +1231,11 @@ td > strong {
 
   .portal-account {
     min-width: 0;
+    justify-content: space-between;
   }
 
   .content {
-    padding-top: 214px;
+    padding-top: 154px;
   }
 
   .metric-grid {
@@ -1198,7 +1250,7 @@ td > strong {
   }
 
   .content {
-    padding-top: 226px;
+    padding-top: 166px;
   }
 
   .portal-nav-inner {
@@ -1216,13 +1268,12 @@ td > strong {
     flex: 0 0 auto;
   }
 
-  .user-card {
-    grid-template-columns: 1fr;
+  .portal-user {
+    flex-wrap: wrap;
   }
 
-  .user-card .ghost-button {
-    grid-column: 1;
-    grid-row: auto;
+  .portal-user strong {
+    max-width: 150px;
   }
 
   .login-story,
@@ -1237,7 +1288,8 @@ td > strong {
 
   .metric-grid,
   .form-grid,
-  .filter-bar {
+  .filter-bar,
+  .profile-detail-grid {
     grid-template-columns: 1fr;
   }
 
