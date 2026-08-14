@@ -79,6 +79,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Create Cryptomus invoice/);
   assert.match(portalApp, /Credit balance/);
   assert.match(portalApp, /Open invoice/);
+  assert.match(portalApp, /Credit notifications/);
+  assert.match(portalApp, /Add client credit/);
+  assert.match(portalApp, /Manual credit amount/);
   assert.match(portalApp, /Edit Payment/);
   assert.match(portalApp, /Edit User/);
   assert.match(portalApp, /Edit Bidder Settings/);
@@ -115,6 +118,10 @@ test("declares the requested frontend records", async () => {
     "Payment History",
     "Credit Wallet",
     "Create Cryptomus invoice",
+    "Credit notifications",
+    "Add client credit",
+    "Manual credit amount",
+    "Mark read",
     "Escrow History",
     "Save paid payment",
     "Edit Payment",
@@ -144,6 +151,8 @@ test("declares the requested frontend records", async () => {
     "signUp",
     "saveProfile",
     "createCreditDeposit",
+    "addManualCredit",
+    "markNotificationsRead",
     "savePaymentMethod",
     "saveWorkLog",
     "deleteWorkLog",
@@ -175,6 +184,9 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /EscrowTable/);
   assert.match(portalApp, /DepositList/);
   assert.match(portalApp, /DepositRecord/);
+  assert.match(portalApp, /PortalNotification/);
+  assert.match(portalApp, /adminNotifications/);
+  assert.match(portalApp, /unreadAdminNotifications/);
   assert.match(portalApp, /creditBalanceForClient/);
   assert.match(portalApp, /creditsDepositedForClient/);
   assert.match(portalApp, /isSuperAdminRole/);
@@ -205,6 +217,8 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /aria-haspopup="menu"/);
   assert.match(portalApp, /fixed z-50/);
   assert.match(portalApp, /portal-nav/);
+  assert.match(portalApp, /notification-menu-wrap/);
+  assert.match(portalApp, /manual-credit-box/);
   assert.match(portalApp, /hover:bg-white\/80/);
   assert.match(portalApp, /auth-logo/);
   assert.match(portalApp, /sidebar-logo/);

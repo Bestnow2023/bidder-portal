@@ -13,6 +13,7 @@ import type {
   PaymentRecord,
   PaymentWeekday,
   PortalData,
+  PortalNotification,
   PortalUser,
   Role,
   UserStatus,
@@ -850,6 +851,7 @@ export default function PortalApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
+  const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [portalNavVisible, setPortalNavVisible] = useState(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState(() =>
     typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted"
@@ -1416,6 +1418,8 @@ export default function PortalApp() {
   const canViewManaged = canViewManagedRecords(currentUser.role);
   const availableViews = viewsForUser(currentUser);
   const safeView = availableViews.includes(activeView) ? activeView : availableViews[0];
+  const adminNotifications = isSuperAdmin ? data.notifications || [] : [];
+  const unreadAdminNotifications = adminNotifications.filter((notification) => !notification.readAt).length;
 
   function navigateToView(event: ReactMouseEvent<HTMLAnchorElement>, view: PortalView) {
     event.preventDefault();
@@ -1443,6 +1447,12 @@ export default function PortalApp() {
     setActiveView("chat");
     setChatUnreadCount(0);
     setPortalNavVisible(true);
+  }
+
+  async function markAdminNotificationsRead(notificationIds?: string[]) {
+    await postAction("markNotificationsRead", {
+      notificationIds: notificationIds?.length ? notificationIds : adminNotifications.filter((notification) => !notification.readAt).map((notification) => notification.id),
+    });
   }
 
   return (
@@ -1476,6 +1486,16 @@ export default function PortalApp() {
           </nav>
 
           <div className="portal-account">
+            {isSuperAdmin ? (
+              <AdminNotificationMenu
+                notifications={adminNotifications}
+                unreadCount={unreadAdminNotifications}
+                open={notificationMenuOpen}
+                busy={busy}
+                onToggle={() => setNotificationMenuOpen((open) => !open)}
+                onMarkRead={markAdminNotificationsRead}
+              />
+            ) : null}
             <div className="portal-user">
               <strong>{currentUser.name}</strong>
               <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
@@ -1528,6 +1548,71 @@ export default function PortalApp() {
         )}
       </section>
     </main>
+  );
+}
+
+function AdminNotificationMenu({
+  notifications,
+  unreadCount,
+  open,
+  busy,
+  onToggle,
+  onMarkRead,
+}: {
+  notifications: PortalNotification[];
+  unreadCount: number;
+  open: boolean;
+  busy: boolean;
+  onToggle: () => void;
+  onMarkRead: (notificationIds?: string[]) => Promise<void>;
+}) {
+  const latestNotifications = notifications.slice(0, 8);
+
+  return (
+    <div className="notification-menu-wrap">
+      <button
+        className={`notification-trigger ${unreadCount ? "has-unread" : ""}`}
+        type="button"
+        aria-label="Credit notifications"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <span>Credits</span>
+        {unreadCount ? <span className="nav-badge">{unreadCount}</span> : null}
+      </button>
+      {open ? (
+        <div className="notification-popover" role="menu">
+          <div className="notification-popover-header">
+            <div>
+              <strong>Credit notifications</strong>
+              <span>{unreadCount ? `${unreadCount} unread` : "All caught up"}</span>
+            </div>
+            <button className="ghost-button compact-button" type="button" disabled={busy || !unreadCount} onClick={() => void onMarkRead()}>
+              Mark read
+            </button>
+          </div>
+          <div className="notification-list">
+            {latestNotifications.map((notification) => (
+              <button
+                className={`notification-item ${notification.readAt ? "" : "unread"}`}
+                key={notification.id}
+                type="button"
+                onClick={() => {
+                  if (!notification.readAt) {
+                    void onMarkRead([notification.id]);
+                  }
+                }}
+              >
+                <strong>{notification.title}</strong>
+                <span>{notification.body}</span>
+                <small>{dateTime(notification.createdAt)}</small>
+              </button>
+            ))}
+            {!latestNotifications.length ? <div className="empty-state compact">No credit notifications yet.</div> : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -3340,6 +3425,11 @@ function AdminPayments({
     toCurrency: "USDT",
     network: "tron",
   });
+  const [manualCreditDraft, setManualCreditDraft] = useState({
+    amount: "",
+    referenceLink: "",
+    memo: "",
+  });
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
 
   const selectedUser = payableUsers.find((user) => user.id === draft.userId);
@@ -3431,6 +3521,19 @@ function AdminPayments({
     });
     if (nextData) {
       setDepositDraft({ ...depositDraft, amount: "" });
+    }
+  }
+
+  async function submitManualCredit(event: FormEvent) {
+    event.preventDefault();
+    const nextData = await onAction("addManualCredit", {
+      clientId: depositClientId,
+      amount: Number(manualCreditDraft.amount),
+      referenceLink: manualCreditDraft.referenceLink,
+      memo: manualCreditDraft.memo,
+    });
+    if (nextData) {
+      setManualCreditDraft({ amount: "", referenceLink: "", memo: "" });
     }
   }
 
@@ -3572,6 +3675,46 @@ function AdminPayments({
               </button>
             </div>
           </form>
+          {isSuperAdminRole(data.currentUser.role) ? (
+            <div className="manual-credit-box">
+              <div className="section-heading compact-heading">
+                <div>
+                  <h3>Add client credit</h3>
+                  <p>Super admin can add credits directly without creating a Cryptomus invoice.</p>
+                </div>
+              </div>
+              <form className="form-grid" onSubmit={submitManualCredit}>
+                <label className="field">
+                  <span>Manual credit amount</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={manualCreditDraft.amount}
+                    onChange={(event) => setManualCreditDraft({ ...manualCreditDraft, amount: event.target.value })}
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>Reference link</span>
+                  <input
+                    value={manualCreditDraft.referenceLink}
+                    onChange={(event) => setManualCreditDraft({ ...manualCreditDraft, referenceLink: event.target.value })}
+                    placeholder="Optional receipt or note link"
+                  />
+                </label>
+                <label className="field full">
+                  <span>Memo</span>
+                  <textarea value={manualCreditDraft.memo} onChange={(event) => setManualCreditDraft({ ...manualCreditDraft, memo: event.target.value })} />
+                </label>
+                <div className="actions full">
+                  <button className="secondary-button" type="submit" disabled={busy || !depositClientId}>
+                    Add credit
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : null}
           <DepositList deposits={(data.deposits || []).filter((deposit) => !depositClientId || deposit.clientId === depositClientId).slice(0, 5)} users={data.users} />
         </section>
 
@@ -3919,13 +4062,15 @@ function DepositList({ deposits, users }: { deposits: DepositRecord[]; users: Po
     <div className="payment-method-list" style={{ marginTop: 16 }}>
       {deposits.map((deposit) => {
         const client = userById(users, deposit.clientId);
+        const sourceLabel = deposit.provider === "manual" ? "manual credit" : "Cryptomus deposit";
         return (
           <div className="payment-row" key={deposit.id}>
             <div>
               <strong>{money(deposit.creditAmount)} credits</strong>
               <span className="muted">
-                {client?.name || "Client"} - {money(deposit.amount)} deposit - {deposit.providerStatus || deposit.status}
+                {client?.name || "Client"} - {money(deposit.amount)} {sourceLabel} - {deposit.providerStatus || deposit.status}
               </span>
+              {deposit.memo ? <span className="table-subtext">{deposit.memo}</span> : null}
             </div>
             <div className="actions">
               <span className={`badge ${deposit.status === "paid" ? "paid" : deposit.status === "failed" ? "paused" : "pending"}`}>

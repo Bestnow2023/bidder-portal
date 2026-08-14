@@ -91,7 +91,7 @@ export type PaymentRecord = {
 export type DepositRecord = {
   id: string;
   clientId: string;
-  provider: "cryptomus";
+  provider: "cryptomus" | "manual";
   orderId: string;
   invoiceUuid: string;
   amount: number;
@@ -106,9 +106,25 @@ export type DepositRecord = {
   paymentAmountUsd: number;
   merchantAmount: number;
   txid: string;
+  memo?: string;
   createdAt: string;
   updatedAt: string;
   paidAt: string;
+};
+
+export type PortalNotification = {
+  id: string;
+  recipientRole: "super_admin";
+  type: "client_credit_paid";
+  title: string;
+  body: string;
+  clientId: string;
+  relatedDepositId: string;
+  amount: number;
+  creditAmount: number;
+  readAt: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type EscrowRecord = {
@@ -159,6 +175,7 @@ export type PortalData = {
   payments: PaymentRecord[];
   escrows: EscrowRecord[];
   deposits: DepositRecord[];
+  notifications: PortalNotification[];
   chatContacts?: PortalUser[];
   chatMessages: ChatMessage[];
 };
