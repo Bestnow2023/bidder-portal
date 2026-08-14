@@ -569,9 +569,41 @@ td {
   padding: 22px;
 }
 
+.empty-state.compact {
+  min-height: 112px;
+}
+
 .payment-method-list {
   display: grid;
   gap: 10px;
+}
+
+.payment-side-column {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.payday-alert {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #f0b6ae;
+  border-radius: 8px;
+  background: #fff6f4;
+  box-shadow: 0 10px 34px rgba(18, 32, 30, 0.05);
+}
+
+.payday-alert h2 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.payday-alert p {
+  margin: 0;
+  color: #7b3a32;
+  font-weight: 700;
 }
 
 .method-row,
@@ -585,6 +617,11 @@ td {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-soft);
+}
+
+.payment-row.urgent {
+  border-color: #f0b6ae;
+  background: #fffaf8;
 }
 
 .method-row strong,

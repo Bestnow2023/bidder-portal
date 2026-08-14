@@ -16,6 +16,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Sign up/);
   assert.match(portalApp, /Daily Bidder Log/);
   assert.match(portalApp, /Payment History/);
+  assert.match(portalApp, /Payday Reminder/);
+  assert.match(portalApp, /Upcoming Payments/);
   assert.match(portalApp, /Group Chat/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.doesNotMatch(`${page}\n${layout}\n${portalApp}`, /codex-preview|Your site is taking shape/i);

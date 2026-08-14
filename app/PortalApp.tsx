@@ -112,6 +112,44 @@ function userById(users: PortalUser[], userId: string) {
   return users.find((user) => user.id === userId);
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function dateAtMidnight(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+function daysUntil(value: string) {
+  const target = dateAtMidnight(value);
+  const current = dateAtMidnight(today());
+  if (!target || !current) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return Math.round((target.getTime() - current.getTime()) / DAY_MS);
+}
+
+function paymentTimingLabel(dayCount: number) {
+  if (dayCount < 0) return `${Math.abs(dayCount)} day${Math.abs(dayCount) === 1 ? "" : "s"} overdue`;
+  if (dayCount === 0) return "Due today";
+  if (dayCount === 1) return "Due tomorrow";
+  return `In ${dayCount} days`;
+}
+
+type UpcomingPaymentItem = {
+  id: string;
+  user?: PortalUser;
+  scheduledDate: string;
+  amount: number;
+  daysUntil: number;
+  description: string;
+  sourceLabel: string;
+};
+
 export default function PortalApp() {
   const [data, setData] = useState<PortalData | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>(isLiveMode ? "signUp" : "signIn");
@@ -962,6 +1000,41 @@ function AdminPayments({
   const suggestedAmount = selectedUser
     ? Math.max(0, estimateForUser(selectedUser, data.workLogs) - paidForUser(selectedUser.id, data.payments))
     : 0;
+  const scheduledPaymentItems: UpcomingPaymentItem[] = data.payments
+    .filter((payment) => payment.status === "scheduled")
+    .map((payment) => {
+      const user = userById(data.users, payment.userId);
+      return {
+        id: payment.id,
+        user,
+        scheduledDate: payment.scheduledDate,
+        amount: payment.amount,
+        daysUntil: daysUntil(payment.scheduledDate),
+        description: `${shortDate(payment.periodStart)} - ${shortDate(payment.periodEnd)}`,
+        sourceLabel: "Scheduled record",
+      };
+    });
+  const scheduledKeys = new Set(
+    scheduledPaymentItems.map((item) => `${item.user?.id || "unknown"}:${item.scheduledDate}`)
+  );
+  const paydayItems: UpcomingPaymentItem[] = payableUsers
+    .filter((user) => user.nextPaymentDate && !scheduledKeys.has(`${user.id}:${user.nextPaymentDate}`))
+    .map((user) => ({
+      id: `payday-${user.id}`,
+      user,
+      scheduledDate: user.nextPaymentDate,
+      amount: Math.max(0, estimateForUser(user, data.workLogs) - paidForUser(user.id, data.payments)),
+      daysUntil: daysUntil(user.nextPaymentDate),
+      description: user.paymentSchedule || "From next payment date",
+      sourceLabel: "Needs payment record",
+    }));
+  const upcomingPayments = [...scheduledPaymentItems, ...paydayItems]
+    .filter((item) => item.daysUntil >= 0)
+    .sort((left, right) => left.daysUntil - right.daysUntil || left.scheduledDate.localeCompare(right.scheduledDate))
+    .slice(0, 10);
+  const paydayReminders = [...scheduledPaymentItems, ...paydayItems]
+    .filter((item) => item.daysUntil <= 1)
+    .sort((left, right) => left.daysUntil - right.daysUntil || left.scheduledDate.localeCompare(right.scheduledDate));
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -982,6 +1055,8 @@ function AdminPayments({
 
   return (
     <div className="two-column">
+      <PaydayReminder reminders={paydayReminders} />
+
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -1038,29 +1113,33 @@ function AdminPayments({
         </form>
       </section>
 
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2>Payment Methods</h2>
-            <p>Saved payout destinations from non-admin users.</p>
+      <div className="payment-side-column">
+        <UpcomingPaymentsPanel payments={upcomingPayments} />
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Payment Methods</h2>
+              <p>Saved payout destinations from non-admin users.</p>
+            </div>
           </div>
-        </div>
-        <div className="payment-method-list">
-          {payableUsers.map((user) => {
-            const methods = data.paymentMethods.filter((method) => method.userId === user.id);
-            const primary = methods.find((method) => method.isPrimary) || methods[0];
-            return (
-              <div className="method-row" key={user.id}>
-                <div>
-                  <strong>{user.name}</strong>
-                  <span className="muted">{primary ? `${primary.method}: ${primary.address}` : "No method saved"}</span>
+          <div className="payment-method-list">
+            {payableUsers.map((user) => {
+              const methods = data.paymentMethods.filter((method) => method.userId === user.id);
+              const primary = methods.find((method) => method.isPrimary) || methods[0];
+              return (
+                <div className="method-row" key={user.id}>
+                  <div>
+                    <strong>{user.name}</strong>
+                    <span className="muted">{primary ? `${primary.method}: ${primary.address}` : "No method saved"}</span>
+                  </div>
+                  <span className={`badge ${user.status}`}>{statusLabel(user.status)}</span>
                 </div>
-                <span className={`badge ${user.status}`}>{statusLabel(user.status)}</span>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+              );
+            })}
+          </div>
+        </section>
+      </div>
 
       <section className="panel" style={{ gridColumn: "1 / -1" }}>
         <div className="panel-header">
@@ -1072,6 +1151,70 @@ function AdminPayments({
         <PaymentTable payments={data.payments} users={data.users} />
       </section>
     </div>
+  );
+}
+
+function PaydayReminder({ reminders }: { reminders: UpcomingPaymentItem[] }) {
+  if (!reminders.length) {
+    return null;
+  }
+
+  return (
+    <section className="payday-alert" style={{ gridColumn: "1 / -1" }}>
+      <div>
+        <h2>Payday Reminder</h2>
+        <p>These payouts are due today, tomorrow, or already overdue.</p>
+      </div>
+      <div className="payment-method-list">
+        {reminders.map((item) => (
+          <div className="payment-row urgent" key={item.id}>
+            <div>
+              <strong>{item.user?.name || "Unknown user"}</strong>
+              <span className="muted">
+                {paymentTimingLabel(item.daysUntil)} - {shortDate(item.scheduledDate)} - {item.sourceLabel}
+              </span>
+            </div>
+            <div>
+              <strong>{money(item.amount)}</strong>
+              <span className="mini-label">{item.description}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function UpcomingPaymentsPanel({ payments }: { payments: UpcomingPaymentItem[] }) {
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <div>
+          <h2>Upcoming Payments</h2>
+          <p>Scheduled payouts and upcoming next-payment dates.</p>
+        </div>
+      </div>
+      {payments.length ? (
+        <div className="payment-method-list">
+          {payments.map((item) => (
+            <div className="payment-row" key={item.id}>
+              <div>
+                <strong>{item.user?.name || "Unknown user"}</strong>
+                <span className="muted">
+                  {paymentTimingLabel(item.daysUntil)} - {shortDate(item.scheduledDate)}
+                </span>
+              </div>
+              <div>
+                <strong>{money(item.amount)}</strong>
+                <span className="mini-label">{item.sourceLabel}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state compact">No upcoming scheduled payments.</div>
+      )}
+    </section>
   );
 }
 
