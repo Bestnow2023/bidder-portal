@@ -26,8 +26,10 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Payday Reminder/);
   assert.match(portalApp, /Upcoming Payments/);
   assert.match(portalApp, /Group Chat/);
+  assert.match(portalApp, /Bidder Group/);
   assert.match(portalApp, /Enable notifications/);
-  assert.match(portalApp, /Attach file/);
+  assert.match(portalApp, /Attach/);
+  assert.match(portalApp, /More/);
   assert.match(portalApp, /Save edit/);
   assert.match(portalApp, /Save changes/);
   assert.match(portalApp, /Forgot password/);
@@ -73,6 +75,8 @@ test("declares the requested frontend records", async () => {
     "Actions",
     "Payment link",
     "Group Chat",
+    "Bidder Group",
+    "More",
     "Local ",
     "Admin ",
   ]) {
@@ -114,6 +118,9 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /sessionToken/);
   assert.match(portalApp, /workLogId/);
   assert.match(portalApp, /ActionMenu/);
+  assert.match(portalApp, /telegram-chat-title/);
+  assert.match(portalApp, /composer-shell/);
+  assert.match(portalApp, /message-row/);
   assert.match(portalApp, /verificationPendingEmail/);
   assert.match(portalApp, /verificationSuccessEmail/);
   assert.match(portalApp, /paymentFrequency/);

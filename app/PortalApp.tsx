@@ -2652,11 +2652,19 @@ function ChatView({
   const [editingMessageId, setEditingMessageId] = useState("");
   const [editBody, setEditBody] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const currentUser = data.currentUser;
   const canSend = currentUser.status === "approved";
   const userTimeZone = browserTimeZone();
   const notificationSupported = typeof window !== "undefined" && "Notification" in window;
   const canSubmit = canSend && Boolean(body.trim() || attachments.length);
+  const activeParticipants = new Set(
+    data.chatMessages.filter((message) => !message.deletedAt).map((message) => message.userId)
+  ).size;
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [data.chatMessages.length]);
 
   async function sendMessage() {
     if (!canSubmit || busy) {
@@ -2769,7 +2777,13 @@ function ChatView({
   return (
     <section className="panel chat-panel">
       <div className="chat-toolbar">
-        <span className="badge bidder">{data.chatMessages.length} messages</span>
+        <div className="telegram-chat-title">
+          <div className="telegram-avatar">BP</div>
+          <div>
+            <h2>Bidder Group</h2>
+            <p>{activeParticipants || 1} participants - {data.chatMessages.length} messages</p>
+          </div>
+        </div>
         {notificationSupported ? (
           <button
             className="ghost-button"
@@ -2791,70 +2805,64 @@ function ChatView({
           const messageAttachments = message.attachments || [];
 
           return (
-            <div className={`message ${isMine ? "mine" : ""} ${deleted ? "deleted" : ""}`} key={message.id}>
-              <div className="message-meta">
-                <span>{message.authorName} - {roleLabel(message.authorRole)}</span>
-                <span className="message-times">
+            <div className={`message-row ${isMine ? "mine" : ""}`} key={message.id}>
+              <div className={`message ${isMine ? "mine" : ""} ${deleted ? "deleted" : ""}`}>
+                {!isMine ? (
+                  <div className="message-author">
+                    <strong>{message.authorName}</strong>
+                    <span>{roleLabel(message.authorRole)}</span>
+                  </div>
+                ) : null}
+
+                {deleted ? (
+                  <p className="muted">Message deleted</p>
+                ) : isEditing ? (
+                  <div className="message-edit">
+                    <textarea
+                      value={editBody}
+                      onChange={(event) => setEditBody(event.target.value)}
+                      onKeyDown={(event) => handleEditKeyDown(event, message)}
+                      autoFocus
+                    />
+                    <div className="actions">
+                      <button className="primary-button" type="button" disabled={busy} onClick={() => void saveEditedMessage(message)}>
+                        Save edit
+                      </button>
+                      <button className="ghost-button" type="button" onClick={cancelEditing}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {message.body ? <p>{message.body}</p> : null}
+                    <ChatAttachments attachments={messageAttachments} />
+                  </>
+                )}
+
+                <div className="message-footer">
                   <span>Local {dateTimeInZone(message.createdAt, message.authorTimeZone || userTimeZone)}</span>
                   <span>Admin {dateTimeInZone(message.createdAt, adminTimeZone)}</span>
-                </span>
+                  {message.editedAt ? <span>Edited</span> : null}
+                  {canManage ? (
+                    <ActionMenu
+                      label="More"
+                      items={[
+                        { label: "Edit", onClick: () => startEditing(message) },
+                        { label: "Delete", danger: true, disabled: busy, onClick: () => void deleteMessage(message) },
+                      ]}
+                    />
+                  ) : null}
+                </div>
               </div>
-
-              {deleted ? (
-                <p className="muted">Message deleted</p>
-              ) : isEditing ? (
-                <div className="message-edit">
-                  <textarea
-                    value={editBody}
-                    onChange={(event) => setEditBody(event.target.value)}
-                    onKeyDown={(event) => handleEditKeyDown(event, message)}
-                    autoFocus
-                  />
-                  <div className="actions">
-                    <button className="primary-button" type="button" disabled={busy} onClick={() => void saveEditedMessage(message)}>
-                      Save edit
-                    </button>
-                    <button className="ghost-button" type="button" onClick={cancelEditing}>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {message.body ? <p>{message.body}</p> : null}
-                  <ChatAttachments attachments={messageAttachments} />
-                  {message.editedAt ? <span className="edited-label">Edited</span> : null}
-                </>
-              )}
-
-              {canManage ? (
-                <div className="message-actions">
-                  <button className="ghost-button" type="button" onClick={() => startEditing(message)}>
-                    Edit
-                  </button>
-                  <button className="danger-button" type="button" disabled={busy} onClick={() => void deleteMessage(message)}>
-                    Delete
-                  </button>
-                </div>
-              ) : null}
             </div>
           );
         })}
         {!data.chatMessages.length ? <div className="empty-state">No messages yet.</div> : null}
+        <div ref={messagesEndRef} />
       </div>
 
       <form className="chat-composer" onSubmit={submit}>
-        <label className="field full">
-          <span>Message</span>
-          <textarea
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-            onKeyDown={handleComposerKeyDown}
-            disabled={!canSend}
-            required={!attachments.length}
-          />
-        </label>
-
         {attachments.length ? (
           <div className="attachment-preview-list">
             {attachments.map((attachment, index) => (
@@ -2868,6 +2876,29 @@ function ChatView({
           </div>
         ) : null}
 
+        <div className="composer-shell">
+          <button
+            className="ghost-button compact-button"
+            type="button"
+            disabled={!canSend || attachments.length >= chatAttachmentLimit}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Attach
+          </button>
+          <textarea
+            aria-label="Message"
+            placeholder="Message"
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
+            disabled={!canSend}
+            required={!attachments.length}
+          />
+          <button className="primary-button" type="submit" disabled={busy || !canSubmit}>
+            Send
+          </button>
+        </div>
+
         <input
           ref={fileInputRef}
           className="file-input"
@@ -2876,16 +2907,7 @@ function ChatView({
           disabled={!canSend}
           onChange={handleFileSelection}
         />
-
-        <div className="actions full">
-          <button className="ghost-button" type="button" disabled={!canSend || attachments.length >= chatAttachmentLimit} onClick={() => fileInputRef.current?.click()}>
-            Attach file
-          </button>
-          <button className="primary-button" type="submit" disabled={busy || !canSubmit}>
-            Send message
-          </button>
-          {!canSend ? <span className="muted">Approval is required before sending group messages.</span> : null}
-        </div>
+        {!canSend ? <span className="muted">Approval is required before sending group messages.</span> : null}
         {chatError ? <div className="error full">{chatError}</div> : null}
       </form>
     </section>

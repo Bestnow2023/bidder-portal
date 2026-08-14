@@ -733,9 +733,10 @@ td > strong {
 
 .chat-panel {
   display: grid;
-  grid-template-rows: auto minmax(320px, 1fr) auto;
-  gap: 14px;
-  min-height: 620px;
+  grid-template-rows: auto minmax(380px, 1fr) auto;
+  gap: 0;
+  min-height: 680px;
+  overflow: hidden;
 }
 
 .chat-toolbar {
@@ -743,76 +744,120 @@ td > strong {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+}
+
+.telegram-chat-title {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.telegram-avatar {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 900;
+}
+
+.telegram-chat-title h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.telegram-chat-title p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .messages {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 8px;
   overflow: auto;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-soft);
+  padding: 16px 4px;
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(36, 89, 166, 0.08)),
+    var(--surface-soft);
+}
+
+.message-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.message-row.mine {
+  justify-content: flex-end;
 }
 
 .message {
-  max-width: 76%;
+  max-width: min(76%, 720px);
   display: grid;
-  gap: 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  gap: 6px;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  border-radius: 8px 8px 8px 2px;
   background: #ffffff;
-  padding: 11px;
+  padding: 9px 10px 7px;
+  box-shadow: 0 4px 18px rgba(18, 32, 30, 0.06);
 }
 
 .message.mine {
-  justify-self: end;
   border-color: rgba(15, 118, 110, 0.22);
-  background: #edf7f4;
+  border-radius: 8px 8px 2px 8px;
+  background: #dff4ee;
 }
 
 .message.deleted {
   opacity: 0.72;
 }
 
-.message-meta {
+.message-author {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 6px;
-  color: var(--muted);
+  gap: 8px;
+  align-items: center;
+  color: var(--accent-strong);
   font-size: 12px;
+  font-weight: 900;
+}
+
+.message-author span {
+  color: var(--muted);
   font-weight: 800;
 }
 
-.message-times {
-  display: grid;
-  gap: 2px;
-  text-align: right;
+.message-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .message p {
   margin: 0;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
-.edited-label {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.message-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.message-actions .ghost-button,
-.message-actions .danger-button {
-  min-height: 32px;
-  padding: 6px 10px;
+.message-footer .action-menu summary {
+  min-height: 26px;
+  border: 0;
+  background: transparent;
+  padding: 3px 7px;
+  color: var(--accent-strong);
 }
 
 .message-edit {
@@ -822,7 +867,33 @@ td > strong {
 
 .chat-composer {
   display: grid;
-  gap: 12px;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.composer-shell {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.composer-shell textarea {
+  min-height: 44px;
+  max-height: 140px;
+  border: 0;
+  box-shadow: none;
+  resize: none;
+  padding: 10px 8px;
+}
+
+.composer-shell textarea:focus {
+  box-shadow: none;
 }
 
 .chat-attachments {
@@ -1009,14 +1080,17 @@ td > strong {
   .section-heading,
   .person-title,
   .chat-toolbar,
-  .message-meta,
   .attachment-preview {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .message-times {
-    text-align: left;
+  .telegram-chat-title {
+    align-items: flex-start;
+  }
+
+  .composer-shell {
+    grid-template-columns: 1fr;
   }
 
   .message {
