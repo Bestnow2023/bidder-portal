@@ -1,12 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f4f7f6;
-  --surface: #ffffff;
-  --surface-soft: #eef3f1;
-  --foreground: #15201f;
-  --muted: #657271;
-  --line: #dce5e2;
+  --background: #eef5f3;
+  --surface: rgba(255, 255, 255, 0.94);
+  --surface-soft: #f2f7f5;
+  --foreground: #101c1b;
+  --muted: #63716f;
+  --line: #d7e4e0;
   --accent: #0f766e;
   --accent-strong: #0b5f59;
   --blue: #2459a6;
@@ -14,7 +14,7 @@
   --coral: #b75a46;
   --success: #177245;
   --danger: #b42318;
-  --shadow: 0 16px 50px rgba(18, 32, 30, 0.08);
+  --shadow: 0 22px 70px rgba(18, 32, 30, 0.1);
 }
 
 * {
@@ -24,7 +24,8 @@
 body {
   min-height: 100vh;
   margin: 0;
-  background: var(--background);
+  background:
+    linear-gradient(180deg, #f9fcfb 0%, var(--background) 48%, #f7f4ec 100%);
   color: var(--foreground);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   letter-spacing: 0;
@@ -67,7 +68,7 @@ a:hover {
   display: grid;
   grid-template-columns: 1fr 420px;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(215, 228, 224, 0.9);
   border-radius: 8px;
   background: var(--surface);
   box-shadow: var(--shadow);
@@ -76,7 +77,7 @@ a:hover {
 .login-story {
   padding: 42px;
   background:
-    linear-gradient(135deg, rgba(15, 118, 110, 0.9), rgba(36, 89, 166, 0.82)),
+    linear-gradient(145deg, rgba(12, 23, 35, 0.96), rgba(9, 58, 54, 0.93)),
     linear-gradient(45deg, #0f766e, #2459a6);
   color: #ffffff;
 }
@@ -191,10 +192,11 @@ textarea {
   min-height: 42px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: #fbfdfc;
   color: var(--foreground);
   padding: 10px 12px;
   outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
 textarea {
@@ -207,6 +209,7 @@ select:focus,
 textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+  background: #ffffff;
 }
 
 .primary-button,
@@ -224,6 +227,7 @@ textarea:focus {
 .primary-button {
   background: var(--accent);
   color: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.2);
 }
 
 .primary-button:hover {
@@ -237,8 +241,9 @@ textarea:focus {
 
 .ghost-button {
   border: 1px solid var(--line);
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.84);
   color: var(--foreground);
+  box-shadow: 0 8px 20px rgba(18, 32, 30, 0.04);
 }
 
 .compact-button {
@@ -269,7 +274,7 @@ button:disabled {
   gap: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface-soft);
+  background: rgba(242, 247, 245, 0.88);
   color: var(--foreground);
   padding: 12px;
   text-align: left;
@@ -298,8 +303,10 @@ button:disabled {
   top: 0;
   height: 100vh;
   padding: 22px;
-  border-right: 1px solid var(--line);
-  background: #ffffff;
+  border-right: 1px solid rgba(215, 228, 224, 0.9);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 10px 0 40px rgba(18, 32, 30, 0.04);
+  backdrop-filter: blur(18px);
 }
 
 .sidebar-header {
@@ -348,7 +355,7 @@ button:disabled {
 
 .nav-button.active {
   border-color: rgba(15, 118, 110, 0.22);
-  background: #eaf5f2;
+  background: linear-gradient(135deg, #eaf7f4, #f8fbfa);
   color: var(--accent-strong);
 }
 
@@ -377,7 +384,8 @@ button:disabled {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface-soft);
+  background: rgba(242, 247, 245, 0.86);
+  box-shadow: 0 12px 30px rgba(18, 32, 30, 0.05);
 }
 
 .content {
@@ -472,10 +480,10 @@ button:disabled {
 
 .metric,
 .panel {
-  border: 1px solid var(--line);
+  border: 1px solid rgba(215, 228, 224, 0.95);
   border-radius: 8px;
   background: var(--surface);
-  box-shadow: 0 10px 34px rgba(18, 32, 30, 0.05);
+  box-shadow: var(--shadow);
 }
 
 .metric {
@@ -497,7 +505,7 @@ button:disabled {
 }
 
 .panel {
-  padding: 18px;
+  padding: 22px;
 }
 
 .panel-header,
@@ -516,7 +524,7 @@ button:disabled {
 
 .filter-bar {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   align-items: end;
   gap: 12px;
   margin-bottom: 16px;
@@ -524,6 +532,7 @@ button:disabled {
 
 .filter-bar .ghost-button {
   min-width: 92px;
+  width: fit-content;
 }
 
 .table-wrap {
@@ -539,7 +548,7 @@ table {
 th,
 td {
   border-bottom: 1px solid var(--line);
-  padding: 11px 10px;
+  padding: 14px 12px;
   text-align: left;
   vertical-align: top;
 }
@@ -547,12 +556,21 @@ td {
 th {
   color: #53615f;
   font-size: 12px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 td {
   color: #22302e;
   font-size: 14px;
+}
+
+tbody tr {
+  transition: background 160ms ease;
+}
+
+tbody tr:hover {
+  background: rgba(242, 247, 245, 0.72);
 }
 
 td > strong {
@@ -583,7 +601,7 @@ td > strong {
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.86);
 }
 
 .person-title {
@@ -622,8 +640,9 @@ td > strong {
   display: grid;
   place-items: center;
   min-height: 180px;
-  border: 1px dashed var(--line);
+  border: 1px dashed #c9d9d5;
   border-radius: 8px;
+  background: rgba(255, 255, 255, 0.48);
   color: var(--muted);
   text-align: center;
   padding: 22px;
@@ -650,8 +669,8 @@ td > strong {
   padding: 18px;
   border: 1px solid #f0b6ae;
   border-radius: 8px;
-  background: #fff6f4;
-  box-shadow: 0 10px 34px rgba(18, 32, 30, 0.05);
+  background: linear-gradient(135deg, #fff6f4, #fffdf9);
+  box-shadow: var(--shadow);
 }
 
 .payday-alert h2 {
@@ -676,7 +695,7 @@ td > strong {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface-soft);
+  background: rgba(242, 247, 245, 0.86);
 }
 
 .payment-row.urgent {
@@ -746,7 +765,7 @@ td > strong {
   border: 0;
   border-radius: 0;
   background:
-    linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(36, 89, 166, 0.08)),
+    linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(36, 89, 166, 0.06)),
     var(--surface-soft);
 }
 
@@ -957,6 +976,7 @@ td > strong {
   display: grid;
   place-items: center;
   background: rgba(12, 20, 19, 0.52);
+  backdrop-filter: blur(8px);
   padding: 20px;
 }
 
@@ -967,7 +987,7 @@ td > strong {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
-  box-shadow: 0 28px 80px rgba(12, 20, 19, 0.24);
+  box-shadow: 0 32px 90px rgba(12, 20, 19, 0.28);
   padding: 20px;
 }
 

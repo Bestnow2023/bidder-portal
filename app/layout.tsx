@@ -5,8 +5,9 @@ export const metadata: Metadata = {
   title: "Bidder Work Portal",
   description: "Internal portal for bidder work logs, payment details, schedules, history, and admin chat.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/favicon.png",
+    shortcut: "/favicon.png",
+    apple: "/favicon.png",
   },
 };
 

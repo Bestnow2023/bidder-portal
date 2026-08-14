@@ -16,6 +16,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(operationsPage, /<PortalApp \/>/);
   assert.match(chatPage, /<PortalApp \/>/);
   assert.match(layout, /Bidder Work Portal/);
+  assert.match(layout, /favicon\.png/);
   assert.match(portalApp, /digniware-logo-dark\.png/);
   assert.match(portalApp, /digniware-logo-light\.png/);
   assert.match(portalApp, /Email and password sign-in/);
@@ -26,7 +27,14 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Bidder Settings/);
   assert.match(portalApp, /All Work Logs/);
   assert.match(portalApp, /Unpaid Work Logs/);
-  assert.match(portalApp, /Date or start/);
+  assert.match(portalApp, /Select bidder/);
+  assert.match(portalApp, /Date filter/);
+  assert.match(portalApp, /Specific date/);
+  assert.match(portalApp, /This week/);
+  assert.match(portalApp, /Last week/);
+  assert.match(portalApp, /Last 7 days/);
+  assert.match(portalApp, /Yesterday/);
+  assert.match(portalApp, /Custom range/);
   assert.match(portalApp, /Daily Bidder Log/);
   assert.match(portalApp, /Payment History/);
   assert.match(portalApp, /Payday Reminder/);
@@ -50,6 +58,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Edit Payment/);
   assert.match(portalApp, /Edit User/);
   assert.match(portalApp, /Edit Bidder Settings/);
+  assert.match(portalApp, /Remove/);
   assert.match(portalApp, /Delete/);
   assert.doesNotMatch(portalApp, /Roles ready|Work logging|No Stripe|set payment rates/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
@@ -78,6 +87,7 @@ test("declares the requested frontend records", async () => {
     "Edit Payment",
     "Edit User",
     "Edit Bidder Settings",
+    "Remove",
     "Actions",
     "Payment link",
     "Group Chat",
@@ -96,6 +106,7 @@ test("declares the requested frontend records", async () => {
     "signIn",
     "updateUser",
     "setUserPassword",
+    "deleteUser",
     "requestEmailVerification",
     "signUp",
     "savePaymentMethod",
@@ -103,6 +114,7 @@ test("declares the requested frontend records", async () => {
     "deleteWorkLog",
     "addPayment",
     "editPayment",
+    "deletePayment",
     "addChatMessage",
     "editChatMessage",
     "deleteChatMessage",
@@ -115,6 +127,8 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /NEXT_PUBLIC_PORTAL_MODE/);
   assert.match(portalApp, /\/api\/portal/);
   assert.match(portalApp, /filterWorkLogsByDate/);
+  assert.match(portalApp, /dateRangeFromPreset/);
+  assert.match(portalApp, /selectedUserId/);
   assert.match(portalApp, /isWorkLogPaid/);
   assert.match(portalApp, /NEXT_PUBLIC_ADMIN_TIME_ZONE/);
   assert.match(portalApp, /Notification/);

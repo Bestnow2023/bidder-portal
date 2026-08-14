@@ -550,7 +550,44 @@ type UpcomingPaymentItem = {
 type DateRange = {
   startDate: string;
   endDate: string;
+  preset?: DatePreset;
 };
+
+type DatePreset = "all" | "date" | "thisWeek" | "lastWeek" | "last7Days" | "yesterday" | "custom";
+
+function startOfWeek(date: Date) {
+  return addDays(date, -((date.getDay() + 6) % 7));
+}
+
+function dateRangeFromPreset(preset: DatePreset, baseDateInput = today()): DateRange {
+  const baseDate = dateAtMidnight(baseDateInput) || new Date();
+  const currentDate = dateInputValue(baseDate);
+
+  if (preset === "date") {
+    return { preset, startDate: currentDate, endDate: "" };
+  }
+
+  if (preset === "thisWeek") {
+    const weekStart = startOfWeek(baseDate);
+    return { preset, startDate: dateInputValue(weekStart), endDate: dateInputValue(addDays(weekStart, 6)) };
+  }
+
+  if (preset === "lastWeek") {
+    const weekStart = addDays(startOfWeek(baseDate), -7);
+    return { preset, startDate: dateInputValue(weekStart), endDate: dateInputValue(addDays(weekStart, 6)) };
+  }
+
+  if (preset === "last7Days") {
+    return { preset, startDate: dateInputValue(addDays(baseDate, -6)), endDate: currentDate };
+  }
+
+  if (preset === "yesterday") {
+    const yesterday = dateInputValue(addDays(baseDate, -1));
+    return { preset, startDate: yesterday, endDate: "" };
+  }
+
+  return { preset, startDate: "", endDate: "" };
+}
 
 function workSummary(user: PortalUser, logs: WorkLog[]) {
   return {
@@ -566,7 +603,7 @@ function logMatchesDateRange(log: WorkLog, range: DateRange) {
     return true;
   }
 
-  if (range.startDate && !range.endDate) {
+  if (range.preset === "date" && range.startDate && !range.endDate) {
     return log.workDate === range.startDate;
   }
 
@@ -1376,6 +1413,17 @@ function PeopleView({
     });
   }
 
+  async function removeUser(user: PortalUser) {
+    if (!window.confirm(`Remove ${user.name}? This will delete this user account and their portal records.`)) {
+      return;
+    }
+
+    const nextData = await onSave("deleteUser", { targetUserId: user.id });
+    if (nextData && editingUser?.id === user.id) {
+      setEditingUser(null);
+    }
+  }
+
   return (
     <section className="panel">
       <div className="section-heading">
@@ -1433,6 +1481,12 @@ function PeopleView({
                         label: "Send verification",
                         disabled: busy || Boolean(user.emailVerifiedAt),
                         onClick: () => onSave("requestEmailVerification", { targetUserId: user.id }),
+                      },
+                      {
+                        label: "Remove",
+                        danger: true,
+                        disabled: busy || user.id === data.currentUser.id,
+                        onClick: () => void removeUser(user),
                       },
                     ]}
                   />
@@ -2016,7 +2070,10 @@ function BidderWorkLog({
 
 function AdminWorkLogs({ data }: { data: PortalData }) {
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
-  const logs = filterWorkLogsByDate(data.workLogs, dateRange);
+  const [selectedUserId, setSelectedUserId] = useState("all");
+  const logUsers = data.users.filter((user) => user.role !== "admin");
+  const userFilteredLogs = data.workLogs.filter((log) => selectedUserId === "all" || log.userId === selectedUserId);
+  const logs = filterWorkLogsByDate(userFilteredLogs, dateRange);
 
   return (
     <section className="panel">
@@ -2026,7 +2083,18 @@ function AdminWorkLogs({ data }: { data: PortalData }) {
           <p>Daily Google Sheet links, applications, and scheduled interviews.</p>
         </div>
       </div>
-      <DateRangeFilter range={dateRange} onChange={setDateRange} />
+      <div className="filter-bar">
+        <label className="field">
+          <span>Select bidder</span>
+          <select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)}>
+            <option value="all">All bidders</option>
+            {logUsers.map((user) => (
+              <option key={user.id} value={user.id}>{user.name}</option>
+            ))}
+          </select>
+        </label>
+        <DateRangeFilter range={dateRange} onChange={setDateRange} embedded />
+      </div>
       <WorkLogTable logs={logs} users={data.users} emptyMessage="No work logs match this date filter." />
     </section>
   );
@@ -2035,38 +2103,78 @@ function AdminWorkLogs({ data }: { data: PortalData }) {
 function DateRangeFilter({
   range,
   onChange,
+  embedded = false,
 }: {
   range: DateRange;
   onChange: (range: DateRange) => void;
+  embedded?: boolean;
 }) {
   const hasFilter = Boolean(range.startDate || range.endDate);
+  const activePreset = range.preset || (hasFilter ? "custom" : "all");
+  const showSingleDate = activePreset === "date";
+  const showCustomRange = activePreset === "custom";
 
-  return (
-    <div className="filter-bar">
+  function selectPreset(preset: DatePreset) {
+    if (preset === "custom") {
+      onChange({ ...range, preset });
+      return;
+    }
+
+    onChange(dateRangeFromPreset(preset));
+  }
+
+  const controls = (
+    <>
       <label className="field">
-        <span>Date or start</span>
-        <input
-          type="date"
-          value={range.startDate}
-          onChange={(event) => onChange({ ...range, startDate: event.target.value })}
-        />
+        <span>Date filter</span>
+        <select value={activePreset} onChange={(event) => selectPreset(event.target.value as DatePreset)}>
+          <option value="all">All dates</option>
+          <option value="date">Specific date</option>
+          <option value="thisWeek">This week</option>
+          <option value="lastWeek">Last week</option>
+          <option value="last7Days">Last 7 days</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="custom">Custom range</option>
+        </select>
       </label>
-      <label className="field">
-        <span>End date</span>
-        <input
-          type="date"
-          value={range.endDate}
-          onChange={(event) => onChange({ ...range, endDate: event.target.value })}
-        />
-      </label>
+      {showSingleDate || showCustomRange ? (
+        <label className="field">
+          <span>{showSingleDate ? "Date" : "Start date"}</span>
+          <input
+            type="date"
+            value={range.startDate}
+            onChange={(event) => onChange({ ...range, preset: activePreset, startDate: event.target.value })}
+          />
+        </label>
+      ) : null}
+      {showCustomRange ? (
+        <label className="field">
+          <span>End date</span>
+          <input
+            type="date"
+            value={range.endDate}
+            onChange={(event) => onChange({ ...range, preset: activePreset, endDate: event.target.value })}
+          />
+        </label>
+      ) : null}
       <button
         className="ghost-button"
         type="button"
         disabled={!hasFilter}
-        onClick={() => onChange({ startDate: "", endDate: "" })}
+        onClick={() => onChange(dateRangeFromPreset("all"))}
       >
         Clear
       </button>
+    </>
+  );
+
+  if (embedded) {
+    return controls;
+  }
+
+  return (
+    <div className="filter-bar">
+      {controls}
     </div>
   );
 }
@@ -2427,6 +2535,19 @@ function AdminPayments({
     .filter((item) => item.daysUntil <= 1)
     .sort((left, right) => left.daysUntil - right.daysUntil || left.scheduledDate.localeCompare(right.scheduledDate));
 
+  async function deletePayment(payment: PaymentRecord) {
+    const user = userById(data.users, payment.userId);
+    const label = `${user?.name || "this user"} - ${money(payment.amount)} on ${shortDate(payment.scheduledDate)}`;
+    if (!window.confirm(`Delete payment record for ${label}?`)) {
+      return;
+    }
+
+    const nextData = await onAction("deletePayment", { paymentId: payment.id });
+    if (nextData && editingPayment?.id === payment.id) {
+      setEditingPayment(null);
+    }
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     const nextData = await onAction("addPayment", {
@@ -2536,7 +2657,7 @@ function AdminPayments({
             <p>Paid records and receipt links.</p>
           </div>
         </div>
-        <PaymentTable payments={data.payments} users={data.users} onEdit={setEditingPayment} />
+        <PaymentTable payments={data.payments} users={data.users} onEdit={setEditingPayment} onDelete={deletePayment} />
       </section>
 
       {editingPayment ? (
@@ -2727,10 +2848,12 @@ function PaymentTable({
   payments,
   users,
   onEdit,
+  onDelete,
 }: {
   payments: PaymentRecord[];
   users: PortalUser[];
   onEdit?: (payment: PaymentRecord) => void;
+  onDelete?: (payment: PaymentRecord) => void;
 }) {
   if (!payments.length) {
     return <div className="empty-state">No payment history yet.</div>;
@@ -2748,7 +2871,7 @@ function PaymentTable({
             <th>Status</th>
             <th>Link</th>
             <th>Memo</th>
-            {onEdit ? <th>Action</th> : null}
+            {onEdit || onDelete ? <th>Actions</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -2763,11 +2886,14 @@ function PaymentTable({
                 <td><span className={`badge ${payment.status === "paid" ? "bidder" : "pending"}`}>{titleCase(payment.status)}</span></td>
                 <td>{payment.paymentLink ? <a href={payment.paymentLink} target="_blank" rel="noreferrer">Open link</a> : "-"}</td>
                 <td>{payment.memo || "-"}</td>
-                {onEdit ? (
+                {onEdit || onDelete ? (
                   <td>
-                    <button className="ghost-button compact-button" type="button" onClick={() => onEdit(payment)}>
-                      Edit
-                    </button>
+                    <ActionMenu
+                      items={[
+                        ...(onEdit ? [{ label: "Edit", onClick: () => onEdit(payment) }] : []),
+                        ...(onDelete ? [{ label: "Delete", danger: true, onClick: () => onDelete(payment) }] : []),
+                      ]}
+                    />
                   </td>
                 ) : null}
               </tr>
