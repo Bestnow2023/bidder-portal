@@ -47,13 +47,16 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Payment History/);
   assert.match(portalApp, /Payday Reminder/);
   assert.match(portalApp, /Upcoming Payments/);
-  assert.match(portalApp, /Group Chat/);
-  assert.match(portalApp, /Bidder Group/);
+  assert.match(portalApp, /Inbox/);
+  assert.match(portalApp, /Monitored conversation/);
+  assert.match(portalApp, /portal-nav/);
+  assert.match(portalApp, /portalNavVisible/);
   assert.match(portalApp, /Enable notifications/);
   assert.match(portalApp, /Attach/);
   assert.match(portalApp, /aria-label="Actions"/);
   assert.match(portalApp, /Save edit/);
   assert.match(portalApp, /Save changes/);
+  assert.match(portalApp, /Save method changes/);
   assert.match(portalApp, /Forgot password/);
   assert.match(portalApp, /Send verification/);
   assert.match(portalApp, /Set password/);
@@ -107,10 +110,10 @@ test("declares the requested frontend records", async () => {
     "Remove",
     "Actions",
     "Payment link",
-    "Group Chat",
-    "Bidder Group",
+    "Inbox",
+    "Monitored conversation",
     "Local ",
-    "Client time ",
+    "Admin time ",
   ]) {
     assert.match(portalApp, new RegExp(label));
   }
@@ -163,6 +166,10 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /Notification/);
   assert.match(portalApp, /FileReader/);
   assert.match(portalApp, /authorTimeZone/);
+  assert.match(portalApp, /chatContacts/);
+  assert.match(portalApp, /recipientId/);
+  assert.match(portalApp, /conversation-list/);
+  assert.match(portalApp, /methodId/);
   assert.match(portalApp, /sessionToken/);
   assert.match(portalApp, /workLogId/);
   assert.match(portalApp, /ActionMenu/);
@@ -175,6 +182,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /\/clients/);
   assert.match(portalApp, /aria-haspopup="menu"/);
   assert.match(portalApp, /fixed z-50/);
+  assert.match(portalApp, /portal-nav/);
   assert.match(portalApp, /hover:bg-white\/80/);
   assert.match(portalApp, /auth-logo/);
   assert.match(portalApp, /sidebar-logo/);
@@ -190,6 +198,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /Cancel/);
   assert.match(portalApp, /audio controls/);
   assert.match(portalApp, /img src/);
+  assert.doesNotMatch(portalApp, /Group Chat|Bidder Group|group messages|Client time /);
   assert.match(envExample, /NEXT_PUBLIC_API_BASE_URL/);
   assert.match(envExample, /NEXT_PUBLIC_PORTAL_MODE/);
   assert.match(envExample, /NEXT_PUBLIC_ADMIN_TIME_ZONE/);

@@ -295,7 +295,7 @@ function viewTitle(view: string) {
     bidderSettings: "Bidder Settings",
     work: "Work Logs",
     payments: "Payments",
-    chat: "Group Chat",
+    chat: "Inbox",
   };
   return titles[view] || "Portal";
 }
@@ -315,7 +315,7 @@ function viewSubtitle(view: string, isAdmin: boolean) {
     bidderSettings: "Set bidder rates, interview bonuses, payment dates, and schedules.",
     work: "Review bidder work logs and Google Sheet links.",
     payments: "Record payouts, review payment methods, and track client escrow.",
-    chat: "Coordinate with bidders in the group chat.",
+    chat: "Direct member messaging with super admin monitoring.",
   };
 
   return subtitles[view] || "Manage the bidder portal.";
@@ -323,7 +323,7 @@ function viewSubtitle(view: string, isAdmin: boolean) {
 
 function viewsForUser(user: PortalUser): PortalView[] {
   if (isSuperAdminRole(user.role)) {
-    return ["overview", "profile", "people", "bidderSettings", "work", "payments", "chat"];
+    return ["people", "chat"];
   }
 
   if (isClientRole(user.role)) {
@@ -373,6 +373,28 @@ function scheduledForUser(userId: string, payments: PaymentRecord[]) {
 
 function userById(users: PortalUser[], userId: string) {
   return users.find((user) => user.id === userId);
+}
+
+function inboxConversationId(userId: string, recipientId: string) {
+  return [userId, recipientId].sort().join("__");
+}
+
+function chatConversationIdForMessage(message: ChatMessage) {
+  if (message.conversationId) {
+    return message.conversationId;
+  }
+
+  return message.recipientId ? inboxConversationId(message.userId, message.recipientId) : "";
+}
+
+function initialsForName(name: string) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+  return initials || "IN";
 }
 
 function assignedClientName(users: PortalUser[], user: PortalUser) {
@@ -774,10 +796,12 @@ export default function PortalApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
+  const [portalNavVisible, setPortalNavVisible] = useState(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState(() =>
     typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted"
   );
   const latestChatMessageIdRef = useRef("");
+  const lastScrollYRef = useRef(0);
   const effectiveActiveView = data ? safeViewForUser(data.currentUser, activeView) : activeView;
 
   const postPublicAction = useCallback(async (
@@ -875,6 +899,30 @@ export default function PortalApp() {
     const handlePopState = () => setActiveView(viewFromPath(window.location.pathname));
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    lastScrollYRef.current = window.scrollY;
+
+    function handleScroll() {
+      const nextScrollY = window.scrollY;
+      const scrollingUp = nextScrollY < lastScrollYRef.current;
+
+      if (nextScrollY < 24 || scrollingUp) {
+        setPortalNavVisible(true);
+      } else if (nextScrollY > 96) {
+        setPortalNavVisible(false);
+      }
+
+      lastScrollYRef.current = nextScrollY;
+    }
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
   const refreshPortalData = useCallback(async (email: string, token: string, silent = false) => {
@@ -1328,47 +1376,49 @@ export default function PortalApp() {
 
   return (
     <main className="app portal-shell">
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <DigniwareLogo className="brand-logo sidebar-logo" />
-          <div className="sidebar-title">
-            <strong>Bidder Portal</strong>
-            <span>Work and payments</span>
-          </div>
-        </div>
-
-        <nav className="nav-list" aria-label="Portal navigation">
-          {availableViews.map((view) => (
-            <a
-              key={view}
-              className={`nav-button transition ${
-                safeView === view
-                  ? "active shadow-sm ring-1 ring-teal-700/10"
-                  : "hover:bg-white/80 hover:text-teal-700"
-              }`}
-              href={viewRoutes[view]}
-              onClick={(event) => navigateToView(event, view)}
-            >
-              <span>{viewTitle(view)}</span>
-              {view === "chat" && chatUnreadCount > 0 ? <span className="nav-badge">{chatUnreadCount}</span> : null}
-            </a>
-          ))}
-        </nav>
-
-        <div className="sidebar-footer">
-          <div className="user-card">
-            <strong>{currentUser.name}</strong>
-            <span>{currentUser.email}</span>
-            <div className="badge-row">
-              <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
-              <span className={`badge ${currentUser.status}`}>{statusLabel(currentUser.status)}</span>
+      <header className={`portal-nav ${portalNavVisible ? "visible" : "hidden"}`}>
+        <div className="portal-nav-inner">
+          <div className="portal-brand">
+            <DigniwareLogo className="brand-logo sidebar-logo" />
+            <div className="sidebar-title">
+              <strong>Bidder Portal</strong>
+              <span>Work and payments</span>
             </div>
-            <button className="ghost-button" type="button" onClick={signOut}>
-              Sign out
-            </button>
+          </div>
+
+          <nav className="nav-list" aria-label="Portal navigation">
+            {availableViews.map((view) => (
+              <a
+                key={view}
+                className={`nav-button transition ${
+                  safeView === view
+                    ? "active shadow-sm ring-1 ring-teal-700/10"
+                    : "hover:bg-white/80 hover:text-teal-700"
+                }`}
+                href={viewRoutes[view]}
+                onClick={(event) => navigateToView(event, view)}
+              >
+                <span>{viewTitle(view)}</span>
+                {view === "chat" && chatUnreadCount > 0 ? <span className="nav-badge">{chatUnreadCount}</span> : null}
+              </a>
+            ))}
+          </nav>
+
+          <div className="portal-account">
+            <div className="user-card">
+              <strong>{currentUser.name}</strong>
+              <span>{currentUser.email}</span>
+              <div className="badge-row">
+                <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
+                <span className={`badge ${currentUser.status}`}>{statusLabel(currentUser.status)}</span>
+              </div>
+              <button className="ghost-button" type="button" onClick={signOut}>
+                Sign out
+              </button>
+            </div>
           </div>
         </div>
-      </aside>
+      </header>
 
       <section className="content">
         <header className="topbar">
@@ -2782,18 +2832,28 @@ function PaymentsView({
 function PaymentMethodForm({
   busy,
   onSave,
+  editingMethod,
+  onCancelEdit,
 }: {
   busy: boolean;
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  editingMethod?: PaymentMethod | null;
+  onCancelEdit?: () => void;
 }) {
-  const [method, setMethod] = useState("Payoneer");
-  const [address, setAddress] = useState("");
+  const [method, setMethod] = useState(editingMethod?.method || "Payoneer");
+  const [address, setAddress] = useState(editingMethod?.address || "");
+  const isEditing = Boolean(editingMethod);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const nextData = await onSave("savePaymentMethod", { method, address });
+    const nextData = await onSave("savePaymentMethod", {
+      methodId: editingMethod?.id,
+      method,
+      address,
+    });
     if (nextData) {
       setAddress("");
+      onCancelEdit?.();
     }
   }
 
@@ -2812,13 +2872,26 @@ function PaymentMethodForm({
         <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Wallet, email, account, or address" required />
       </label>
       <div className="actions full">
-        <button className="primary-button" type="submit" disabled={busy}>Save payment method</button>
+        <button className="primary-button" type="submit" disabled={busy}>
+          {isEditing ? "Save method changes" : "Save payment method"}
+        </button>
+        {isEditing ? (
+          <button className="ghost-button" type="button" disabled={busy} onClick={onCancelEdit}>
+            Cancel
+          </button>
+        ) : null}
       </div>
     </form>
   );
 }
 
-function PaymentMethodList({ methods }: { methods: PaymentMethod[] }) {
+function PaymentMethodList({
+  methods,
+  onEdit,
+}: {
+  methods: PaymentMethod[];
+  onEdit?: (method: PaymentMethod) => void;
+}) {
   if (!methods.length) {
     return <div className="empty-state">No payment method saved yet.</div>;
   }
@@ -2831,7 +2904,10 @@ function PaymentMethodList({ methods }: { methods: PaymentMethod[] }) {
             <strong>{method.method}</strong>
             <span className="muted">Address: {method.address}</span>
           </div>
-          {method.isPrimary ? <span className="badge bidder">Primary</span> : null}
+          <div className="method-actions">
+            {method.isPrimary ? <span className="badge bidder">Primary</span> : null}
+            {onEdit ? <ActionMenu items={[{ label: "Edit", onClick: () => onEdit(method) }]} /> : null}
+          </div>
         </div>
       ))}
     </div>
@@ -2849,6 +2925,7 @@ function UserPayments({
 }) {
   const user = data.currentUser;
   const methods = data.paymentMethods.filter((method) => method.userId === user.id);
+  const [editingMethod, setEditingMethod] = useState<PaymentMethod | null>(null);
   const earned = estimateForUser(user, data.workLogs);
   const paid = paidForUser(user.id, data.payments);
   const scheduled = scheduledForUser(user.id, data.payments);
@@ -2863,9 +2940,15 @@ function UserPayments({
             <p>Manual payout details only; no payment processor is connected.</p>
           </div>
         </div>
-        <PaymentMethodForm busy={busy} onSave={onAction} />
+        <PaymentMethodForm
+          key={editingMethod?.id || "new-method"}
+          busy={busy}
+          onSave={onAction}
+          editingMethod={editingMethod}
+          onCancelEdit={() => setEditingMethod(null)}
+        />
         <div style={{ marginTop: 16 }}>
-          <PaymentMethodList methods={methods} />
+          <PaymentMethodList methods={methods} onEdit={setEditingMethod} />
         </div>
       </section>
 
@@ -3537,20 +3620,81 @@ function ChatView({
   const [chatError, setChatError] = useState("");
   const [editingMessageId, setEditingMessageId] = useState("");
   const [editBody, setEditBody] = useState("");
+  const [selectedConversationId, setSelectedConversationId] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const currentUser = data.currentUser;
   const canSend = currentUser.status === "approved";
   const userTimeZone = browserTimeZone();
   const notificationSupported = typeof window !== "undefined" && "Notification" in window;
-  const canSubmit = canSend && Boolean(body.trim() || attachments.length);
-  const activeParticipants = new Set(
-    data.chatMessages.filter((message) => !message.deletedAt).map((message) => message.userId)
-  ).size;
+  const membersById = new Map<string, PortalUser>();
+  [currentUser, ...data.users, ...(data.chatContacts || [])].forEach((user) => {
+    membersById.set(user.id, user);
+  });
+  const contactUsers = (data.chatContacts || []).filter((user) => user.id !== currentUser.id);
+  const directConversations = contactUsers.map((contact) => {
+    const conversationId = inboxConversationId(currentUser.id, contact.id);
+    const messages = data.chatMessages.filter((message) => chatConversationIdForMessage(message) === conversationId);
+    const latestMessage = messages[messages.length - 1];
+
+    return {
+      id: `direct:${contact.id}`,
+      conversationId,
+      recipientId: contact.id,
+      title: contact.name,
+      subtitle: `${roleLabel(contact.role)} - ${contact.email}`,
+      preview: latestMessage?.deletedAt ? "Message deleted" : latestMessage?.body || latestMessage?.attachments?.[0]?.name || "No messages yet",
+      avatar: initialsForName(contact.name),
+      monitored: false,
+    };
+  });
+  const directConversationIds = new Set(directConversations.map((conversation) => conversation.conversationId));
+  const monitoredConversations = isSuperAdminRole(currentUser.role)
+    ? Array.from(new Set(data.chatMessages.map(chatConversationIdForMessage).filter(Boolean)))
+        .filter((conversationId) => !directConversationIds.has(conversationId))
+        .map((conversationId) => {
+          const messages = data.chatMessages.filter((message) => chatConversationIdForMessage(message) === conversationId);
+          const latestMessage = messages[messages.length - 1];
+          const participantIds = Array.from(
+            new Set(messages.flatMap((message) => [message.userId, message.recipientId || ""]).filter(Boolean))
+          );
+          const participantNames = participantIds.map((id) => membersById.get(id)?.name || "Unknown member");
+
+          return {
+            id: `monitor:${conversationId}`,
+            conversationId,
+            recipientId: "",
+            title: participantNames.join(" / ") || "Monitored conversation",
+            subtitle: "Monitored conversation",
+            preview: latestMessage?.deletedAt ? "Message deleted" : latestMessage?.body || latestMessage?.attachments?.[0]?.name || "No messages yet",
+            avatar: "SA",
+            monitored: true,
+          };
+        })
+    : [];
+  const conversations = [...directConversations, ...monitoredConversations];
+  const activeConversation =
+    conversations.find((conversation) => conversation.id === selectedConversationId) || conversations[0];
+  const activeMessages = activeConversation
+    ? data.chatMessages.filter((message) => chatConversationIdForMessage(message) === activeConversation.conversationId)
+    : [];
+  const canSubmit =
+    canSend &&
+    Boolean(activeConversation) &&
+    !activeConversation.monitored &&
+    Boolean(activeConversation.recipientId) &&
+    Boolean(body.trim() || attachments.length);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
-  }, [data.chatMessages.length]);
+  }, [activeConversation?.id, activeMessages.length]);
+
+  function selectConversation(conversationId: string) {
+    setSelectedConversationId(conversationId);
+    setEditingMessageId("");
+    setEditBody("");
+    setChatError("");
+  }
 
   async function sendMessage() {
     if (!canSubmit || busy) {
@@ -3558,6 +3702,7 @@ function ChatView({
     }
 
     const nextData = await onSend("addChatMessage", {
+      recipientId: activeConversation?.recipientId || "",
       body,
       attachments,
       authorTimeZone: userTimeZone,
@@ -3664,10 +3809,14 @@ function ChatView({
     <section className="panel chat-panel">
       <div className="chat-toolbar">
         <div className="telegram-chat-title">
-          <div className="telegram-avatar">BP</div>
+          <div className="telegram-avatar">{activeConversation?.avatar || "IN"}</div>
           <div>
-            <h2>Bidder Group</h2>
-            <p>{activeParticipants || 1} participants - {data.chatMessages.length} messages</p>
+            <h2>{activeConversation?.title || "Inbox"}</h2>
+            <p>
+              {activeConversation
+                ? `${activeConversation.subtitle} - ${activeMessages.length} messages`
+                : "Choose an approved member to start a conversation."}
+            </p>
           </div>
         </div>
         {notificationSupported ? (
@@ -3682,69 +3831,93 @@ function ChatView({
         ) : null}
       </div>
 
-      <div className="messages">
-        {data.chatMessages.map((message) => {
-          const deleted = Boolean(message.deletedAt);
-          const isMine = message.userId === currentUser.id;
-          const canManage = !deleted && (isMine || isSuperAdminRole(currentUser.role));
-          const isEditing = editingMessageId === message.id;
-          const messageAttachments = message.attachments || [];
+      <div className="inbox-layout">
+        <div className="conversation-list" aria-label="Inbox conversations">
+          {conversations.map((conversation) => (
+            <button
+              key={conversation.id}
+              type="button"
+              className={`conversation-button ${activeConversation?.id === conversation.id ? "active" : ""}`}
+              onClick={() => selectConversation(conversation.id)}
+            >
+              <span className="conversation-avatar">{conversation.avatar}</span>
+              <span>
+                <strong>{conversation.title}</strong>
+                <small>{conversation.preview}</small>
+              </span>
+            </button>
+          ))}
+          {!conversations.length ? (
+            <div className="empty-state compact">No inbox contacts yet.</div>
+          ) : null}
+        </div>
 
-          return (
-            <div className={`message-row ${isMine ? "mine" : ""}`} key={message.id}>
-              <div className={`message ${isMine ? "mine" : ""} ${deleted ? "deleted" : ""}`}>
-                {!isMine ? (
-                  <div className="message-author">
-                    <strong>{message.authorName}</strong>
-                    <span>{roleLabel(message.authorRole)}</span>
-                  </div>
-                ) : null}
+        <div className="messages">
+          {activeMessages.map((message) => {
+            const deleted = Boolean(message.deletedAt);
+            const isMine = message.userId === currentUser.id;
+            const canEdit = !deleted && (isMine || isSuperAdminRole(currentUser.role));
+            const canDelete = !deleted && isSuperAdminRole(currentUser.role);
+            const isEditing = editingMessageId === message.id;
+            const messageAttachments = message.attachments || [];
+            const menuItems: ActionMenuItem[] = [];
 
-                {deleted ? (
-                  <p className="muted">Message deleted</p>
-                ) : isEditing ? (
-                  <div className="message-edit">
-                    <textarea
-                      value={editBody}
-                      onChange={(event) => setEditBody(event.target.value)}
-                      onKeyDown={(event) => handleEditKeyDown(event, message)}
-                      autoFocus
-                    />
-                    <div className="actions">
-                      <button className="primary-button" type="button" disabled={busy} onClick={() => void saveEditedMessage(message)}>
-                        Save edit
-                      </button>
-                      <button className="ghost-button" type="button" onClick={cancelEditing}>
-                        Cancel
-                      </button>
+            if (canEdit) {
+              menuItems.push({ label: "Edit", onClick: () => startEditing(message) });
+            }
+            if (canDelete) {
+              menuItems.push({ label: "Delete", danger: true, disabled: busy, onClick: () => void deleteMessage(message) });
+            }
+
+            return (
+              <div className={`message-row ${isMine ? "mine" : ""}`} key={message.id}>
+                <div className={`message ${isMine ? "mine" : ""} ${deleted ? "deleted" : ""}`}>
+                  {!isMine ? (
+                    <div className="message-author">
+                      <strong>{message.authorName}</strong>
+                      <span>{roleLabel(message.authorRole)}</span>
                     </div>
-                  </div>
-                ) : (
-                  <>
-                    {message.body ? <p>{message.body}</p> : null}
-                    <ChatAttachments attachments={messageAttachments} />
-                  </>
-                )}
-
-                <div className="message-footer">
-                  <span>Local {dateTimeInZone(message.createdAt, message.authorTimeZone || userTimeZone)}</span>
-                  <span>Client time {dateTimeInZone(message.createdAt, adminTimeZone)}</span>
-                  {message.editedAt ? <span>Edited</span> : null}
-                  {canManage ? (
-                    <ActionMenu
-                      items={[
-                        { label: "Edit", onClick: () => startEditing(message) },
-                        { label: "Delete", danger: true, disabled: busy, onClick: () => void deleteMessage(message) },
-                      ]}
-                    />
                   ) : null}
+
+                  {deleted ? (
+                    <p className="muted">Message deleted</p>
+                  ) : isEditing ? (
+                    <div className="message-edit">
+                      <textarea
+                        value={editBody}
+                        onChange={(event) => setEditBody(event.target.value)}
+                        onKeyDown={(event) => handleEditKeyDown(event, message)}
+                        autoFocus
+                      />
+                      <div className="actions">
+                        <button className="primary-button" type="button" disabled={busy} onClick={() => void saveEditedMessage(message)}>
+                          Save edit
+                        </button>
+                        <button className="ghost-button" type="button" onClick={cancelEditing}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {message.body ? <p>{message.body}</p> : null}
+                      <ChatAttachments attachments={messageAttachments} />
+                    </>
+                  )}
+
+                  <div className="message-footer">
+                    <span>Local {dateTimeInZone(message.createdAt, message.authorTimeZone || userTimeZone)}</span>
+                    <span>Admin time {dateTimeInZone(message.createdAt, adminTimeZone)}</span>
+                    {message.editedAt ? <span>Edited</span> : null}
+                    {menuItems.length ? <ActionMenu items={menuItems} /> : null}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-        {!data.chatMessages.length ? <div className="empty-state">No messages yet.</div> : null}
-        <div ref={messagesEndRef} />
+            );
+          })}
+          {activeConversation && !activeMessages.length ? <div className="empty-state">No messages yet.</div> : null}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
       <form className="chat-composer" onSubmit={submit}>
@@ -3765,7 +3938,7 @@ function ChatView({
           <button
             className="ghost-button compact-button"
             type="button"
-            disabled={!canSend || attachments.length >= chatAttachmentLimit}
+            disabled={!canSend || !activeConversation || activeConversation.monitored || attachments.length >= chatAttachmentLimit}
             onClick={() => fileInputRef.current?.click()}
           >
             Attach
@@ -3776,7 +3949,7 @@ function ChatView({
             value={body}
             onChange={(event) => setBody(event.target.value)}
             onKeyDown={handleComposerKeyDown}
-            disabled={!canSend}
+            disabled={!canSend || !activeConversation || activeConversation.monitored}
             required={!attachments.length}
           />
           <button className="primary-button" type="submit" disabled={busy || !canSubmit}>
@@ -3789,10 +3962,12 @@ function ChatView({
           className="file-input"
           type="file"
           multiple
-          disabled={!canSend}
+          disabled={!canSend || !activeConversation || activeConversation.monitored}
           onChange={handleFileSelection}
         />
-        {!canSend ? <span className="muted">Approval is required before sending group messages.</span> : null}
+        {!canSend ? <span className="muted">Approval is required before sending inbox messages.</span> : null}
+        {activeConversation?.monitored ? <span className="muted">Monitoring conversation. Select a direct inbox contact to send.</span> : null}
+        {!activeConversation && canSend ? <span className="muted">No approved inbox contacts are available yet.</span> : null}
         {chatError ? <div className="error full">{chatError}</div> : null}
       </form>
     </section>
@@ -3811,6 +3986,7 @@ function PendingView({
   const user = data.currentUser;
   const methods = data.paymentMethods.filter((method) => method.userId === user.id);
   const canSavePaymentMethod = !isSuperAdminRole(user.role) && !isClientRole(user.role);
+  const [editingMethod, setEditingMethod] = useState<PaymentMethod | null>(null);
 
   return (
     <div className="pending-box">
@@ -3832,7 +4008,13 @@ function PendingView({
               <p>You can save payout details while waiting.</p>
             </div>
           </div>
-          <PaymentMethodForm busy={busy} onSave={onSaveMethod} />
+          <PaymentMethodForm
+            key={editingMethod?.id || "pending-new-method"}
+            busy={busy}
+            onSave={onSaveMethod}
+            editingMethod={editingMethod}
+            onCancelEdit={() => setEditingMethod(null)}
+          />
         </section>
 
         <section className="panel">
@@ -3842,7 +4024,7 @@ function PendingView({
               <p>Your assigned client will see the selected method and address.</p>
             </div>
           </div>
-          <PaymentMethodList methods={methods} />
+          <PaymentMethodList methods={methods} onEdit={setEditingMethod} />
         </section>
         </div>
       ) : null}

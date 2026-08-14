@@ -109,6 +109,8 @@ export type ChatAttachment = {
 export type ChatMessage = {
   id: string;
   userId: string;
+  recipientId?: string;
+  conversationId?: string;
   authorName: string;
   authorRole: Role;
   body: string;
@@ -130,5 +132,6 @@ export type PortalData = {
   workLogs: WorkLog[];
   payments: PaymentRecord[];
   escrows: EscrowRecord[];
+  chatContacts?: PortalUser[];
   chatMessages: ChatMessage[];
 };
