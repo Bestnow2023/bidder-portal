@@ -1,98 +1,67 @@
-# vinext-starter
+# Bidder Work Portal
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Frontend Next.js portal for managing job bidders, daily work logs, manual
+payment methods, payout schedules, payment history, and admin group chat.
 
 ## Prerequisites
 
 - Node.js `>=22.13.0`
+- The backend API from `Bestnow2023/bidder-portal-be`
+- A Vercel account/project
 
-## Quick Start
+## Local Setup
 
 ```bash
 npm install
+cp .env.local.example .env.local
 npm run dev
-npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+Set the API base URL in `.env.local` before signing in:
 
-## Included Shape
-
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```text
+NEXT_PUBLIC_API_BASE_URL="http://localhost:4000"
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+The backend initializes MongoDB indexes automatically on first API use and seeds
+three demo accounts:
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+- `admin@portal.local`
+- `maya.bidder@example.com`
+- `pending.bidder@example.com`
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+## Vercel Setup
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+1. Create a new Vercel project from this repository.
+2. Set the project root directory to `bidder-portal` if deploying from the
+   larger `Playground` folder.
+3. Use the Next.js framework preset.
+4. Add `NEXT_PUBLIC_API_BASE_URL` in Vercel Project Settings -> Environment
+   Variables for Production, Preview, and Development. Use the deployed backend
+   URL, for example `https://bidder-portal-be.vercel.app`.
+5. Deploy.
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+The included `vercel.json` pins the expected settings:
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+- Framework: `nextjs`
+- Install command: `npm ci`
+- Build command: `next build`
+- Development command: `next dev`
 
-## Useful Commands
+## Database
+
+- MongoDB runs only in the backend API repo.
+- This frontend calls `${NEXT_PUBLIC_API_BASE_URL}/api/portal`.
+- Keep database credentials out of this frontend project.
+
+## Commands
 
 - `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+- `npm run build`: run a Vercel-compatible Next.js build
+- `npm run lint`: run lint
+- `npm test`: build and run smoke tests
 
-## Learn More
+## Deploy Notes
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+Do not commit `.env.local`. Use Vercel environment variables for hosted
+deployments.

@@ -20,21 +20,23 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.doesNotMatch(`${page}\n${layout}\n${portalApp}`, /codex-preview|Your site is taking shape/i);
 });
 
-test("declares the requested records", async () => {
-  const [schema, route, store] = await Promise.all([
-    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/portal/route.ts", import.meta.url), "utf8"),
-    readFile(new URL("../db/portal-store.ts", import.meta.url), "utf8"),
+test("declares the requested frontend records", async () => {
+  const [portalApp, packageJson, vercelConfig, envExample, appEntries] = await Promise.all([
+    readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../vercel.json", import.meta.url), "utf8"),
+    readFile(new URL("../.env.local.example", import.meta.url), "utf8"),
+    readdir(new URL("../app/", import.meta.url), { recursive: true }),
   ]);
 
-  for (const table of [
-    "portalUsers",
-    "portalPaymentMethods",
-    "portalWorkLogs",
-    "portalPayments",
-    "portalChatMessages",
+  for (const label of [
+    "User Management",
+    "Daily Bidder Log",
+    "Payment Method",
+    "Payment History",
+    "Group Chat",
   ]) {
-    assert.match(schema, new RegExp(table));
+    assert.match(portalApp, new RegExp(label));
   }
 
   for (const action of [
@@ -44,9 +46,19 @@ test("declares the requested records", async () => {
     "addPayment",
     "addChatMessage",
   ]) {
-    assert.match(route, new RegExp(action));
-    assert.match(store, new RegExp(action));
+    assert.match(portalApp, new RegExp(action));
   }
+
+  const parsedPackage = JSON.parse(packageJson);
+  assert.match(portalApp, /NEXT_PUBLIC_API_BASE_URL/);
+  assert.match(portalApp, /\/api\/portal/);
+  assert.match(envExample, /NEXT_PUBLIC_API_BASE_URL/);
+  assert.equal(parsedPackage.dependencies.mongodb, undefined);
+  assert.equal(parsedPackage.scripts.build, "next build");
+  assert.equal(parsedPackage.scripts["db:generate"], undefined);
+  assert.equal(JSON.parse(vercelConfig).framework, "nextjs");
+  assert.equal(appEntries.some((entry) => String(entry) === "api/portal/route.ts"), false);
+  assert.doesNotMatch(`${portalApp}\n${packageJson}\n${envExample}`, /@neondatabase|drizzle|DATABASE_URL|MONGODB_URI|cloudflare:workers|env\.DB/);
 });
 
 test("does not keep starter preview files", async () => {

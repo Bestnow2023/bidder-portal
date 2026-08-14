@@ -13,6 +13,9 @@ import type {
 } from "./portal-types";
 
 const paymentMethods = ["Payoneer", "BEP20", "Wise", "PayPal", "Bank transfer", "USDT TRC20", "Other"];
+const defaultApiBaseUrl = process.env.NODE_ENV === "development" ? "http://localhost:4000" : "";
+const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || defaultApiBaseUrl).replace(/\/$/, "");
+const portalApiUrl = `${apiBaseUrl}/api/portal`;
 
 const demoAccounts = [
   { label: "Admin", email: "admin@portal.local", name: "Admin Owner" },
@@ -127,7 +130,7 @@ export default function PortalApp() {
     setError("");
     try {
       const email = action === "signIn" ? loginEmail : data?.currentUser.email;
-      const response = await fetch("/api/portal", {
+      const response = await fetch(portalApiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, email, ...payload }),
