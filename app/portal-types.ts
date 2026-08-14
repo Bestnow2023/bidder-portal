@@ -78,6 +78,7 @@ export type ChatMessage = {
 
 export type PortalData = {
   currentUser: PortalUser;
+  sessionToken?: string;
   users: PortalUser[];
   paymentMethods: PaymentMethod[];
   workLogs: WorkLog[];

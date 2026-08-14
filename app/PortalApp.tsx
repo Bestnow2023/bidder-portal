@@ -28,6 +28,7 @@ const adminTimeZone = process.env.NEXT_PUBLIC_ADMIN_TIME_ZONE || "America/New_Yo
 const chatPollIntervalMs = 15000;
 const chatAttachmentLimit = 3;
 const maxChatAttachmentBytes = 2 * 1024 * 1024;
+const demoPassword = "demo1234";
 
 const demoAccounts = [
   { label: "Admin", email: "admin@portal.local", name: "Admin Owner" },
@@ -298,6 +299,14 @@ export default function PortalApp() {
     return storedEmail || (isLiveMode ? "" : "admin@portal.local");
   });
   const [loginName, setLoginName] = useState("");
+  const [loginPassword, setLoginPassword] = useState(isLiveMode ? "" : demoPassword);
+  const [sessionToken, setSessionToken] = useState(() => {
+    if (typeof window === "undefined") {
+      return "";
+    }
+
+    return window.localStorage.getItem("bidderPortalSessionToken") || "";
+  });
   const [activeView, setActiveView] = useState("overview");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -307,8 +316,8 @@ export default function PortalApp() {
   );
   const latestChatMessageIdRef = useRef("");
 
-  const refreshPortalData = useCallback(async (email: string, silent = false) => {
-    if (!email) {
+  const refreshPortalData = useCallback(async (email: string, token: string, silent = false) => {
+    if (!email || !token) {
       return;
     }
 
@@ -318,7 +327,11 @@ export default function PortalApp() {
     }
 
     try {
-      const response = await fetch(`${portalApiUrl}?email=${encodeURIComponent(email)}`);
+      const response = await fetch(portalApiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "refreshPortal", email, sessionToken: token }),
+      });
       const contentType = response.headers.get("content-type") || "";
       if (!contentType.includes("application/json")) {
         throw new Error(`Portal API returned ${contentType || "non-JSON"} from ${portalApiUrl}. Check NEXT_PUBLIC_API_BASE_URL.`);
@@ -331,6 +344,10 @@ export default function PortalApp() {
 
       setData(nextData);
       setLoginEmail(nextData.currentUser.email);
+      if (nextData.sessionToken) {
+        setSessionToken(nextData.sessionToken);
+        window.localStorage.setItem("bidderPortalSessionToken", nextData.sessionToken);
+      }
       window.localStorage.setItem("bidderPortalEmail", nextData.currentUser.email);
       return nextData as PortalData;
     } catch (refreshError) {
@@ -345,17 +362,29 @@ export default function PortalApp() {
   }, []);
 
   useEffect(() => {
-    if (!data?.currentUser.email) {
+    if (!data?.currentUser.email || !sessionToken) {
       return;
     }
 
     const email = data.currentUser.email;
     const interval = window.setInterval(() => {
-      void refreshPortalData(email, true);
+      void refreshPortalData(email, sessionToken, true);
     }, chatPollIntervalMs);
 
     return () => window.clearInterval(interval);
-  }, [data?.currentUser.email, refreshPortalData]);
+  }, [data?.currentUser.email, refreshPortalData, sessionToken]);
+
+  useEffect(() => {
+    if (data || !loginEmail || !sessionToken) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void refreshPortalData(loginEmail, sessionToken, true);
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [data, loginEmail, refreshPortalData, sessionToken]);
 
   useEffect(() => {
     if (!data) {
@@ -427,10 +456,14 @@ export default function PortalApp() {
     setError("");
     try {
       const email = action === "signIn" || action === "signUp" ? loginEmail : data?.currentUser.email;
+      const authPayload =
+        action === "signIn" || action === "signUp"
+          ? { password: loginPassword }
+          : { sessionToken };
       const response = await fetch(portalApiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, email, ...payload }),
+        body: JSON.stringify({ action, email, ...authPayload, ...payload }),
       });
       const contentType = response.headers.get("content-type") || "";
       if (!contentType.includes("application/json")) {
@@ -444,6 +477,10 @@ export default function PortalApp() {
 
       setData(nextData);
       setLoginEmail(nextData.currentUser.email);
+      if (nextData.sessionToken) {
+        setSessionToken(nextData.sessionToken);
+        window.localStorage.setItem("bidderPortalSessionToken", nextData.sessionToken);
+      }
       window.localStorage.setItem("bidderPortalEmail", nextData.currentUser.email);
       return nextData as PortalData;
     } catch (actionError) {
@@ -455,7 +492,10 @@ export default function PortalApp() {
 
   function signOut() {
     window.localStorage.removeItem("bidderPortalEmail");
+    window.localStorage.removeItem("bidderPortalSessionToken");
     setData(null);
+    setSessionToken("");
+    setLoginPassword(isLiveMode ? "" : demoPassword);
     setActiveView("overview");
     setChatUnreadCount(0);
     latestChatMessageIdRef.current = "";
@@ -469,6 +509,7 @@ export default function PortalApp() {
 
   function switchAuthMode(nextAuthMode: AuthMode) {
     setAuthMode(nextAuthMode);
+    setLoginPassword(nextAuthMode === "signIn" && !isLiveMode ? demoPassword : "");
     setError("");
   }
 
@@ -483,25 +524,11 @@ export default function PortalApp() {
               Sign in with email, log bidder work, keep payment method details in one place,
               and let admin manage approvals, rates, next payout dates, history, and chat.
             </p>
-            <div className="login-stats">
-              <div>
-                <strong>3</strong>
-                <span>Roles ready</span>
-              </div>
-              <div>
-                <strong>Daily</strong>
-                <span>Work logging</span>
-              </div>
-              <div>
-                <strong>No Stripe</strong>
-                <span>Manual payment records</span>
-              </div>
-            </div>
           </div>
 
           <form className="login-form" onSubmit={handleLogin}>
-            <h2>{authMode === "signUp" ? "Sign up" : "Email sign-in"}</h2>
-            <p>{authMode === "signUp" ? "New users enter as pending bidders until admin approval." : "Use your approved email to enter the portal."}</p>
+            <h2>{authMode === "signUp" ? "Sign up" : "Email and password sign-in"}</h2>
+            <p>{authMode === "signUp" ? "New users enter as pending bidders until admin approval." : "Use your approved email and password to enter the portal."}</p>
 
             <div className="auth-toggle" role="tablist" aria-label="Authentication mode">
               <button
@@ -529,6 +556,7 @@ export default function PortalApp() {
                   onClick={() => {
                     setLoginEmail(account.email);
                     setLoginName(account.name);
+                    setLoginPassword(demoPassword);
                   }}
                 >
                   <span>{account.label}</span>
@@ -546,6 +574,17 @@ export default function PortalApp() {
                   value={loginEmail}
                   onChange={(event) => setLoginEmail(event.target.value)}
                   placeholder="person@example.com"
+                  required
+                />
+              </label>
+              <label className="field full">
+                <span>Password</span>
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(event) => setLoginPassword(event.target.value)}
+                  placeholder={authMode === "signUp" ? "Create at least 8 characters" : "Your password"}
+                  minLength={8}
                   required
                 />
               </label>
@@ -1003,6 +1042,7 @@ function BidderWorkLog({
     interviewsScheduled: "",
     notes: "",
   });
+  const [editingWorkLogId, setEditingWorkLogId] = useState("");
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
 
   const user = data.currentUser;
@@ -1014,6 +1054,7 @@ function BidderWorkLog({
   async function submit(event: FormEvent) {
     event.preventDefault();
     const nextData = await onSave("saveWorkLog", {
+      workLogId: editingWorkLogId,
       workDate: draft.workDate,
       sheetLink: draft.sheetLink,
       appliedJobs: Number(draft.appliedJobs),
@@ -1022,7 +1063,24 @@ function BidderWorkLog({
     });
     if (nextData) {
       setDraft({ workDate: today(), sheetLink: "", appliedJobs: "", interviewsScheduled: "", notes: "" });
+      setEditingWorkLogId("");
     }
+  }
+
+  function startEditingWorkLog(log: WorkLog) {
+    setEditingWorkLogId(log.id);
+    setDraft({
+      workDate: log.workDate,
+      sheetLink: log.sheetLink,
+      appliedJobs: String(log.appliedJobs),
+      interviewsScheduled: String(log.interviewsScheduled),
+      notes: log.notes,
+    });
+  }
+
+  function cancelEditingWorkLog() {
+    setEditingWorkLogId("");
+    setDraft({ workDate: today(), sheetLink: "", appliedJobs: "", interviewsScheduled: "", notes: "" });
   }
 
   return (
@@ -1030,8 +1088,8 @@ function BidderWorkLog({
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Daily Bidder Log</h2>
-            <p>Attach the Google Sheet and enter daily totals.</p>
+            <h2>{editingWorkLogId ? "Edit Work Log" : "Daily Bidder Log"}</h2>
+            <p>{editingWorkLogId ? "Update this unpaid work log before it is paid." : "Attach the Google Sheet and enter daily totals."}</p>
           </div>
         </div>
         <form className="form-grid" onSubmit={submit}>
@@ -1056,7 +1114,14 @@ function BidderWorkLog({
             <textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
           </label>
           <div className="actions full">
-            <button className="primary-button" type="submit" disabled={busy}>Save daily log</button>
+            <button className="primary-button" type="submit" disabled={busy}>
+              {editingWorkLogId ? "Save changes" : "Save daily log"}
+            </button>
+            {editingWorkLogId ? (
+              <button className="ghost-button" type="button" onClick={cancelEditingWorkLog}>
+                Cancel edit
+              </button>
+            ) : null}
           </div>
         </form>
       </section>
@@ -1097,7 +1162,12 @@ function BidderWorkLog({
           </div>
           <span className="badge pending">{logs.length} open</span>
         </div>
-        <WorkLogTable logs={logs} users={[user]} emptyMessage="No unpaid work logs match this date filter." />
+        <WorkLogTable
+          logs={logs}
+          users={[user]}
+          emptyMessage="No unpaid work logs match this date filter."
+          onEditLog={startEditingWorkLog}
+        />
       </section>
     </div>
   );
@@ -1166,12 +1236,14 @@ function WorkLogTable({
   payments = [],
   showPaymentStatus = false,
   emptyMessage = "No work logs yet.",
+  onEditLog,
 }: {
   logs: WorkLog[];
   users: PortalUser[];
   payments?: PaymentRecord[];
   showPaymentStatus?: boolean;
   emptyMessage?: string;
+  onEditLog?: (log: WorkLog) => void;
 }) {
   if (!logs.length) {
     return <div className="empty-state">{emptyMessage}</div>;
@@ -1189,6 +1261,7 @@ function WorkLogTable({
             <th>Interviews</th>
             {showPaymentStatus ? <th>Status</th> : null}
             <th>Notes</th>
+            {onEditLog ? <th>Actions</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -1206,6 +1279,13 @@ function WorkLogTable({
                   <td><span className={`badge ${paid ? "bidder" : "pending"}`}>{paid ? "Paid" : "Unpaid"}</span></td>
                 ) : null}
                 <td>{log.notes || "-"}</td>
+                {onEditLog ? (
+                  <td>
+                    <button className="ghost-button compact-button" type="button" onClick={() => onEditLog(log)}>
+                      Edit
+                    </button>
+                  </td>
+                ) : null}
               </tr>
             );
           })}

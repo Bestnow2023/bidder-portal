@@ -108,32 +108,6 @@ a:hover {
   line-height: 1.6;
 }
 
-.login-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-top: 54px;
-}
-
-.login-stats div {
-  min-height: 92px;
-  padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.login-stats strong {
-  display: block;
-  font-size: 24px;
-  margin-bottom: 8px;
-}
-
-.login-stats span {
-  color: rgba(255, 255, 255, 0.78);
-  font-size: 13px;
-}
-
 .login-form {
   padding: 42px;
 }
@@ -256,6 +230,11 @@ textarea:focus {
   border: 1px solid var(--line);
   background: #ffffff;
   color: var(--foreground);
+}
+
+.compact-button {
+  min-height: 32px;
+  padding: 6px 10px;
 }
 
 .danger-button {
@@ -897,7 +876,6 @@ td {
     font-size: 32px;
   }
 
-  .login-stats,
   .metric-grid,
   .form-grid,
   .filter-bar {

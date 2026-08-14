@@ -12,7 +12,8 @@ test("keeps the bidder portal as the primary screen", async () => {
 
   assert.match(page, /<PortalApp \/>/);
   assert.match(layout, /Bidder Work Portal/);
-  assert.match(portalApp, /Email sign-in/);
+  assert.match(portalApp, /Email and password sign-in/);
+  assert.match(portalApp, /Password/);
   assert.match(portalApp, /Sign up/);
   assert.match(portalApp, /Dashboard/);
   assert.match(portalApp, /Work Summary/);
@@ -27,6 +28,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Enable notifications/);
   assert.match(portalApp, /Attach file/);
   assert.match(portalApp, /Save edit/);
+  assert.match(portalApp, /Save changes/);
+  assert.doesNotMatch(portalApp, /Roles ready|Work logging|No Stripe/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.doesNotMatch(`${page}\n${layout}\n${portalApp}`, /codex-preview|Your site is taking shape/i);
 });
@@ -55,6 +58,8 @@ test("declares the requested frontend records", async () => {
   }
 
   for (const action of [
+    "refreshPortal",
+    "signIn",
     "updateUser",
     "signUp",
     "savePaymentMethod",
@@ -77,6 +82,9 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /Notification/);
   assert.match(portalApp, /FileReader/);
   assert.match(portalApp, /authorTimeZone/);
+  assert.match(portalApp, /sessionToken/);
+  assert.match(portalApp, /workLogId/);
+  assert.match(portalApp, /Cancel edit/);
   assert.match(portalApp, /audio controls/);
   assert.match(portalApp, /img src/);
   assert.match(envExample, /NEXT_PUBLIC_API_BASE_URL/);
