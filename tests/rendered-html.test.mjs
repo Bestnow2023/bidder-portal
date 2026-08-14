@@ -72,6 +72,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Set password/);
   assert.match(portalApp, /Check your email/);
   assert.match(portalApp, /Email verified successfully/);
+  assert.match(portalApp, /isEmailVerificationError/);
   assert.match(portalApp, /Continue to sign in/);
   assert.match(portalApp, /Frequency/);
   assert.match(portalApp, /Weekday/);

@@ -816,6 +816,10 @@ function filterWorkLogsByDate(logs: WorkLog[], range: DateRange) {
   return logs.filter((log) => logMatchesDateRange(log, range));
 }
 
+function isEmailVerificationError(message: string) {
+  return message.toLowerCase().includes("verify your email");
+}
+
 function isWorkLogPaid(log: WorkLog, payments: PaymentRecord[]) {
   const logDate = dateAtMidnight(log.workDate)?.getTime();
   if (logDate == null) {
@@ -884,6 +888,29 @@ export default function PortalApp() {
   const latestChatMessageIdRef = useRef("");
   const lastScrollYRef = useRef(0);
   const effectiveActiveView = data ? safeViewForUser(data.currentUser, activeView) : activeView;
+
+  const handleEmailVerificationRequired = useCallback((emailValue: string, message?: string) => {
+    const nextEmail = emailValue || loginEmail;
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("bidderPortalSessionToken");
+      if (nextEmail) {
+        window.localStorage.setItem("bidderPortalEmail", nextEmail);
+      }
+      if (window.location.pathname !== "/") {
+        window.history.pushState({}, "", "/");
+      }
+    }
+
+    setData(null);
+    setSessionToken("");
+    setLoginEmail(nextEmail);
+    setLoginPassword("");
+    setAuthMode("signIn");
+    setVerificationPendingEmail(nextEmail);
+    setVerificationSuccessEmail("");
+    setAuthNotice(message || "Check your email to verify your account before signing in.");
+    setError("");
+  }, [loginEmail]);
 
   const postPublicAction = useCallback(async (
     action: string,
@@ -1044,15 +1071,20 @@ export default function PortalApp() {
       window.localStorage.setItem("bidderPortalEmail", nextData.currentUser.email);
       return nextData as PortalData;
     } catch (refreshError) {
+      const message = refreshError instanceof Error ? refreshError.message : "Refresh failed.";
+      if (isEmailVerificationError(message)) {
+        handleEmailVerificationRequired(email, message);
+        return undefined;
+      }
       if (!silent) {
-        setError(refreshError instanceof Error ? refreshError.message : "Refresh failed.");
+        setError(message);
       }
     } finally {
       if (!silent) {
         setBusy(false);
       }
     }
-  }, []);
+  }, [handleEmailVerificationRequired]);
 
   useEffect(() => {
     if (!data?.currentUser.email || !sessionToken) {
@@ -1182,7 +1214,7 @@ export default function PortalApp() {
       }
 
       if (!nextData.currentUser) {
-        if (action === "signUp" && nextData.needsEmailVerification) {
+        if (nextData.needsEmailVerification) {
           const nextEmail = nextData.email || email || loginEmail;
           setVerificationPendingEmail(nextEmail);
           setVerificationSuccessEmail("");
@@ -1205,6 +1237,10 @@ export default function PortalApp() {
       return nextData as PortalData;
     } catch (actionError) {
       const message = actionError instanceof Error ? actionError.message : "Action failed.";
+      if (isEmailVerificationError(message)) {
+        handleEmailVerificationRequired(data?.currentUser.email || loginEmail, message);
+        return;
+      }
       if (action === "signIn" && message.toLowerCase().includes("sign up")) {
         setAuthMode("signUp");
         setLoginPassword("");
