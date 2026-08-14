@@ -14,11 +14,19 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(layout, /Bidder Work Portal/);
   assert.match(portalApp, /Email sign-in/);
   assert.match(portalApp, /Sign up/);
+  assert.match(portalApp, /Dashboard/);
+  assert.match(portalApp, /Work Summary/);
+  assert.match(portalApp, /All Work Logs/);
+  assert.match(portalApp, /Unpaid Work Logs/);
+  assert.match(portalApp, /Date or start/);
   assert.match(portalApp, /Daily Bidder Log/);
   assert.match(portalApp, /Payment History/);
   assert.match(portalApp, /Payday Reminder/);
   assert.match(portalApp, /Upcoming Payments/);
   assert.match(portalApp, /Group Chat/);
+  assert.match(portalApp, /Enable notifications/);
+  assert.match(portalApp, /Attach file/);
+  assert.match(portalApp, /Save edit/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.doesNotMatch(`${page}\n${layout}\n${portalApp}`, /codex-preview|Your site is taking shape/i);
 });
@@ -34,10 +42,14 @@ test("declares the requested frontend records", async () => {
 
   for (const label of [
     "User Management",
+    "Work Summary",
     "Daily Bidder Log",
+    "Unpaid Work Totals",
     "Payment Method",
     "Payment History",
     "Group Chat",
+    "Local ",
+    "Admin ",
   ]) {
     assert.match(portalApp, new RegExp(label));
   }
@@ -49,6 +61,8 @@ test("declares the requested frontend records", async () => {
     "saveWorkLog",
     "addPayment",
     "addChatMessage",
+    "editChatMessage",
+    "deleteChatMessage",
   ]) {
     assert.match(portalApp, new RegExp(action));
   }
@@ -57,8 +71,17 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /NEXT_PUBLIC_API_BASE_URL/);
   assert.match(portalApp, /NEXT_PUBLIC_PORTAL_MODE/);
   assert.match(portalApp, /\/api\/portal/);
+  assert.match(portalApp, /filterWorkLogsByDate/);
+  assert.match(portalApp, /isWorkLogPaid/);
+  assert.match(portalApp, /NEXT_PUBLIC_ADMIN_TIME_ZONE/);
+  assert.match(portalApp, /Notification/);
+  assert.match(portalApp, /FileReader/);
+  assert.match(portalApp, /authorTimeZone/);
+  assert.match(portalApp, /audio controls/);
+  assert.match(portalApp, /img src/);
   assert.match(envExample, /NEXT_PUBLIC_API_BASE_URL/);
   assert.match(envExample, /NEXT_PUBLIC_PORTAL_MODE/);
+  assert.match(envExample, /NEXT_PUBLIC_ADMIN_TIME_ZONE/);
   assert.equal(parsedPackage.dependencies.mongodb, undefined);
   assert.equal(parsedPackage.scripts.build, "next build");
   assert.equal(parsedPackage.scripts["db:generate"], undefined);

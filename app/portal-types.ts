@@ -52,13 +52,28 @@ export type PaymentRecord = {
   updatedAt: string;
 };
 
+export type ChatAttachment = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  dataUrl: string;
+};
+
 export type ChatMessage = {
   id: string;
   userId: string;
   authorName: string;
   authorRole: Role;
   body: string;
+  attachments?: ChatAttachment[];
+  authorTimeZone?: string;
   createdAt: string;
+  updatedAt?: string;
+  editedAt?: string;
+  editedByUserId?: string;
+  deletedAt?: string;
+  deletedByUserId?: string;
 };
 
 export type PortalData = {

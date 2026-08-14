@@ -1,7 +1,10 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import type {
+  ChatAttachment,
+  ChatMessage,
   PaymentMethod,
   PaymentRecord,
   PaymentStatus,
@@ -21,6 +24,10 @@ const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || defaultApiBaseUrl).r
 const portalApiUrl = `${apiBaseUrl}/api/portal`;
 const portalMode = process.env.NEXT_PUBLIC_PORTAL_MODE?.toLowerCase() === "live" ? "live" : "dev";
 const isLiveMode = portalMode === "live";
+const adminTimeZone = process.env.NEXT_PUBLIC_ADMIN_TIME_ZONE || "America/New_York";
+const chatPollIntervalMs = 15000;
+const chatAttachmentLimit = 3;
+const maxChatAttachmentBytes = 2 * 1024 * 1024;
 
 const demoAccounts = [
   { label: "Admin", email: "admin@portal.local", name: "Admin Owner" },
@@ -59,6 +66,66 @@ function dateTime(value: string) {
   }).format(new Date(value));
 }
 
+function dateTimeInZone(value: string, timeZone: string) {
+  if (!value) {
+    return "Not set";
+  }
+
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZoneName: "short",
+      timeZone,
+    }).format(new Date(value));
+  } catch {
+    return dateTime(value);
+  }
+}
+
+function browserTimeZone() {
+  if (typeof Intl === "undefined") {
+    return adminTimeZone;
+  }
+
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || adminTimeZone;
+}
+
+function formatBytes(value: number) {
+  if (!value) {
+    return "File";
+  }
+
+  if (value < 1024 * 1024) {
+    return `${Math.max(1, Math.round(value / 1024))} KB`;
+  }
+
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function attachmentSummary(attachments: ChatAttachment[] = []) {
+  if (!attachments.length) {
+    return "";
+  }
+
+  if (attachments.length === 1) {
+    const [attachment] = attachments;
+    if (attachment.type.startsWith("image/")) return "Photo";
+    if (attachment.type.startsWith("audio/")) return "Voice message";
+    return attachment.name;
+  }
+
+  return `${attachments.length} files`;
+}
+
+function chatNotificationText(message: ChatMessage) {
+  const body = message.body?.trim();
+  const attachmentText = attachmentSummary(message.attachments || []);
+  return `${message.authorName}: ${body || attachmentText || "New message"}`;
+}
+
 function titleCase(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -75,6 +142,7 @@ function statusLabel(status: UserStatus) {
 
 function viewTitle(view: string) {
   const titles: Record<string, string> = {
+    dashboard: "Dashboard",
     overview: "Operations",
     people: "People",
     work: "Work Logs",
@@ -150,6 +218,69 @@ type UpcomingPaymentItem = {
   sourceLabel: string;
 };
 
+type DateRange = {
+  startDate: string;
+  endDate: string;
+};
+
+function workSummary(user: PortalUser, logs: WorkLog[]) {
+  return {
+    appliedJobs: logs.reduce((total, log) => total + log.appliedJobs, 0),
+    interviewsScheduled: logs.reduce((total, log) => total + log.interviewsScheduled, 0),
+    earned: estimateForUser(user, logs),
+    logCount: logs.length,
+  };
+}
+
+function logMatchesDateRange(log: WorkLog, range: DateRange) {
+  if (!range.startDate && !range.endDate) {
+    return true;
+  }
+
+  if (range.startDate && !range.endDate) {
+    return log.workDate === range.startDate;
+  }
+
+  const logDate = dateAtMidnight(log.workDate)?.getTime();
+  if (logDate == null) {
+    return false;
+  }
+
+  const startDate = range.startDate ? dateAtMidnight(range.startDate)?.getTime() : null;
+  const endDate = range.endDate ? dateAtMidnight(range.endDate)?.getTime() : null;
+
+  if (startDate != null && logDate < startDate) {
+    return false;
+  }
+
+  if (endDate != null && logDate > endDate) {
+    return false;
+  }
+
+  return true;
+}
+
+function filterWorkLogsByDate(logs: WorkLog[], range: DateRange) {
+  return logs.filter((log) => logMatchesDateRange(log, range));
+}
+
+function isWorkLogPaid(log: WorkLog, payments: PaymentRecord[]) {
+  const logDate = dateAtMidnight(log.workDate)?.getTime();
+  if (logDate == null) {
+    return false;
+  }
+
+  return payments.some((payment) => {
+    if (payment.userId !== log.userId || payment.status !== "paid") {
+      return false;
+    }
+
+    const periodStart = dateAtMidnight(payment.periodStart)?.getTime();
+    const periodEnd = dateAtMidnight(payment.periodEnd)?.getTime();
+    return periodStart != null && periodEnd != null && periodStart <= logDate && logDate <= periodEnd;
+  });
+}
+
 export default function PortalApp() {
   const [data, setData] = useState<PortalData | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>(isLiveMode ? "signUp" : "signIn");
@@ -170,6 +301,122 @@ export default function PortalApp() {
   const [activeView, setActiveView] = useState("overview");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() =>
+    typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted"
+  );
+  const latestChatMessageIdRef = useRef("");
+
+  const refreshPortalData = useCallback(async (email: string, silent = false) => {
+    if (!email) {
+      return;
+    }
+
+    if (!silent) {
+      setBusy(true);
+      setError("");
+    }
+
+    try {
+      const response = await fetch(`${portalApiUrl}?email=${encodeURIComponent(email)}`);
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Portal API returned ${contentType || "non-JSON"} from ${portalApiUrl}. Check NEXT_PUBLIC_API_BASE_URL.`);
+      }
+
+      const nextData = await response.json();
+      if (!response.ok) {
+        throw new Error(nextData.error || "Refresh failed.");
+      }
+
+      setData(nextData);
+      setLoginEmail(nextData.currentUser.email);
+      window.localStorage.setItem("bidderPortalEmail", nextData.currentUser.email);
+      return nextData as PortalData;
+    } catch (refreshError) {
+      if (!silent) {
+        setError(refreshError instanceof Error ? refreshError.message : "Refresh failed.");
+      }
+    } finally {
+      if (!silent) {
+        setBusy(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!data?.currentUser.email) {
+      return;
+    }
+
+    const email = data.currentUser.email;
+    const interval = window.setInterval(() => {
+      void refreshPortalData(email, true);
+    }, chatPollIntervalMs);
+
+    return () => window.clearInterval(interval);
+  }, [data?.currentUser.email, refreshPortalData]);
+
+  useEffect(() => {
+    if (!data) {
+      latestChatMessageIdRef.current = "";
+      window.setTimeout(() => setChatUnreadCount(0), 0);
+      return;
+    }
+
+    const messages = data.chatMessages || [];
+    const latestMessage = messages[messages.length - 1];
+    if (!latestMessage) {
+      latestChatMessageIdRef.current = "";
+      window.setTimeout(() => setChatUnreadCount(0), 0);
+      return;
+    }
+
+    const previousMessageId = latestChatMessageIdRef.current;
+    if (!previousMessageId) {
+      latestChatMessageIdRef.current = latestMessage.id;
+      return;
+    }
+
+    if (previousMessageId !== latestMessage.id) {
+      const previousIndex = messages.findIndex((message) => message.id === previousMessageId);
+      const newMessages = previousIndex >= 0 ? messages.slice(previousIndex + 1) : [latestMessage];
+      const incomingMessages = newMessages.filter(
+        (message) => message.userId !== data.currentUser.id && !message.deletedAt
+      );
+
+      if (incomingMessages.length && activeView !== "chat") {
+        window.setTimeout(() => setChatUnreadCount((count) => count + incomingMessages.length), 0);
+        const lastIncoming = incomingMessages[incomingMessages.length - 1];
+        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+          new Notification("Bidder Portal", { body: chatNotificationText(lastIncoming) });
+        }
+      }
+
+      latestChatMessageIdRef.current = latestMessage.id;
+    }
+
+    if (activeView === "chat") {
+      window.setTimeout(() => setChatUnreadCount(0), 0);
+    }
+  }, [activeView, data]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    document.title = chatUnreadCount > 0 ? `(${chatUnreadCount}) Bidder Work Portal` : "Bidder Work Portal";
+  }, [chatUnreadCount]);
+
+  async function enableChatNotifications() {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    setNotificationsEnabled(permission === "granted");
+  }
 
   async function postAction(action: string, payload: Record<string, unknown> = {}) {
     if (!data && action !== "signIn" && action !== "signUp") {
@@ -210,6 +457,8 @@ export default function PortalApp() {
     window.localStorage.removeItem("bidderPortalEmail");
     setData(null);
     setActiveView("overview");
+    setChatUnreadCount(0);
+    latestChatMessageIdRef.current = "";
     setError("");
   }
 
@@ -331,7 +580,7 @@ export default function PortalApp() {
   const availableViews = isAdmin
     ? ["overview", "people", "work", "payments", "chat"]
     : currentUser.role === "bidder"
-      ? ["work", "payments", "chat"]
+      ? ["dashboard", "work", "payments", "chat"]
       : ["payments", "chat"];
   const safeView = availableViews.includes(activeView) ? activeView : availableViews[0];
 
@@ -354,7 +603,8 @@ export default function PortalApp() {
               onClick={() => setActiveView(view)}
               type="button"
             >
-              {viewTitle(view)}
+              <span>{viewTitle(view)}</span>
+              {view === "chat" && chatUnreadCount > 0 ? <span className="nav-badge">{chatUnreadCount}</span> : null}
             </button>
           ))}
         </nav>
@@ -394,9 +644,18 @@ export default function PortalApp() {
           <>
             {safeView === "overview" && isAdmin ? <AdminOverview data={data} /> : null}
             {safeView === "people" && isAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
+            {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
             {safeView === "work" ? <WorkView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "payments" ? <PaymentsView data={data} busy={busy} onAction={postAction} /> : null}
-            {safeView === "chat" ? <ChatView data={data} busy={busy} onSend={postAction} /> : null}
+            {safeView === "chat" ? (
+              <ChatView
+                data={data}
+                busy={busy}
+                notificationsEnabled={notificationsEnabled}
+                onEnableNotifications={enableChatNotifications}
+                onSend={postAction}
+              />
+            ) : null}
           </>
         )}
       </section>
@@ -645,6 +904,65 @@ function UserEditor({
   );
 }
 
+function BidderDashboard({ data }: { data: PortalData }) {
+  const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
+  const user = data.currentUser;
+  const allLogs = data.workLogs.filter((log) => log.userId === user.id);
+  const filteredLogs = filterWorkLogsByDate(allLogs, dateRange);
+  const unpaidFilteredLogs = filteredLogs.filter((log) => !isWorkLogPaid(log, data.payments));
+  const summary = workSummary(user, filteredLogs);
+  const openEstimate = estimateForUser(user, unpaidFilteredLogs);
+
+  return (
+    <div className="dashboard-stack">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Work Summary</h2>
+            <p>All logged work with date filters.</p>
+          </div>
+        </div>
+        <DateRangeFilter range={dateRange} onChange={setDateRange} />
+        <div className="metric-grid">
+          <div className="metric">
+            <span>Total applied</span>
+            <strong>{summary.appliedJobs}</strong>
+          </div>
+          <div className="metric">
+            <span>Total interviews</span>
+            <strong>{summary.interviewsScheduled}</strong>
+          </div>
+          <div className="metric">
+            <span>Total earned</span>
+            <strong>{money(summary.earned)}</strong>
+          </div>
+          <div className="metric">
+            <span>Open estimate</span>
+            <strong>{money(openEstimate)}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <h2>All Work Logs</h2>
+            <p>Paid and unpaid bidder logs.</p>
+          </div>
+          <span className="badge bidder">{summary.logCount} logs</span>
+        </div>
+        <WorkLogTable
+          logs={filteredLogs}
+          users={[user]}
+          payments={data.payments}
+          showPaymentStatus
+          emptyMessage="No work logs match this date filter."
+        />
+      </section>
+    </div>
+  );
+}
+
 function WorkView({
   data,
   busy,
@@ -685,12 +1003,13 @@ function BidderWorkLog({
     interviewsScheduled: "",
     notes: "",
   });
+  const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
 
   const user = data.currentUser;
-  const logs = data.workLogs.filter((log) => log.userId === user.id);
-  const totalApplied = logs.reduce((total, log) => total + log.appliedJobs, 0);
-  const totalInterviews = logs.reduce((total, log) => total + log.interviewsScheduled, 0);
-  const earned = estimateForUser(user, logs);
+  const allLogs = data.workLogs.filter((log) => log.userId === user.id);
+  const unpaidLogs = allLogs.filter((log) => !isWorkLogPaid(log, data.payments));
+  const logs = filterWorkLogsByDate(unpaidLogs, dateRange);
+  const summary = workSummary(user, logs);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -745,18 +1064,19 @@ function BidderWorkLog({
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Bidder Totals</h2>
-            <p>Your rate is visible from admin settings.</p>
+            <h2>Unpaid Work Totals</h2>
+            <p>Only unpaid work logs are included here.</p>
           </div>
         </div>
+        <DateRangeFilter range={dateRange} onChange={setDateRange} />
         <div className="metric-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
           <div className="metric">
             <span>Applied jobs</span>
-            <strong>{totalApplied}</strong>
+            <strong>{summary.appliedJobs}</strong>
           </div>
           <div className="metric">
             <span>Interviews</span>
-            <strong>{totalInterviews}</strong>
+            <strong>{summary.interviewsScheduled}</strong>
           </div>
           <div className="metric">
             <span>Job rate</span>
@@ -764,19 +1084,29 @@ function BidderWorkLog({
           </div>
           <div className="metric">
             <span>Estimate</span>
-            <strong>{money(earned)}</strong>
+            <strong>{money(summary.earned)}</strong>
           </div>
         </div>
       </section>
 
       <section className="panel" style={{ gridColumn: "1 / -1" }}>
-        <WorkLogTable logs={logs} users={[user]} />
+        <div className="section-heading">
+          <div>
+            <h2>Unpaid Work Logs</h2>
+            <p>Logs disappear from this list after a paid payment record covers their work date.</p>
+          </div>
+          <span className="badge pending">{logs.length} open</span>
+        </div>
+        <WorkLogTable logs={logs} users={[user]} emptyMessage="No unpaid work logs match this date filter." />
       </section>
     </div>
   );
 }
 
 function AdminWorkLogs({ data }: { data: PortalData }) {
+  const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
+  const logs = filterWorkLogsByDate(data.workLogs, dateRange);
+
   return (
     <section className="panel">
       <div className="section-heading">
@@ -785,14 +1115,66 @@ function AdminWorkLogs({ data }: { data: PortalData }) {
           <p>Daily Google Sheet links, applications, and scheduled interviews.</p>
         </div>
       </div>
-      <WorkLogTable logs={data.workLogs} users={data.users} />
+      <DateRangeFilter range={dateRange} onChange={setDateRange} />
+      <WorkLogTable logs={logs} users={data.users} emptyMessage="No work logs match this date filter." />
     </section>
   );
 }
 
-function WorkLogTable({ logs, users }: { logs: WorkLog[]; users: PortalUser[] }) {
+function DateRangeFilter({
+  range,
+  onChange,
+}: {
+  range: DateRange;
+  onChange: (range: DateRange) => void;
+}) {
+  const hasFilter = Boolean(range.startDate || range.endDate);
+
+  return (
+    <div className="filter-bar">
+      <label className="field">
+        <span>Date or start</span>
+        <input
+          type="date"
+          value={range.startDate}
+          onChange={(event) => onChange({ ...range, startDate: event.target.value })}
+        />
+      </label>
+      <label className="field">
+        <span>End date</span>
+        <input
+          type="date"
+          value={range.endDate}
+          onChange={(event) => onChange({ ...range, endDate: event.target.value })}
+        />
+      </label>
+      <button
+        className="ghost-button"
+        type="button"
+        disabled={!hasFilter}
+        onClick={() => onChange({ startDate: "", endDate: "" })}
+      >
+        Clear
+      </button>
+    </div>
+  );
+}
+
+function WorkLogTable({
+  logs,
+  users,
+  payments = [],
+  showPaymentStatus = false,
+  emptyMessage = "No work logs yet.",
+}: {
+  logs: WorkLog[];
+  users: PortalUser[];
+  payments?: PaymentRecord[];
+  showPaymentStatus?: boolean;
+  emptyMessage?: string;
+}) {
   if (!logs.length) {
-    return <div className="empty-state">No work logs yet.</div>;
+    return <div className="empty-state">{emptyMessage}</div>;
   }
 
   return (
@@ -805,12 +1187,14 @@ function WorkLogTable({ logs, users }: { logs: WorkLog[]; users: PortalUser[] })
             <th>Sheet</th>
             <th>Applied</th>
             <th>Interviews</th>
+            {showPaymentStatus ? <th>Status</th> : null}
             <th>Notes</th>
           </tr>
         </thead>
         <tbody>
           {logs.map((log) => {
             const user = userById(users, log.userId);
+            const paid = isWorkLogPaid(log, payments);
             return (
               <tr key={log.id}>
                 <td>{shortDate(log.workDate)}</td>
@@ -818,6 +1202,9 @@ function WorkLogTable({ logs, users }: { logs: WorkLog[]; users: PortalUser[] })
                 <td><a href={log.sheetLink} target="_blank" rel="noreferrer">Open sheet</a></td>
                 <td>{log.appliedJobs}</td>
                 <td>{log.interviewsScheduled}</td>
+                {showPaymentStatus ? (
+                  <td><span className={`badge ${paid ? "bidder" : "pending"}`}>{paid ? "Paid" : "Unpaid"}</span></td>
+                ) : null}
                 <td>{log.notes || "-"}</td>
               </tr>
             );
@@ -1258,51 +1645,311 @@ function PaymentTable({ payments, users }: { payments: PaymentRecord[]; users: P
   );
 }
 
+type ChatAttachmentDraft = Omit<ChatAttachment, "id"> & { id?: string };
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("File could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function ChatAttachmentView({ attachment }: { attachment: ChatAttachmentDraft }) {
+  const isImage = attachment.type.startsWith("image/");
+  const isAudio = attachment.type.startsWith("audio/");
+
+  return (
+    <div className={`chat-attachment ${isImage ? "image" : ""}`}>
+      {isImage ? (
+        <a href={attachment.dataUrl} target="_blank" rel="noreferrer">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={attachment.dataUrl} alt={attachment.name} />
+        </a>
+      ) : isAudio ? (
+        <audio controls preload="metadata" src={attachment.dataUrl} />
+      ) : (
+        <a className="file-link" href={attachment.dataUrl} download={attachment.name}>
+          {attachment.name}
+        </a>
+      )}
+      <span>{attachment.name} - {formatBytes(attachment.size)}</span>
+    </div>
+  );
+}
+
+function ChatAttachments({ attachments }: { attachments: ChatAttachmentDraft[] }) {
+  if (!attachments.length) {
+    return null;
+  }
+
+  return (
+    <div className="chat-attachments">
+      {attachments.map((attachment, index) => (
+        <ChatAttachmentView
+          key={attachment.id || `${attachment.name}-${attachment.size}-${index}`}
+          attachment={attachment}
+        />
+      ))}
+    </div>
+  );
+}
+
 function ChatView({
   data,
   busy,
+  notificationsEnabled,
+  onEnableNotifications,
   onSend,
 }: {
   data: PortalData;
   busy: boolean;
+  notificationsEnabled: boolean;
+  onEnableNotifications: () => Promise<void>;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
   const [body, setBody] = useState("");
+  const [attachments, setAttachments] = useState<ChatAttachmentDraft[]>([]);
+  const [chatError, setChatError] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const currentUser = data.currentUser;
   const canSend = currentUser.status === "approved";
+  const userTimeZone = browserTimeZone();
+  const notificationSupported = typeof window !== "undefined" && "Notification" in window;
+  const canSubmit = canSend && Boolean(body.trim() || attachments.length);
+
+  async function sendMessage() {
+    if (!canSubmit || busy) {
+      return;
+    }
+
+    const nextData = await onSend("addChatMessage", {
+      body,
+      attachments,
+      authorTimeZone: userTimeZone,
+    });
+    if (nextData) {
+      setBody("");
+      setAttachments([]);
+      setChatError("");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const nextData = await onSend("addChatMessage", { body });
+    await sendMessage();
+  }
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void sendMessage();
+    }
+  }
+
+  async function handleFileSelection(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.target.files || []);
+    if (!selectedFiles.length) {
+      return;
+    }
+
+    const remainingSlots = chatAttachmentLimit - attachments.length;
+    const acceptedFiles = selectedFiles.slice(0, Math.max(0, remainingSlots));
+    const skippedCount = selectedFiles.length - acceptedFiles.length;
+    const nextAttachments: ChatAttachmentDraft[] = [];
+    let nextError = skippedCount > 0 ? `Only ${chatAttachmentLimit} files can be attached to one message.` : "";
+
+    for (const file of acceptedFiles) {
+      if (file.size > maxChatAttachmentBytes) {
+        nextError = "Each chat file must be 2 MB or smaller.";
+        continue;
+      }
+
+      try {
+        nextAttachments.push({
+          name: file.name,
+          type: file.type || "application/octet-stream",
+          size: file.size,
+          dataUrl: await readFileAsDataUrl(file),
+        });
+      } catch (fileError) {
+        nextError = fileError instanceof Error ? fileError.message : "File could not be read.";
+      }
+    }
+
+    if (nextAttachments.length) {
+      setAttachments((current) => [...current, ...nextAttachments]);
+    }
+    setChatError(nextError);
+    event.target.value = "";
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((current) => current.filter((_, attachmentIndex) => attachmentIndex !== index));
+  }
+
+  function startEditing(message: ChatMessage) {
+    setEditingMessageId(message.id);
+    setEditBody(message.body || "");
+    setChatError("");
+  }
+
+  function cancelEditing() {
+    setEditingMessageId("");
+    setEditBody("");
+  }
+
+  async function saveEditedMessage(message: ChatMessage) {
+    const nextData = await onSend("editChatMessage", {
+      messageId: message.id,
+      body: editBody,
+    });
     if (nextData) {
-      setBody("");
+      cancelEditing();
+    }
+  }
+
+  function handleEditKeyDown(event: KeyboardEvent<HTMLTextAreaElement>, message: ChatMessage) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void saveEditedMessage(message);
+    }
+  }
+
+  async function deleteMessage(message: ChatMessage) {
+    const nextData = await onSend("deleteChatMessage", { messageId: message.id });
+    if (nextData && editingMessageId === message.id) {
+      cancelEditing();
     }
   }
 
   return (
     <section className="panel chat-panel">
+      <div className="chat-toolbar">
+        <span className="badge bidder">{data.chatMessages.length} messages</span>
+        {notificationSupported ? (
+          <button
+            className="ghost-button"
+            type="button"
+            disabled={notificationsEnabled}
+            onClick={onEnableNotifications}
+          >
+            {notificationsEnabled ? "Notifications on" : "Enable notifications"}
+          </button>
+        ) : null}
+      </div>
+
       <div className="messages">
-        {data.chatMessages.map((message) => (
-          <div className={`message ${message.userId === currentUser.id ? "mine" : ""}`} key={message.id}>
-            <div className="message-meta">
-              <span>{message.authorName} - {roleLabel(message.authorRole)}</span>
-              <span>{dateTime(message.createdAt)}</span>
+        {data.chatMessages.map((message) => {
+          const deleted = Boolean(message.deletedAt);
+          const isMine = message.userId === currentUser.id;
+          const canManage = !deleted && (isMine || currentUser.role === "admin");
+          const isEditing = editingMessageId === message.id;
+          const messageAttachments = message.attachments || [];
+
+          return (
+            <div className={`message ${isMine ? "mine" : ""} ${deleted ? "deleted" : ""}`} key={message.id}>
+              <div className="message-meta">
+                <span>{message.authorName} - {roleLabel(message.authorRole)}</span>
+                <span className="message-times">
+                  <span>Local {dateTimeInZone(message.createdAt, message.authorTimeZone || userTimeZone)}</span>
+                  <span>Admin {dateTimeInZone(message.createdAt, adminTimeZone)}</span>
+                </span>
+              </div>
+
+              {deleted ? (
+                <p className="muted">Message deleted</p>
+              ) : isEditing ? (
+                <div className="message-edit">
+                  <textarea
+                    value={editBody}
+                    onChange={(event) => setEditBody(event.target.value)}
+                    onKeyDown={(event) => handleEditKeyDown(event, message)}
+                    autoFocus
+                  />
+                  <div className="actions">
+                    <button className="primary-button" type="button" disabled={busy} onClick={() => void saveEditedMessage(message)}>
+                      Save edit
+                    </button>
+                    <button className="ghost-button" type="button" onClick={cancelEditing}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {message.body ? <p>{message.body}</p> : null}
+                  <ChatAttachments attachments={messageAttachments} />
+                  {message.editedAt ? <span className="edited-label">Edited</span> : null}
+                </>
+              )}
+
+              {canManage ? (
+                <div className="message-actions">
+                  <button className="ghost-button" type="button" onClick={() => startEditing(message)}>
+                    Edit
+                  </button>
+                  <button className="danger-button" type="button" disabled={busy} onClick={() => void deleteMessage(message)}>
+                    Delete
+                  </button>
+                </div>
+              ) : null}
             </div>
-            <p>{message.body}</p>
-          </div>
-        ))}
+          );
+        })}
         {!data.chatMessages.length ? <div className="empty-state">No messages yet.</div> : null}
       </div>
 
-      <form className="form-grid" onSubmit={submit}>
+      <form className="chat-composer" onSubmit={submit}>
         <label className="field full">
           <span>Message</span>
-          <textarea value={body} onChange={(event) => setBody(event.target.value)} disabled={!canSend} required />
+          <textarea
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
+            disabled={!canSend}
+            required={!attachments.length}
+          />
         </label>
+
+        {attachments.length ? (
+          <div className="attachment-preview-list">
+            {attachments.map((attachment, index) => (
+              <div className="attachment-preview" key={`${attachment.name}-${attachment.size}-${index}`}>
+                <span>{attachment.name} - {formatBytes(attachment.size)}</span>
+                <button className="ghost-button" type="button" onClick={() => removeAttachment(index)}>
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <input
+          ref={fileInputRef}
+          className="file-input"
+          type="file"
+          multiple
+          disabled={!canSend}
+          onChange={handleFileSelection}
+        />
+
         <div className="actions full">
-          <button className="primary-button" type="submit" disabled={busy || !canSend}>Send message</button>
+          <button className="ghost-button" type="button" disabled={!canSend || attachments.length >= chatAttachmentLimit} onClick={() => fileInputRef.current?.click()}>
+            Attach file
+          </button>
+          <button className="primary-button" type="submit" disabled={busy || !canSubmit}>
+            Send message
+          </button>
           {!canSend ? <span className="muted">Approval is required before sending group messages.</span> : null}
         </div>
+        {chatError ? <div className="error full">{chatError}</div> : null}
       </form>
     </section>
   );
