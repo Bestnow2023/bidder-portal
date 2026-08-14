@@ -24,10 +24,13 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Sign up/);
   assert.match(portalApp, /Requested role/);
   assert.match(portalApp, /Super Admin/);
+  assert.match(portalApp, /Approved client/);
   assert.match(portalApp, /Assigned client/);
   assert.match(portalApp, /Dashboard/);
   assert.match(portalApp, /My Profile/);
   assert.match(portalApp, /Client Search/);
+  assert.match(portalApp, /Search clients/);
+  assert.match(portalApp, /Search bidders/);
   assert.match(portalApp, /Work Summary/);
   assert.match(portalApp, /Bidder Settings/);
   assert.match(portalApp, /All Work Logs/);
@@ -86,6 +89,8 @@ test("declares the requested frontend records", async () => {
     "Manage accounts, approval status, roles, passwords, and email verification.",
     "My Profile",
     "Client Search",
+    "Search clients",
+    "Search bidders",
     "Assigned client",
     "Bidder Settings",
     "Work Summary",
@@ -149,8 +154,11 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /profileCompletedAt/);
   assert.match(portalApp, /clientStats/);
   assert.match(portalApp, /clientUsers/);
+  assert.match(portalApp, /timeZoneOptions/);
+  assert.match(portalApp, /client@portal\.local/);
   assert.match(portalApp, /EscrowTable/);
-  assert.match(portalApp, /isAdminRole/);
+  assert.match(portalApp, /isSuperAdminRole/);
+  assert.match(portalApp, /isClientRole/);
   assert.match(portalApp, /isWorkerUser/);
   assert.match(portalApp, /Notification/);
   assert.match(portalApp, /FileReader/);

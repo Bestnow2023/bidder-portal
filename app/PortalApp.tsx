@@ -56,8 +56,28 @@ const demoPassword = "demo1234";
 
 const demoAccounts = [
   { label: "Super admin", email: "admin@portal.local", name: "Super Admin Owner" },
+  { label: "Approved client", email: "client@portal.local", name: "Demo Client" },
   { label: "Approved bidder", email: "maya.bidder@example.com", name: "Maya Bidder" },
   { label: "Pending bidder", email: "pending.bidder@example.com", name: "Pending Bidder" },
+];
+const timeZoneOptions = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Sao_Paulo",
+  "Europe/London",
+  "Europe/Berlin",
+  "Europe/Warsaw",
+  "Africa/Lagos",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Dhaka",
+  "Asia/Singapore",
+  "Asia/Manila",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+  "UTC",
 ];
 const viewRoutes: Record<PortalView, string> = {
   overview: "/operations",
@@ -240,17 +260,25 @@ function paymentScheduleLabel(frequencyInput?: string, weekdayInput?: string) {
 
 function roleLabel(role: Role) {
   if (role === "super_admin") return "Super Admin";
-  if (role === "admin") return "Client";
+  if (role === "client" || role === "admin") return "Client";
   if (role === "developer") return "Developer";
   return "Bidder";
 }
 
-function isAdminRole(role: Role) {
-  return role === "admin" || role === "super_admin";
+function isSuperAdminRole(role: Role) {
+  return role === "super_admin";
+}
+
+function isClientRole(role: Role) {
+  return role === "client" || role === "admin";
+}
+
+function canViewManagedRecords(role: Role) {
+  return isSuperAdminRole(role) || isClientRole(role);
 }
 
 function isWorkerUser(user: PortalUser) {
-  return !isAdminRole(user.role);
+  return !isSuperAdminRole(user.role) && !isClientRole(user.role);
 }
 
 function statusLabel(status: UserStatus) {
@@ -260,7 +288,7 @@ function statusLabel(status: UserStatus) {
 function viewTitle(view: string) {
   const titles: Record<string, string> = {
     dashboard: "Dashboard",
-    overview: "Operations",
+    overview: "Dashboard",
     profile: "Profile",
     clients: "Clients",
     people: "People",
@@ -280,7 +308,7 @@ function viewSubtitle(view: string, isAdmin: boolean) {
   }
 
   const subtitles: Record<string, string> = {
-    overview: "Review operations, recent work, and payment snapshots.",
+    overview: "Review work, clients, payments, and escrow snapshots.",
     profile: "Complete your public profile and escrow readiness.",
     clients: "Review client profiles and hiring signals.",
     people: "Manage user accounts, approval status, roles, passwords, and email verification.",
@@ -294,8 +322,12 @@ function viewSubtitle(view: string, isAdmin: boolean) {
 }
 
 function viewsForUser(user: PortalUser): PortalView[] {
-  if (isAdminRole(user.role)) {
+  if (isSuperAdminRole(user.role)) {
     return ["overview", "profile", "people", "bidderSettings", "work", "payments", "chat"];
+  }
+
+  if (isClientRole(user.role)) {
+    return ["overview", "profile", "work", "payments", "chat"];
   }
 
   if (user.role === "bidder") {
@@ -360,7 +392,26 @@ function isProfileComplete(user: PortalUser) {
 }
 
 function clientUsers(users: PortalUser[]) {
-  return users.filter((user) => user.role === "admin" && user.status === "approved");
+  return users.filter((user) => isClientRole(user.role) && user.status === "approved");
+}
+
+function userMatchesSearch(user: PortalUser, query: string) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  return [
+    user.name,
+    user.email,
+    roleLabel(user.role),
+    user.profileTitle,
+    user.profileBio,
+    user.profileLocation,
+    ...(user.profileSkills || []),
+  ]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(normalizedQuery));
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -1021,7 +1072,12 @@ export default function PortalApp() {
       window.localStorage.setItem("bidderPortalEmail", nextData.currentUser.email);
       return nextData as PortalData;
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Action failed.");
+      const message = actionError instanceof Error ? actionError.message : "Action failed.";
+      if (action === "signIn" && message.toLowerCase().includes("sign up")) {
+        setAuthMode("signUp");
+        setLoginPassword("");
+      }
+      setError(message);
     } finally {
       setBusy(false);
     }
@@ -1219,7 +1275,7 @@ export default function PortalApp() {
                   <span>Requested role</span>
                   <select value={signupRole} onChange={(event) => setSignupRole(event.target.value as Role)}>
                     <option value="bidder">Bidder</option>
-                    <option value="admin">Client</option>
+                    <option value="client">Client</option>
                     <option value="developer">Developer</option>
                   </select>
                 </label>
@@ -1251,7 +1307,8 @@ export default function PortalApp() {
   }
 
   const currentUser = data.currentUser;
-  const isAdmin = isAdminRole(currentUser.role);
+  const isSuperAdmin = isSuperAdminRole(currentUser.role);
+  const canViewManaged = canViewManagedRecords(currentUser.role);
   const availableViews = viewsForUser(currentUser);
   const safeView = availableViews.includes(activeView) ? activeView : availableViews[0];
 
@@ -1317,7 +1374,7 @@ export default function PortalApp() {
         <header className="topbar">
           <div>
             <h1>{viewTitle(safeView)}</h1>
-            <p>{viewSubtitle(safeView, isAdmin)}</p>
+            <p>{viewSubtitle(safeView, canViewManaged)}</p>
           </div>
           <div className="badge-row">
             <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
@@ -1331,11 +1388,11 @@ export default function PortalApp() {
           <PendingView data={data} busy={busy} onSaveMethod={postAction} />
         ) : (
           <>
-            {safeView === "overview" && isAdmin ? <AdminOverview data={data} /> : null}
+            {safeView === "overview" && canViewManaged ? <AdminOverview data={data} /> : null}
             {safeView === "profile" ? <ProfileView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "clients" ? <ClientDirectoryView data={data} /> : null}
-            {safeView === "people" && isAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
-            {safeView === "bidderSettings" && isAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
+            {safeView === "people" && isSuperAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
+            {safeView === "bidderSettings" && isSuperAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
             {safeView === "work" ? <WorkView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "payments" ? <PaymentsView data={data} busy={busy} onAction={postAction} /> : null}
@@ -1463,17 +1520,20 @@ function ProfileView({
     profileLocation: user.profileLocation || "",
     profileTimeZone: user.profileTimeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "",
   });
+  const profileTimeZoneOptions = timeZoneOptions.includes(draft.profileTimeZone)
+    ? timeZoneOptions
+    : [draft.profileTimeZone, ...timeZoneOptions].filter(Boolean);
   const relatedProfiles = data.users.filter((profileUser) => {
     if (profileUser.id === user.id || !isProfileComplete(profileUser)) {
       return false;
     }
     if (user.role === "bidder") {
-      return profileUser.role === "admin";
+      return isClientRole(profileUser.role);
     }
-    if (isAdminRole(user.role)) {
+    if (canViewManagedRecords(user.role)) {
       return profileUser.role === "bidder";
     }
-    return profileUser.role === "admin";
+    return isClientRole(profileUser.role);
   });
 
   async function submit(event: FormEvent) {
@@ -1500,7 +1560,7 @@ function ProfileView({
             <input
               value={draft.profileTitle}
               onChange={(event) => setDraft({ ...draft, profileTitle: event.target.value })}
-              placeholder={user.role === "admin" ? "Hiring client for remote bidder work" : "Technical bidder for web projects"}
+              placeholder={isClientRole(user.role) ? "Hiring client for remote bidder work" : "Technical bidder for web projects"}
             />
           </label>
           <label className="field">
@@ -1513,11 +1573,14 @@ function ProfileView({
           </label>
           <label className="field">
             <span>Timezone</span>
-            <input
+            <select
               value={draft.profileTimeZone}
               onChange={(event) => setDraft({ ...draft, profileTimeZone: event.target.value })}
-              placeholder="America/New_York"
-            />
+            >
+              {profileTimeZoneOptions.map((timeZone) => (
+                <option key={timeZone} value={timeZone}>{timeZone}</option>
+              ))}
+            </select>
           </label>
           <label className="field">
             <span>Skills / focus</span>
@@ -1587,6 +1650,7 @@ function ProfileCardGrid({ users }: { users: PortalUser[] }) {
 
 function ClientDirectoryView({ data }: { data: PortalData }) {
   const [filters, setFilters] = useState({
+    query: "",
     joinedAfter: "",
     minMoneyPaid: "",
     minRating: "",
@@ -1596,6 +1660,7 @@ function ClientDirectoryView({ data }: { data: PortalData }) {
     sortBy: "joinedDate",
   });
   const clients = clientUsers(data.users)
+    .filter((client) => userMatchesSearch(client, filters.query))
     .filter((client) => {
       const stats = client.clientStats;
       const joinedAfter = filters.joinedAfter ? new Date(`${filters.joinedAfter}T00:00:00`) : null;
@@ -1634,6 +1699,10 @@ function ClientDirectoryView({ data }: { data: PortalData }) {
       </div>
 
       <div className="filter-bar">
+        <label className="field">
+          <span>Search clients</span>
+          <input value={filters.query} onChange={(event) => setFilters({ ...filters, query: event.target.value })} placeholder="Name, email, skill, location" />
+        </label>
         <label className="field">
           <span>Joined after</span>
           <input type="date" value={filters.joinedAfter} onChange={(event) => setFilters({ ...filters, joinedAfter: event.target.value })} />
@@ -1730,7 +1799,7 @@ function PeopleView({
 }) {
   const [editingUser, setEditingUser] = useState<PortalUser | null>(null);
   const canManageRoles = data.currentUser.role === "super_admin";
-  const adminUsers = data.users.filter((user) => user.role === "admin" && user.status === "approved");
+  const adminUsers = data.users.filter((user) => isClientRole(user.role) && user.status === "approved");
   const visibleUsers = canManageRoles ? data.users : data.users.filter(isWorkerUser);
 
   async function updateUser(user: PortalUser, changes: Partial<Pick<PortalUser, "name" | "role" | "status" | "assignedAdminId">>) {
@@ -1932,7 +2001,7 @@ function UserEditModal({
               {draft.role === "super_admin" ? <option value="super_admin">Super Admin</option> : null}
               <option value="bidder">Bidder</option>
               <option value="developer">Developer</option>
-              <option value="admin">Client</option>
+              <option value="client">Client</option>
             </select>
           </label>
           {draft.role === "bidder" ? (
@@ -2001,7 +2070,8 @@ function BidderSettingsView({
   busy: boolean;
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
-  const bidders = data.users.filter((user) => user.role === "bidder");
+  const [bidderSearch, setBidderSearch] = useState("");
+  const bidders = data.users.filter((user) => user.role === "bidder" && userMatchesSearch(user, bidderSearch));
   const [editingBidder, setEditingBidder] = useState<PortalUser | null>(null);
 
   return (
@@ -2011,6 +2081,12 @@ function BidderSettingsView({
           <h2>Bidder Settings</h2>
           <p>Manage bidder rates, bonuses, and payment schedules separately from user accounts.</p>
         </div>
+      </div>
+      <div className="filter-bar">
+        <label className="field">
+          <span>Search bidders</span>
+          <input value={bidderSearch} onChange={(event) => setBidderSearch(event.target.value)} placeholder="Name, email, skill, location" />
+        </label>
       </div>
       {bidders.length ? (
         <div className="table-wrap">
@@ -2265,7 +2341,7 @@ function WorkView({
   busy: boolean;
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
-  if (isAdminRole(data.currentUser.role)) {
+  if (canViewManagedRecords(data.currentUser.role)) {
     return <AdminWorkLogs data={data} />;
   }
 
@@ -2696,7 +2772,7 @@ function PaymentsView({
   busy: boolean;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
-  if (isAdminRole(data.currentUser.role)) {
+  if (canViewManagedRecords(data.currentUser.role)) {
     return <AdminPayments data={data} busy={busy} onAction={onAction} />;
   }
 
@@ -2844,6 +2920,7 @@ function AdminPayments({
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
   const payableUsers = data.users.filter(isWorkerUser);
+  const canRecordPayments = isSuperAdminRole(data.currentUser.role);
   const [draft, setDraft] = useState({
     userId: payableUsers[0]?.id || "",
     periodStart: today(),
@@ -2956,7 +3033,8 @@ function AdminPayments({
     <div className="two-column">
       <PaydayReminder reminders={paydayReminders} />
 
-      <section className="panel">
+      {canRecordPayments ? (
+        <section className="panel">
         <div className="panel-header">
           <div>
             <h2>Add Payment Record</h2>
@@ -3003,7 +3081,8 @@ function AdminPayments({
             </button>
           </div>
         </form>
-      </section>
+        </section>
+      ) : null}
 
       <div className="payment-side-column">
         <UpcomingPaymentsPanel payments={upcomingPayments} />
@@ -3086,7 +3165,12 @@ function AdminPayments({
             <p>Paid records and receipt links.</p>
           </div>
         </div>
-        <PaymentTable payments={data.payments} users={data.users} onEdit={setEditingPayment} onDelete={deletePayment} />
+        <PaymentTable
+          payments={data.payments}
+          users={data.users}
+          onEdit={canRecordPayments ? setEditingPayment : undefined}
+          onDelete={canRecordPayments ? deletePayment : undefined}
+        />
       </section>
 
       <section className="panel" style={{ gridColumn: "1 / -1" }}>
@@ -3602,7 +3686,7 @@ function ChatView({
         {data.chatMessages.map((message) => {
           const deleted = Boolean(message.deletedAt);
           const isMine = message.userId === currentUser.id;
-          const canManage = !deleted && (isMine || isAdminRole(currentUser.role));
+          const canManage = !deleted && (isMine || isSuperAdminRole(currentUser.role));
           const isEditing = editingMessageId === message.id;
           const messageAttachments = message.attachments || [];
 
@@ -3726,14 +3810,14 @@ function PendingView({
 }) {
   const user = data.currentUser;
   const methods = data.paymentMethods.filter((method) => method.userId === user.id);
-  const canSavePaymentMethod = !isAdminRole(user.role);
+  const canSavePaymentMethod = !isSuperAdminRole(user.role) && !isClientRole(user.role);
 
   return (
     <div className="pending-box">
       <div className="status-strip">
         <h2>Account pending approval</h2>
         <p>
-          {user.role === "admin"
+          {isClientRole(user.role)
             ? "A super admin must approve client accounts before management tools are available."
             : "A client can approve your account, set your bidder rate, set your interview bonus, and schedule your next payment."}
         </p>

@@ -434,7 +434,8 @@ button:disabled {
   font-weight: 800;
 }
 
-.badge.admin {
+.badge.admin,
+.badge.client {
   background: #e8f0ff;
   color: var(--blue);
 }

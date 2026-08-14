@@ -1,4 +1,4 @@
-export type Role = "super_admin" | "admin" | "bidder" | "developer";
+export type Role = "super_admin" | "client" | "admin" | "bidder" | "developer";
 export type UserStatus = "pending" | "approved" | "paused";
 export type PaymentStatus = "scheduled" | "paid";
 export type PaymentFrequency = "" | "weekly" | "biweekly" | "monthly";
