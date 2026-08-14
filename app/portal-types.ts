@@ -75,15 +75,40 @@ export type WorkLog = {
 export type PaymentRecord = {
   id: string;
   userId: string;
+  clientId?: string;
   periodStart: string;
   periodEnd: string;
   scheduledDate: string;
   amount: number;
+  creditAmountUsed?: number;
   status: PaymentStatus;
   paymentLink: string;
   memo: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type DepositRecord = {
+  id: string;
+  clientId: string;
+  provider: "cryptomus";
+  orderId: string;
+  invoiceUuid: string;
+  amount: number;
+  feeAmount: number;
+  creditAmount: number;
+  currency: string;
+  toCurrency: string;
+  network: string;
+  status: "pending" | "paid" | "failed";
+  providerStatus: string;
+  paymentUrl: string;
+  paymentAmountUsd: number;
+  merchantAmount: number;
+  txid: string;
+  createdAt: string;
+  updatedAt: string;
+  paidAt: string;
 };
 
 export type EscrowRecord = {
@@ -133,6 +158,7 @@ export type PortalData = {
   workLogs: WorkLog[];
   payments: PaymentRecord[];
   escrows: EscrowRecord[];
+  deposits: DepositRecord[];
   chatContacts?: PortalUser[];
   chatMessages: ChatMessage[];
 };

@@ -6,6 +6,7 @@ import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "
 import type {
   ChatAttachment,
   ChatMessage,
+  DepositRecord,
   EscrowRecord,
   PaymentFrequency,
   PaymentMethod,
@@ -19,7 +20,7 @@ import type {
 } from "./portal-types";
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
-type PortalView = "overview" | "dashboard" | "profile" | "clients" | "people" | "bidderSettings" | "work" | "payments" | "chat";
+type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "people" | "bidderSettings" | "work" | "payments" | "chat";
 
 const paymentMethods = ["Payoneer", "BEP20", "Wise", "PayPal", "Bank transfer", "USDT TRC20", "Other"];
 const paymentFrequencies: { value: PaymentFrequency; label: string }[] = [
@@ -84,6 +85,7 @@ const viewRoutes: Record<PortalView, string> = {
   dashboard: "/dashboard",
   profile: "/profile",
   clients: "/clients",
+  bidders: "/bidders",
   people: "/people",
   bidderSettings: "/bidder-settings",
   work: "/work",
@@ -95,6 +97,7 @@ const routeViews: Record<string, PortalView> = {
   "/dashboard": "dashboard",
   "/profile": "profile",
   "/clients": "clients",
+  "/bidders": "bidders",
   "/people": "people",
   "/bidder-settings": "bidderSettings",
   "/work": "work",
@@ -316,6 +319,7 @@ function viewTitle(view: string) {
     overview: "Dashboard",
     profile: "Profile",
     clients: "Clients",
+    bidders: "Bidders",
     people: "People",
     bidderSettings: "Bidder Settings",
     work: "Work Logs",
@@ -328,6 +332,7 @@ function viewTitle(view: string) {
 function viewSubtitle(view: string, isAdmin: boolean) {
   if (!isAdmin) {
     if (view === "clients") return "Search client profiles and review payment history signals.";
+    if (view === "bidders") return "Search bidder profiles and contracting status.";
     if (view === "profile") return "Complete your public profile so matched people understand who they are working with.";
     return "Log your bidder activity and keep payment details current.";
   }
@@ -336,6 +341,7 @@ function viewSubtitle(view: string, isAdmin: boolean) {
     overview: "Review work, clients, payments, and escrow snapshots.",
     profile: "Complete your public profile and escrow readiness.",
     clients: "Review client profiles and hiring signals.",
+    bidders: "Search bidders and see who is available or already contracted.",
     people: "Manage user accounts, approval status, roles, passwords, and email verification.",
     bidderSettings: "Set bidder rates, interview bonuses, payment dates, and schedules.",
     work: "Review bidder work logs and Google Sheet links.",
@@ -352,7 +358,7 @@ function viewsForUser(user: PortalUser): PortalView[] {
   }
 
   if (isClientRole(user.role)) {
-    return ["overview", "profile", "work", "payments", "chat"];
+    return ["overview", "profile", "bidders", "work", "payments", "chat"];
   }
 
   if (user.role === "bidder") {
@@ -394,6 +400,22 @@ function scheduledForUser(userId: string, payments: PaymentRecord[]) {
   return payments
     .filter((payment) => payment.userId === userId && payment.status === "scheduled")
     .reduce((total, payment) => total + payment.amount, 0);
+}
+
+function creditsDepositedForClient(clientId: string, deposits: DepositRecord[]) {
+  return deposits
+    .filter((deposit) => deposit.clientId === clientId && deposit.status === "paid")
+    .reduce((total, deposit) => total + deposit.creditAmount, 0);
+}
+
+function creditsSpentForClient(clientId: string, payments: PaymentRecord[]) {
+  return payments
+    .filter((payment) => payment.clientId === clientId && payment.status === "paid")
+    .reduce((total, payment) => total + payment.amount, 0);
+}
+
+function creditBalanceForClient(clientId: string, deposits: DepositRecord[], payments: PaymentRecord[]) {
+  return Math.max(0, creditsDepositedForClient(clientId, deposits) - creditsSpentForClient(clientId, payments));
 }
 
 function userById(users: PortalUser[], userId: string) {
@@ -1486,6 +1508,7 @@ export default function PortalApp() {
             {safeView === "overview" && canViewManaged ? <AdminOverview data={data} /> : null}
             {safeView === "profile" ? <ProfileView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "clients" ? <ClientDirectoryView data={data} onMessageClient={openInboxForUser} /> : null}
+            {safeView === "bidders" ? <BiddersDirectoryView data={data} onMessageBidder={openInboxForUser} /> : null}
             {safeView === "people" && isSuperAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "bidderSettings" && isSuperAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
@@ -2031,6 +2054,101 @@ function ClientDirectoryView({
           </section>
         </div>
       ) : null}
+    </section>
+  );
+}
+
+function BiddersDirectoryView({
+  data,
+  onMessageBidder,
+}: {
+  data: PortalData;
+  onMessageBidder: (bidderId: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const bidders = data.users
+    .filter((user) => isWorkerUser(user) && user.status === "approved")
+    .filter((user) => userMatchesSearch(user, query))
+    .sort((left, right) => {
+      const leftAvailable = !left.assignedAdminId || left.assignedAdminId === data.currentUser.id;
+      const rightAvailable = !right.assignedAdminId || right.assignedAdminId === data.currentUser.id;
+      if (leftAvailable !== rightAvailable) return leftAvailable ? -1 : 1;
+      return left.name.localeCompare(right.name);
+    });
+
+  function contractStatus(user: PortalUser) {
+    if (!user.assignedAdminId) {
+      return { label: "Available", className: "approved" };
+    }
+    if (user.assignedAdminId === data.currentUser.id) {
+      return { label: "Contracting with you", className: "bidder" };
+    }
+    return { label: "Contracted with another client", className: "pending" };
+  }
+
+  return (
+    <section className="panel">
+      <div className="section-heading">
+        <div>
+          <h2>Bidder Search</h2>
+          <p>Review bidder profiles and see whether they are available or already contracted.</p>
+        </div>
+      </div>
+
+      <div className="filter-bar">
+        <label className="field">
+          <span>Search bidders</span>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, email, skill, location" />
+        </label>
+      </div>
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Bidder</th>
+              <th>Contract status</th>
+              <th>Applied</th>
+              <th>Interviews</th>
+              <th>Earned</th>
+              <th>Profile</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bidders.map((bidder) => {
+              const status = contractStatus(bidder);
+              return (
+                <tr key={bidder.id}>
+                  <td>
+                    <strong>{bidder.name}</strong>
+                    <span className="table-subtext">{bidder.email}</span>
+                  </td>
+                  <td><span className={`badge ${status.className}`}>{status.label}</span></td>
+                  <td>{bidder.bidderStats?.totalApplied || 0}</td>
+                  <td>{bidder.bidderStats?.totalInterviews || 0}</td>
+                  <td>{money(bidder.bidderStats?.totalEarned || 0)}</td>
+                  <td>
+                    <strong>{bidder.profileTitle || "No title"}</strong>
+                    <span className="table-subtext">{bidder.profileLocation || "Location not set"}</span>
+                  </td>
+                  <td>
+                    <button
+                      className="ghost-button compact-button"
+                      type="button"
+                      disabled={bidder.allowDirectMessages === false}
+                      onClick={() => onMessageBidder(bidder.id)}
+                    >
+                      {bidder.allowDirectMessages === false ? "Messages off" : "Message"}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {!bidders.length ? <div className="empty-state">No bidders match this search.</div> : null}
     </section>
   );
 }
@@ -3199,8 +3317,12 @@ function AdminPayments({
   busy: boolean;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
-  const payableUsers = data.users.filter(isWorkerUser);
-  const canRecordPayments = isSuperAdminRole(data.currentUser.role);
+  const payableUsers = data.users.filter((user) =>
+    isWorkerUser(user) &&
+    (isSuperAdminRole(data.currentUser.role) || user.assignedAdminId === data.currentUser.id)
+  );
+  const canRecordPayments = isSuperAdminRole(data.currentUser.role) || isClientRole(data.currentUser.role);
+  const canModifyPayments = isSuperAdminRole(data.currentUser.role);
   const [draft, setDraft] = useState({
     userId: payableUsers[0]?.id || "",
     periodStart: today(),
@@ -3210,19 +3332,25 @@ function AdminPayments({
     paymentLink: "",
     memo: "",
   });
-  const escrowClients = clientUsers(data.users);
-  const [escrowDraft, setEscrowDraft] = useState({
-    clientId: data.currentUser.role === "super_admin" ? escrowClients[0]?.id || "" : data.currentUser.id,
+  const creditClients = isSuperAdminRole(data.currentUser.role) ? clientUsers(data.users) : [data.currentUser].filter((user) => isClientRole(user.role));
+  const [depositDraft, setDepositDraft] = useState({
+    clientId: data.currentUser.role === "super_admin" ? creditClients[0]?.id || "" : data.currentUser.id,
     amount: "",
-    receiptLink: "",
-    memo: "",
+    currency: "USD",
+    toCurrency: "USDT",
+    network: "tron",
   });
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
 
   const selectedUser = payableUsers.find((user) => user.id === draft.userId);
-  const escrowAmount = Number(escrowDraft.amount) || 0;
-  const escrowFee = Math.round(escrowAmount * 0.05 * 100) / 100;
-  const escrowNet = Math.max(0, Math.round((escrowAmount - escrowFee) * 100) / 100);
+  const paymentClientId = isSuperAdminRole(data.currentUser.role)
+    ? selectedUser?.assignedAdminId || depositDraft.clientId
+    : data.currentUser.id;
+  const depositClientId = isSuperAdminRole(data.currentUser.role) ? depositDraft.clientId : data.currentUser.id;
+  const creditBalance = paymentClientId ? creditBalanceForClient(paymentClientId, data.deposits || [], data.payments) : 0;
+  const depositAmount = Number(depositDraft.amount) || 0;
+  const depositFee = Math.round(depositAmount * 0.05 * 100) / 100;
+  const depositCredit = Math.max(0, Math.round((depositAmount - depositFee) * 100) / 100);
   const suggestedAmount = selectedUser
     ? Math.max(0, estimateForUser(selectedUser, data.workLogs) - paidForUser(selectedUser.id, data.payments))
     : 0;
@@ -3279,6 +3407,7 @@ function AdminPayments({
     event.preventDefault();
     const nextData = await onAction("addPayment", {
       userId: draft.userId,
+      clientId: paymentClientId,
       periodStart: draft.periodStart,
       periodEnd: draft.periodEnd,
       scheduledDate: draft.scheduledDate,
@@ -3291,16 +3420,17 @@ function AdminPayments({
     }
   }
 
-  async function submitEscrow(event: FormEvent) {
+  async function submitDeposit(event: FormEvent) {
     event.preventDefault();
-    const nextData = await onAction("addEscrow", {
-      clientId: escrowDraft.clientId,
-      amount: Number(escrowDraft.amount),
-      receiptLink: escrowDraft.receiptLink,
-      memo: escrowDraft.memo,
+    const nextData = await onAction("createCreditDeposit", {
+      clientId: depositDraft.clientId,
+      amount: Number(depositDraft.amount),
+      currency: depositDraft.currency,
+      toCurrency: depositDraft.toCurrency,
+      network: depositDraft.network,
     });
     if (nextData) {
-      setEscrowDraft({ ...escrowDraft, amount: "", receiptLink: "", memo: "" });
+      setDepositDraft({ ...depositDraft, amount: "" });
     }
   }
 
@@ -3318,8 +3448,9 @@ function AdminPayments({
         <div className="panel-header">
           <div>
             <h2>Add Payment Record</h2>
-            <p>Record paid payouts with the receipt or transfer link.</p>
+            <p>Pay assigned bidders from client credits.</p>
           </div>
+          <span className="badge paid">{money(creditBalance)} credits</span>
         </div>
         <form className="form-grid" onSubmit={submit}>
           <label className="field full">
@@ -3348,14 +3479,14 @@ function AdminPayments({
           </label>
           <label className="field">
             <span>Payment link</span>
-            <input value={draft.paymentLink} onChange={(event) => setDraft({ ...draft, paymentLink: event.target.value })} placeholder="Receipt or transfer link" required />
+            <input value={draft.paymentLink} onChange={(event) => setDraft({ ...draft, paymentLink: event.target.value })} placeholder="Optional receipt or transfer note" />
           </label>
           <label className="field full">
             <span>Memo</span>
             <textarea value={draft.memo} onChange={(event) => setDraft({ ...draft, memo: event.target.value })} />
           </label>
           <div className="actions full">
-            <button className="primary-button" type="submit" disabled={busy || !payableUsers.length}>Save paid payment</button>
+            <button className="primary-button" type="submit" disabled={busy || !payableUsers.length || (Number(draft.amount) || 0) > creditBalance}>Save paid payment</button>
             <button className="ghost-button" type="button" onClick={() => setDraft({ ...draft, amount: String(suggestedAmount.toFixed(2)) })}>
               Use estimate
             </button>
@@ -3370,47 +3501,78 @@ function AdminPayments({
         <section className="panel">
           <div className="panel-header">
             <div>
-              <h2>Escrow</h2>
-              <p>Record client escrow manually. Platform escrow fee is 5%.</p>
+              <h2>Credit Wallet</h2>
+              <p>Deposit through Cryptomus. A 5% platform fee is deducted before credits are added.</p>
             </div>
           </div>
-          <form className="form-grid" onSubmit={submitEscrow}>
+          <div className="metric-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+            <div className="metric">
+              <span>Credit balance</span>
+              <strong>{money(depositClientId ? creditBalanceForClient(depositClientId, data.deposits || [], data.payments) : 0)}</strong>
+            </div>
+            <div className="metric">
+              <span>Total deposited</span>
+              <strong>{money(depositClientId ? creditsDepositedForClient(depositClientId, data.deposits || []) : 0)}</strong>
+            </div>
+            <div className="metric">
+              <span>Credits spent</span>
+              <strong>{money(depositClientId ? creditsSpentForClient(depositClientId, data.payments) : 0)}</strong>
+            </div>
+          </div>
+          <form className="form-grid" onSubmit={submitDeposit}>
             {data.currentUser.role === "super_admin" ? (
               <label className="field full">
                 <span>Client</span>
-                <select value={escrowDraft.clientId} onChange={(event) => setEscrowDraft({ ...escrowDraft, clientId: event.target.value })} required>
-                  {escrowClients.map((client) => (
+                <select value={depositDraft.clientId} onChange={(event) => setDepositDraft({ ...depositDraft, clientId: event.target.value })} required>
+                  {creditClients.map((client) => (
                     <option key={client.id} value={client.id}>{client.name}</option>
                   ))}
                 </select>
               </label>
             ) : null}
             <label className="field">
-              <span>Escrow amount</span>
-              <input type="number" min="0" step="0.01" value={escrowDraft.amount} onChange={(event) => setEscrowDraft({ ...escrowDraft, amount: event.target.value })} required />
+              <span>Deposit amount</span>
+              <input type="number" min="0" step="0.01" value={depositDraft.amount} onChange={(event) => setDepositDraft({ ...depositDraft, amount: event.target.value })} required />
             </label>
             <label className="field">
               <span>5% fee</span>
-              <input value={money(escrowFee)} readOnly />
+              <input value={money(depositFee)} readOnly />
             </label>
             <label className="field">
-              <span>Net escrow</span>
-              <input value={money(escrowNet)} readOnly />
+              <span>Credits added</span>
+              <input value={money(depositCredit)} readOnly />
             </label>
             <label className="field">
-              <span>Escrow link</span>
-              <input value={escrowDraft.receiptLink} onChange={(event) => setEscrowDraft({ ...escrowDraft, receiptLink: event.target.value })} placeholder="Receipt or escrow proof link" />
+              <span>Invoice currency</span>
+              <select value={depositDraft.currency} onChange={(event) => setDepositDraft({ ...depositDraft, currency: event.target.value })}>
+                <option value="USD">USD</option>
+                <option value="USDT">USDT</option>
+              </select>
             </label>
-            <label className="field full">
-              <span>Memo</span>
-              <textarea value={escrowDraft.memo} onChange={(event) => setEscrowDraft({ ...escrowDraft, memo: event.target.value })} />
+            <label className="field">
+              <span>Pay with</span>
+              <select value={depositDraft.toCurrency} onChange={(event) => setDepositDraft({ ...depositDraft, toCurrency: event.target.value })}>
+                <option value="USDT">USDT</option>
+                <option value="BTC">BTC</option>
+                <option value="ETH">ETH</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Network</span>
+              <select value={depositDraft.network} onChange={(event) => setDepositDraft({ ...depositDraft, network: event.target.value })}>
+                <option value="tron">TRON</option>
+                <option value="bsc">BEP20</option>
+                <option value="ethereum">Ethereum</option>
+                <option value="">Any supported network</option>
+              </select>
             </label>
             <div className="actions full">
-              <button className="primary-button" type="submit" disabled={busy || !escrowClients.length}>
-                Save escrow
+              <button className="primary-button" type="submit" disabled={busy || !creditClients.length}>
+                Create Cryptomus invoice
               </button>
             </div>
           </form>
+          <DepositList deposits={(data.deposits || []).filter((deposit) => !depositClientId || deposit.clientId === depositClientId).slice(0, 5)} users={data.users} />
         </section>
 
         <section className="panel">
@@ -3448,8 +3610,8 @@ function AdminPayments({
         <PaymentTable
           payments={data.payments}
           users={data.users}
-          onEdit={canRecordPayments ? setEditingPayment : undefined}
-          onDelete={canRecordPayments ? deletePayment : undefined}
+          onEdit={canModifyPayments ? setEditingPayment : undefined}
+          onDelete={canModifyPayments ? deletePayment : undefined}
         />
       </section>
 
@@ -3744,6 +3906,36 @@ function EscrowTable({ escrows, users }: { escrows: EscrowRecord[]; users: Porta
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function DepositList({ deposits, users }: { deposits: DepositRecord[]; users: PortalUser[] }) {
+  if (!deposits.length) {
+    return <div className="empty-state compact">No credit deposits yet.</div>;
+  }
+
+  return (
+    <div className="payment-method-list" style={{ marginTop: 16 }}>
+      {deposits.map((deposit) => {
+        const client = userById(users, deposit.clientId);
+        return (
+          <div className="payment-row" key={deposit.id}>
+            <div>
+              <strong>{money(deposit.creditAmount)} credits</strong>
+              <span className="muted">
+                {client?.name || "Client"} - {money(deposit.amount)} deposit - {deposit.providerStatus || deposit.status}
+              </span>
+            </div>
+            <div className="actions">
+              <span className={`badge ${deposit.status === "paid" ? "paid" : deposit.status === "failed" ? "paused" : "pending"}`}>
+                {titleCase(deposit.status)}
+              </span>
+              {deposit.paymentUrl ? <a href={deposit.paymentUrl} target="_blank" rel="noreferrer">Open invoice</a> : null}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
