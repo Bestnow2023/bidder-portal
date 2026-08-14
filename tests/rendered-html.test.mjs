@@ -88,8 +88,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Credit balance/);
   assert.match(portalApp, /Open invoice/);
   assert.match(portalApp, /Credit notifications/);
-  assert.match(portalApp, /Add client credit/);
-  assert.match(portalApp, /Manual credit amount/);
+  assert.match(portalApp, /Charge client credit/);
+  assert.match(portalApp, /Charge credit/);
   assert.match(portalApp, /Edit Payment/);
   assert.match(portalApp, /Edit User/);
   assert.match(portalApp, /Edit Bidder Settings/);
@@ -134,8 +134,9 @@ test("declares the requested frontend records", async () => {
     "Credit Wallet",
     "Create Cryptomus invoice",
     "Credit notifications",
-    "Add client credit",
-    "Manual credit amount",
+    "Charge client credit",
+    "Credit amount",
+    "Charge credit",
     "Mark read",
     "Escrow History",
     "Save paid payment",
@@ -229,6 +230,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /viewRoutes/);
   assert.match(portalApp, /routeViews/);
   assert.match(portalApp, /navigateToView/);
+  assert.match(portalApp, /\["people", "billing", "chat"\]/);
   assert.match(portalApp, /\/bidder-settings/);
   assert.match(portalApp, /\/payments/);
   assert.match(portalApp, /\/profile/);

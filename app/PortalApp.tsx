@@ -364,7 +364,7 @@ function viewSubtitle(view: string, isAdmin: boolean) {
 
 function viewsForUser(user: PortalUser): PortalView[] {
   if (isSuperAdminRole(user.role)) {
-    return ["people", "chat"];
+    return ["people", "billing", "chat"];
   }
 
   if (isClientRole(user.role)) {
@@ -3823,13 +3823,13 @@ function AdminPayments({
             <div className="manual-credit-box">
               <div className="section-heading compact-heading">
                 <div>
-                  <h3>Add client credit</h3>
-                  <p>Super admin can add credits directly without creating a Cryptomus invoice.</p>
+                  <h3>Charge client credit</h3>
+                  <p>Super admin can charge credits directly to a client without creating a Cryptomus invoice.</p>
                 </div>
               </div>
               <form className="form-grid" onSubmit={submitManualCredit}>
                 <label className="field">
-                  <span>Manual credit amount</span>
+                  <span>Credit amount</span>
                   <input
                     type="number"
                     min="0"
@@ -3853,7 +3853,7 @@ function AdminPayments({
                 </label>
                 <div className="actions full">
                   <button className="secondary-button" type="submit" disabled={busy || !depositClientId}>
-                    Add credit
+                    Charge credit
                   </button>
                 </div>
               </form>
