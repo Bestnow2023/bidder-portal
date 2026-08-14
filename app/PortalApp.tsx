@@ -12,11 +12,15 @@ import type {
   WorkLog,
 } from "./portal-types";
 
+type AuthMode = "signIn" | "signUp";
+
 const paymentMethods = ["Payoneer", "BEP20", "Wise", "PayPal", "Bank transfer", "USDT TRC20", "Other"];
 const defaultApiBaseUrl =
   process.env.NODE_ENV === "development" ? "http://localhost:4000" : "https://bidder-portal-be.vercel.app";
 const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || defaultApiBaseUrl).replace(/\/$/, "");
 const portalApiUrl = `${apiBaseUrl}/api/portal`;
+const portalMode = process.env.NEXT_PUBLIC_PORTAL_MODE?.toLowerCase() === "live" ? "live" : "dev";
+const isLiveMode = portalMode === "live";
 
 const demoAccounts = [
   { label: "Admin", email: "admin@portal.local", name: "Admin Owner" },
@@ -110,12 +114,19 @@ function userById(users: PortalUser[], userId: string) {
 
 export default function PortalApp() {
   const [data, setData] = useState<PortalData | null>(null);
+  const [authMode, setAuthMode] = useState<AuthMode>(isLiveMode ? "signUp" : "signIn");
   const [loginEmail, setLoginEmail] = useState(() => {
     if (typeof window === "undefined") {
-      return "admin@portal.local";
+      return isLiveMode ? "" : "admin@portal.local";
     }
 
-    return window.localStorage.getItem("bidderPortalEmail") || "admin@portal.local";
+    const storedEmail = window.localStorage.getItem("bidderPortalEmail") || "";
+    const storedDemoEmail = demoAccounts.some((account) => account.email === storedEmail);
+    if (isLiveMode && storedDemoEmail) {
+      return "";
+    }
+
+    return storedEmail || (isLiveMode ? "" : "admin@portal.local");
   });
   const [loginName, setLoginName] = useState("");
   const [activeView, setActiveView] = useState("overview");
@@ -123,14 +134,14 @@ export default function PortalApp() {
   const [error, setError] = useState("");
 
   async function postAction(action: string, payload: Record<string, unknown> = {}) {
-    if (!data && action !== "signIn") {
+    if (!data && action !== "signIn" && action !== "signUp") {
       return;
     }
 
     setBusy(true);
     setError("");
     try {
-      const email = action === "signIn" ? loginEmail : data?.currentUser.email;
+      const email = action === "signIn" || action === "signUp" ? loginEmail : data?.currentUser.email;
       const response = await fetch(portalApiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -166,7 +177,12 @@ export default function PortalApp() {
 
   async function handleLogin(event: FormEvent) {
     event.preventDefault();
-    await postAction("signIn", { name: loginName });
+    await postAction(authMode, { name: loginName });
+  }
+
+  function switchAuthMode(nextAuthMode: AuthMode) {
+    setAuthMode(nextAuthMode);
+    setError("");
   }
 
   if (!data) {
@@ -197,10 +213,28 @@ export default function PortalApp() {
           </div>
 
           <form className="login-form" onSubmit={handleLogin}>
-            <h2>Email sign-in</h2>
-            <p>New users enter as pending bidders until admin approval.</p>
+            <h2>{authMode === "signUp" ? "Sign up" : "Email sign-in"}</h2>
+            <p>{authMode === "signUp" ? "New users enter as pending bidders until admin approval." : "Use your approved email to enter the portal."}</p>
 
-            <div className="quick-login">
+            <div className="auth-toggle" role="tablist" aria-label="Authentication mode">
+              <button
+                type="button"
+                className={authMode === "signIn" ? "active" : ""}
+                onClick={() => switchAuthMode("signIn")}
+              >
+                Sign in
+              </button>
+              <button
+                type="button"
+                className={authMode === "signUp" ? "active" : ""}
+                onClick={() => switchAuthMode("signUp")}
+              >
+                Sign up
+              </button>
+            </div>
+
+            {!isLiveMode && authMode === "signIn" ? (
+              <div className="quick-login">
               {demoAccounts.map((account) => (
                 <button
                   key={account.email}
@@ -214,7 +248,8 @@ export default function PortalApp() {
                   <strong>{account.email}</strong>
                 </button>
               ))}
-            </div>
+              </div>
+            ) : null}
 
             <div className="form-grid">
               <label className="field full">
@@ -227,19 +262,22 @@ export default function PortalApp() {
                   required
                 />
               </label>
-              <label className="field full">
+              {authMode === "signUp" || !isLiveMode ? (
+                <label className="field full">
                 <span>Name</span>
                 <input
                   value={loginName}
                   onChange={(event) => setLoginName(event.target.value)}
-                  placeholder="Optional display name"
+                  placeholder={authMode === "signUp" ? "Your name" : "Optional display name"}
+                  required={authMode === "signUp"}
                 />
               </label>
+              ) : null}
             </div>
 
             <div className="actions" style={{ marginTop: 18 }}>
               <button className="primary-button" type="submit" disabled={busy}>
-                {busy ? "Signing in" : "Continue"}
+                {busy ? "Please wait" : authMode === "signUp" ? "Create account" : "Sign in"}
               </button>
             </div>
 

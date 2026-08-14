@@ -13,6 +13,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(page, /<PortalApp \/>/);
   assert.match(layout, /Bidder Work Portal/);
   assert.match(portalApp, /Email sign-in/);
+  assert.match(portalApp, /Sign up/);
   assert.match(portalApp, /Daily Bidder Log/);
   assert.match(portalApp, /Payment History/);
   assert.match(portalApp, /Group Chat/);
@@ -41,6 +42,7 @@ test("declares the requested frontend records", async () => {
 
   for (const action of [
     "updateUser",
+    "signUp",
     "savePaymentMethod",
     "saveWorkLog",
     "addPayment",
@@ -51,8 +53,10 @@ test("declares the requested frontend records", async () => {
 
   const parsedPackage = JSON.parse(packageJson);
   assert.match(portalApp, /NEXT_PUBLIC_API_BASE_URL/);
+  assert.match(portalApp, /NEXT_PUBLIC_PORTAL_MODE/);
   assert.match(portalApp, /\/api\/portal/);
   assert.match(envExample, /NEXT_PUBLIC_API_BASE_URL/);
+  assert.match(envExample, /NEXT_PUBLIC_PORTAL_MODE/);
   assert.equal(parsedPackage.dependencies.mongodb, undefined);
   assert.equal(parsedPackage.scripts.build, "next build");
   assert.equal(parsedPackage.scripts["db:generate"], undefined);
