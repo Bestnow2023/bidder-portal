@@ -81,15 +81,24 @@ a:hover {
   color: #ffffff;
 }
 
-.brand-mark {
+.brand-logo {
+  display: block;
+  border-radius: 12px;
+  object-fit: contain;
+}
+
+.auth-logo {
+  width: 112px;
+  height: 112px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
+
+.sidebar-logo {
   width: 46px;
   height: 46px;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.16);
-  border: 1px solid rgba(255, 255, 255, 0.24);
-  font-weight: 800;
+  flex: 0 0 auto;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  box-shadow: 0 8px 22px rgba(18, 32, 30, 0.08);
 }
 
 .login-story h1 {
@@ -281,6 +290,7 @@ button:disabled {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
+  width: 100%;
 }
 
 .sidebar {
@@ -332,6 +342,10 @@ button:disabled {
   cursor: pointer;
 }
 
+.nav-button:hover {
+  text-decoration: none;
+}
+
 .nav-button.active {
   border-color: rgba(15, 118, 110, 0.22);
   background: #eaf5f2;
@@ -368,6 +382,7 @@ button:disabled {
 
 .content {
   min-width: 0;
+  width: 100%;
   padding: 28px;
 }
 
@@ -554,62 +569,7 @@ td > strong {
 
 .action-menu {
   position: relative;
-  width: max-content;
-}
-
-.action-menu summary {
-  min-height: 34px;
-  list-style: none;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #ffffff;
-  color: var(--foreground);
-  padding: 7px 12px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.action-menu summary::-webkit-details-marker {
-  display: none;
-}
-
-.action-menu[open] summary {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
-}
-
-.action-menu-list {
-  position: absolute;
-  right: 0;
-  z-index: 20;
-  display: grid;
-  min-width: 170px;
-  margin-top: 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: var(--shadow);
-  padding: 6px;
-}
-
-.action-menu-list button {
-  min-height: 34px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--foreground);
-  padding: 8px 10px;
-  text-align: left;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.action-menu-list button:hover:not(:disabled) {
-  background: var(--surface-soft);
-}
-
-.action-menu-list button.danger {
-  color: var(--danger);
+  display: inline-flex;
 }
 
 .people-list {
@@ -850,14 +810,6 @@ td > strong {
   line-height: 1.45;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-}
-
-.message-footer .action-menu summary {
-  min-height: 26px;
-  border: 0;
-  background: transparent;
-  padding: 3px 7px;
-  color: var(--accent-strong);
 }
 
 .message-edit {

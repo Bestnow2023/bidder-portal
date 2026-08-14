@@ -3,15 +3,21 @@ import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 test("keeps the bidder portal as the primary screen", async () => {
-  const [page, layout, portalApp, packageJson] = await Promise.all([
+  const [page, operationsPage, chatPage, layout, portalApp, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/operations/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /<PortalApp \/>/);
+  assert.match(operationsPage, /<PortalApp \/>/);
+  assert.match(chatPage, /<PortalApp \/>/);
   assert.match(layout, /Bidder Work Portal/);
+  assert.match(portalApp, /digniware-logo-dark\.png/);
+  assert.match(portalApp, /digniware-logo-light\.png/);
   assert.match(portalApp, /Email and password sign-in/);
   assert.match(portalApp, /Password/);
   assert.match(portalApp, /Sign up/);
@@ -29,7 +35,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Bidder Group/);
   assert.match(portalApp, /Enable notifications/);
   assert.match(portalApp, /Attach/);
-  assert.match(portalApp, /More/);
+  assert.match(portalApp, /aria-label="Actions"/);
   assert.match(portalApp, /Save edit/);
   assert.match(portalApp, /Save changes/);
   assert.match(portalApp, /Forgot password/);
@@ -76,7 +82,6 @@ test("declares the requested frontend records", async () => {
     "Payment link",
     "Group Chat",
     "Bidder Group",
-    "More",
     "Local ",
     "Admin ",
   ]) {
@@ -118,6 +123,16 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /sessionToken/);
   assert.match(portalApp, /workLogId/);
   assert.match(portalApp, /ActionMenu/);
+  assert.match(portalApp, /viewRoutes/);
+  assert.match(portalApp, /routeViews/);
+  assert.match(portalApp, /navigateToView/);
+  assert.match(portalApp, /\/bidder-settings/);
+  assert.match(portalApp, /\/payments/);
+  assert.match(portalApp, /aria-haspopup="menu"/);
+  assert.match(portalApp, /fixed z-50/);
+  assert.match(portalApp, /hover:bg-white\/80/);
+  assert.match(portalApp, /auth-logo/);
+  assert.match(portalApp, /sidebar-logo/);
   assert.match(portalApp, /telegram-chat-title/);
   assert.match(portalApp, /composer-shell/);
   assert.match(portalApp, /message-row/);
@@ -137,6 +152,17 @@ test("declares the requested frontend records", async () => {
   assert.equal(parsedPackage.scripts.build, "next build");
   assert.equal(parsedPackage.scripts["db:generate"], undefined);
   assert.equal(JSON.parse(vercelConfig).framework, "nextjs");
+  for (const routePage of [
+    "operations/page.tsx",
+    "dashboard/page.tsx",
+    "people/page.tsx",
+    "bidder-settings/page.tsx",
+    "work/page.tsx",
+    "payments/page.tsx",
+    "chat/page.tsx",
+  ]) {
+    assert.equal(appEntries.some((entry) => String(entry) === routePage), true);
+  }
   assert.equal(appEntries.some((entry) => String(entry) === "api/portal/route.ts"), false);
   assert.doesNotMatch(`${portalApp}\n${packageJson}\n${envExample}`, /@neondatabase|drizzle|DATABASE_URL|MONGODB_URI|cloudflare:workers|env\.DB/);
 });

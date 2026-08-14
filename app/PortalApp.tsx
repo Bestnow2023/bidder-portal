@@ -1,7 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent } from "react";
+import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -17,6 +18,7 @@ import type {
 } from "./portal-types";
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
+type PortalView = "overview" | "dashboard" | "people" | "bidderSettings" | "work" | "payments" | "chat";
 
 const paymentMethods = ["Payoneer", "BEP20", "Wise", "PayPal", "Bank transfer", "USDT TRC20", "Other"];
 const paymentFrequencies: { value: PaymentFrequency; label: string }[] = [
@@ -56,6 +58,45 @@ const demoAccounts = [
   { label: "Approved bidder", email: "maya.bidder@example.com", name: "Maya Bidder" },
   { label: "Pending bidder", email: "pending.bidder@example.com", name: "Pending Bidder" },
 ];
+const viewRoutes: Record<PortalView, string> = {
+  overview: "/operations",
+  dashboard: "/dashboard",
+  people: "/people",
+  bidderSettings: "/bidder-settings",
+  work: "/work",
+  payments: "/payments",
+  chat: "/chat",
+};
+const routeViews: Record<string, PortalView> = {
+  "/operations": "overview",
+  "/dashboard": "dashboard",
+  "/people": "people",
+  "/bidder-settings": "bidderSettings",
+  "/work": "work",
+  "/payments": "payments",
+  "/chat": "chat",
+};
+
+function DigniwareLogo({
+  className,
+  variant = "theme",
+}: {
+  className?: string;
+  variant?: "theme" | "dark" | "light";
+}) {
+  const fallbackSrc = variant === "dark" ? "/digniware-logo-dark.png" : "/digniware-logo-light.png";
+
+  if (variant !== "theme") {
+    return <Image className={className} src={fallbackSrc} alt="Digniware" width={112} height={112} />;
+  }
+
+  return (
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcSet="/digniware-logo-dark.png" />
+      <Image className={className} src="/digniware-logo-light.png" alt="Digniware" width={112} height={112} />
+    </picture>
+  );
+}
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -232,6 +273,28 @@ function viewSubtitle(view: string, isAdmin: boolean) {
   return subtitles[view] || "Manage the bidder portal.";
 }
 
+function viewsForUser(user: PortalUser): PortalView[] {
+  if (user.role === "admin") {
+    return ["overview", "people", "bidderSettings", "work", "payments", "chat"];
+  }
+
+  if (user.role === "bidder") {
+    return ["dashboard", "work", "payments", "chat"];
+  }
+
+  return ["payments", "chat"];
+}
+
+function safeViewForUser(user: PortalUser, view: PortalView) {
+  const availableViews = viewsForUser(user);
+  return availableViews.includes(view) ? view : availableViews[0];
+}
+
+function viewFromPath(pathname: string): PortalView {
+  const normalizedPath = pathname.replace(/\/+$/, "") || "/";
+  return routeViews[normalizedPath] || "overview";
+}
+
 function estimateForUser(user: PortalUser, logs: WorkLog[]) {
   return logs
     .filter((log) => log.userId === user.id)
@@ -340,27 +403,120 @@ type ActionMenuItem = {
   danger?: boolean;
 };
 
-function ActionMenu({ label = "Actions", items }: { label?: string; items: ActionMenuItem[] }) {
+function ActionMenu({ label = "...", items }: { label?: string; items: ActionMenuItem[] }) {
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const isOpen = Boolean(menuPosition);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function closeMenu() {
+      setMenuPosition(null);
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) {
+        return;
+      }
+
+      closeMenu();
+    }
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [isOpen]);
+
+  function openMenu() {
+    const trigger = buttonRef.current;
+    if (!trigger) {
+      return;
+    }
+
+    const rect = trigger.getBoundingClientRect();
+    const menuWidth = 208;
+    const menuHeight = Math.min(items.length * 42 + 14, 280);
+    const left = Math.min(window.innerWidth - menuWidth - 12, Math.max(12, rect.right - menuWidth));
+    const downTop = rect.bottom + 8;
+    const upTop = rect.top - menuHeight - 8;
+    const top = downTop + menuHeight > window.innerHeight && upTop > 12
+      ? upTop
+      : Math.min(downTop, window.innerHeight - menuHeight - 12);
+
+    setMenuPosition({ top: Math.max(12, top), left });
+  }
+
   return (
-    <details className="action-menu">
-      <summary>{label}</summary>
-      <div className="action-menu-list">
+    <div className="action-menu">
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-label="Actions"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-transparent bg-transparent text-xl font-black leading-none text-slate-500 transition hover:bg-slate-100 hover:text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+        onClick={() => {
+          if (isOpen) {
+            setMenuPosition(null);
+          } else {
+            openMenu();
+          }
+        }}
+      >
+        {label}
+      </button>
+      {menuPosition ? (
+        <div
+          ref={menuRef}
+          role="menu"
+          className="fixed z-50 grid w-52 gap-1 rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl shadow-slate-900/15"
+          style={{ top: menuPosition.top, left: menuPosition.left }}
+        >
         {items.map((item) => (
           <button
             key={item.label}
             type="button"
+            role="menuitem"
             disabled={item.disabled}
-            className={item.danger ? "danger" : ""}
-            onClick={(event) => {
-              event.currentTarget.closest("details")?.removeAttribute("open");
+            className={`min-h-9 rounded-lg px-3 py-2 text-left text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-45 ${
+              item.danger
+                ? "text-red-700 hover:bg-red-50"
+                : "text-slate-700 hover:bg-slate-100 hover:text-teal-700"
+            }`}
+            onClick={() => {
+              setMenuPosition(null);
               item.onClick();
             }}
           >
             {item.label}
           </button>
         ))}
-      </div>
-    </details>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -483,7 +639,9 @@ export default function PortalApp() {
 
     return window.localStorage.getItem("bidderPortalSessionToken") || "";
   });
-  const [activeView, setActiveView] = useState("overview");
+  const [activeView, setActiveView] = useState<PortalView>(() =>
+    typeof window === "undefined" ? "overview" : viewFromPath(window.location.pathname)
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
@@ -491,6 +649,7 @@ export default function PortalApp() {
     typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted"
   );
   const latestChatMessageIdRef = useRef("");
+  const effectiveActiveView = data ? safeViewForUser(data.currentUser, activeView) : activeView;
 
   const postPublicAction = useCallback(async (
     action: string,
@@ -578,6 +737,16 @@ export default function PortalApp() {
       return () => window.clearTimeout(timeout);
     }
   }, [postPublicAction]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handlePopState = () => setActiveView(viewFromPath(window.location.pathname));
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   const refreshPortalData = useCallback(async (email: string, token: string, silent = false) => {
     if (!email || !token) {
@@ -677,7 +846,7 @@ export default function PortalApp() {
         (message) => message.userId !== data.currentUser.id && !message.deletedAt
       );
 
-      if (incomingMessages.length && activeView !== "chat") {
+      if (incomingMessages.length && effectiveActiveView !== "chat") {
         window.setTimeout(() => setChatUnreadCount((count) => count + incomingMessages.length), 0);
         const lastIncoming = incomingMessages[incomingMessages.length - 1];
         if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
@@ -688,10 +857,10 @@ export default function PortalApp() {
       latestChatMessageIdRef.current = latestMessage.id;
     }
 
-    if (activeView === "chat") {
+    if (effectiveActiveView === "chat") {
       window.setTimeout(() => setChatUnreadCount(0), 0);
     }
-  }, [activeView, data]);
+  }, [data, effectiveActiveView]);
 
   useEffect(() => {
     if (typeof document === "undefined") {
@@ -700,6 +869,19 @@ export default function PortalApp() {
 
     document.title = chatUnreadCount > 0 ? `(${chatUnreadCount}) Bidder Work Portal` : "Bidder Work Portal";
   }, [chatUnreadCount]);
+
+  useEffect(() => {
+    if (!data || typeof window === "undefined") {
+      return;
+    }
+
+    const nextView = safeViewForUser(data.currentUser, activeView);
+    const nextPath = viewRoutes[nextView];
+
+    if (window.location.pathname !== nextPath) {
+      window.history.replaceState({}, "", nextPath);
+    }
+  }, [activeView, data]);
 
   async function enableChatNotifications() {
     if (typeof window === "undefined" || !("Notification" in window)) {
@@ -770,6 +952,7 @@ export default function PortalApp() {
   function signOut() {
     window.localStorage.removeItem("bidderPortalEmail");
     window.localStorage.removeItem("bidderPortalSessionToken");
+    window.history.pushState({}, "", "/");
     setData(null);
     setSessionToken("");
     setLoginPassword(isLiveMode ? "" : demoPassword);
@@ -822,7 +1005,7 @@ export default function PortalApp() {
         <main className="app login-page">
           <section className="login-card">
             <div className="login-story">
-              <div className="brand-mark">BP</div>
+              <DigniwareLogo className="brand-logo auth-logo" variant="dark" />
               <h1>Bidder Work Portal</h1>
               <p>
                 Sign in with email, log bidder work, keep payment method details in one place,
@@ -864,7 +1047,7 @@ export default function PortalApp() {
       <main className="app login-page">
         <section className="login-card">
           <div className="login-story">
-            <div className="brand-mark">BP</div>
+            <DigniwareLogo className="brand-logo auth-logo" variant="dark" />
             <h1>Bidder Work Portal</h1>
             <p>
               Sign in with email, log bidder work, keep payment method details in one place,
@@ -981,18 +1164,28 @@ export default function PortalApp() {
 
   const currentUser = data.currentUser;
   const isAdmin = currentUser.role === "admin";
-  const availableViews = isAdmin
-    ? ["overview", "people", "bidderSettings", "work", "payments", "chat"]
-    : currentUser.role === "bidder"
-      ? ["dashboard", "work", "payments", "chat"]
-      : ["payments", "chat"];
+  const availableViews = viewsForUser(currentUser);
   const safeView = availableViews.includes(activeView) ? activeView : availableViews[0];
+
+  function navigateToView(event: ReactMouseEvent<HTMLAnchorElement>, view: PortalView) {
+    event.preventDefault();
+    const nextPath = viewRoutes[view];
+
+    if (typeof window !== "undefined" && window.location.pathname !== nextPath) {
+      window.history.pushState({}, "", nextPath);
+    }
+
+    setActiveView(view);
+    if (view === "chat") {
+      setChatUnreadCount(0);
+    }
+  }
 
   return (
     <main className="app portal-shell">
       <aside className="sidebar">
         <div className="sidebar-header">
-          <div className="brand-mark" style={{ background: "#0f766e", color: "#fff" }}>BP</div>
+          <DigniwareLogo className="brand-logo sidebar-logo" />
           <div className="sidebar-title">
             <strong>Bidder Portal</strong>
             <span>Work and payments</span>
@@ -1001,15 +1194,19 @@ export default function PortalApp() {
 
         <nav className="nav-list" aria-label="Portal navigation">
           {availableViews.map((view) => (
-            <button
+            <a
               key={view}
-              className={`nav-button ${safeView === view ? "active" : ""}`}
-              onClick={() => setActiveView(view)}
-              type="button"
+              className={`nav-button transition ${
+                safeView === view
+                  ? "active shadow-sm ring-1 ring-teal-700/10"
+                  : "hover:bg-white/80 hover:text-teal-700"
+              }`}
+              href={viewRoutes[view]}
+              onClick={(event) => navigateToView(event, view)}
             >
               <span>{viewTitle(view)}</span>
               {view === "chat" && chatUnreadCount > 0 ? <span className="nav-badge">{chatUnreadCount}</span> : null}
-            </button>
+            </a>
           ))}
         </nav>
 
@@ -2846,7 +3043,6 @@ function ChatView({
                   {message.editedAt ? <span>Edited</span> : null}
                   {canManage ? (
                     <ActionMenu
-                      label="More"
                       items={[
                         { label: "Edit", onClick: () => startEditing(message) },
                         { label: "Delete", danger: true, disabled: busy, onClick: () => void deleteMessage(message) },
