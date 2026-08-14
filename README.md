@@ -38,7 +38,7 @@ three demo accounts:
 3. Use the Next.js framework preset.
 4. Add `NEXT_PUBLIC_API_BASE_URL` in Vercel Project Settings -> Environment
    Variables for Production, Preview, and Development. Use the deployed backend
-   URL, for example `https://bidder-portal-be.vercel.app`.
+   URL: `https://bidder-portal-be.vercel.app`.
 5. Deploy.
 
 The included `vercel.json` pins the expected settings:

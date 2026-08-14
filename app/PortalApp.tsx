@@ -13,7 +13,8 @@ import type {
 } from "./portal-types";
 
 const paymentMethods = ["Payoneer", "BEP20", "Wise", "PayPal", "Bank transfer", "USDT TRC20", "Other"];
-const defaultApiBaseUrl = process.env.NODE_ENV === "development" ? "http://localhost:4000" : "";
+const defaultApiBaseUrl =
+  process.env.NODE_ENV === "development" ? "http://localhost:4000" : "https://bidder-portal-be.vercel.app";
 const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || defaultApiBaseUrl).replace(/\/$/, "");
 const portalApiUrl = `${apiBaseUrl}/api/portal`;
 
@@ -135,6 +136,11 @@ export default function PortalApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, email, ...payload }),
       });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Portal API returned ${contentType || "non-JSON"} from ${portalApiUrl}. Check NEXT_PUBLIC_API_BASE_URL.`);
+      }
+
       const nextData = await response.json();
       if (!response.ok) {
         throw new Error(nextData.error || "Action failed.");
