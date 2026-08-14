@@ -17,6 +17,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Sign up/);
   assert.match(portalApp, /Dashboard/);
   assert.match(portalApp, /Work Summary/);
+  assert.match(portalApp, /Bidder Settings/);
   assert.match(portalApp, /All Work Logs/);
   assert.match(portalApp, /Unpaid Work Logs/);
   assert.match(portalApp, /Date or start/);
@@ -29,7 +30,10 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Attach file/);
   assert.match(portalApp, /Save edit/);
   assert.match(portalApp, /Save changes/);
-  assert.doesNotMatch(portalApp, /Roles ready|Work logging|No Stripe/);
+  assert.match(portalApp, /Forgot password/);
+  assert.match(portalApp, /Send verification/);
+  assert.match(portalApp, /Set password/);
+  assert.doesNotMatch(portalApp, /Roles ready|Work logging|No Stripe|set payment rates/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.doesNotMatch(`${page}\n${layout}\n${portalApp}`, /codex-preview|Your site is taking shape/i);
 });
@@ -45,6 +49,8 @@ test("declares the requested frontend records", async () => {
 
   for (const label of [
     "User Management",
+    "Manage accounts, approval status, roles, passwords, and email verification.",
+    "Bidder Settings",
     "Work Summary",
     "Daily Bidder Log",
     "Unpaid Work Totals",
@@ -59,8 +65,13 @@ test("declares the requested frontend records", async () => {
 
   for (const action of [
     "refreshPortal",
+    "requestPasswordReset",
+    "resetPassword",
+    "verifyEmail",
     "signIn",
     "updateUser",
+    "setUserPassword",
+    "requestEmailVerification",
     "signUp",
     "savePaymentMethod",
     "saveWorkLog",

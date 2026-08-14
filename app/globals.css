@@ -570,6 +570,22 @@ td {
   color: var(--muted);
 }
 
+.account-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.account-tools {
+  align-items: end;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
 .empty-state {
   display: grid;
   place-items: center;
@@ -815,6 +831,13 @@ td {
   border-radius: 8px;
   background: #fffaf0;
   padding: 16px;
+}
+
+.status-strip.compact {
+  margin-top: 12px;
+  padding: 12px;
+  color: #695034;
+  font-weight: 700;
 }
 
 .status-strip h2 {

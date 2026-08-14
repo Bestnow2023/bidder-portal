@@ -12,6 +12,11 @@ export type PortalUser = {
   bonusPerInterview: number;
   nextPaymentDate: string;
   paymentSchedule: string;
+  passwordSet?: boolean;
+  passwordUpdatedAt?: string;
+  passwordResetSentAt?: string;
+  emailVerifiedAt?: string;
+  emailVerificationSentAt?: string;
   createdAt: string;
   updatedAt: string;
 };

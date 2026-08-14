@@ -15,7 +15,7 @@ import type {
   WorkLog,
 } from "./portal-types";
 
-type AuthMode = "signIn" | "signUp";
+type AuthMode = "signIn" | "signUp" | "resetPassword";
 
 const paymentMethods = ["Payoneer", "BEP20", "Wise", "PayPal", "Bank transfer", "USDT TRC20", "Other"];
 const defaultApiBaseUrl =
@@ -65,6 +65,10 @@ function dateTime(value: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function optionalDateTime(value?: string) {
+  return value ? dateTime(value) : "Not set";
 }
 
 function dateTimeInZone(value: string, timeZone: string) {
@@ -146,11 +150,29 @@ function viewTitle(view: string) {
     dashboard: "Dashboard",
     overview: "Operations",
     people: "People",
+    bidderSettings: "Bidder Settings",
     work: "Work Logs",
     payments: "Payments",
     chat: "Group Chat",
   };
   return titles[view] || "Portal";
+}
+
+function viewSubtitle(view: string, isAdmin: boolean) {
+  if (!isAdmin) {
+    return "Log your bidder activity and keep payment details current.";
+  }
+
+  const subtitles: Record<string, string> = {
+    overview: "Review operations, recent work, and payment snapshots.",
+    people: "Manage user accounts, approval status, roles, passwords, and email verification.",
+    bidderSettings: "Set bidder rates, interview bonuses, payment dates, and schedules.",
+    work: "Review bidder work logs and Google Sheet links.",
+    payments: "Schedule payouts, record payment history, and review payment methods.",
+    chat: "Coordinate with bidders in the group chat.",
+  };
+
+  return subtitles[view] || "Manage the bidder portal.";
 }
 
 function estimateForUser(user: PortalUser, logs: WorkLog[]) {
@@ -300,6 +322,8 @@ export default function PortalApp() {
   });
   const [loginName, setLoginName] = useState("");
   const [loginPassword, setLoginPassword] = useState(isLiveMode ? "" : demoPassword);
+  const [resetToken, setResetToken] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
   const [sessionToken, setSessionToken] = useState(() => {
     if (typeof window === "undefined") {
       return "";
@@ -315,6 +339,87 @@ export default function PortalApp() {
     typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted"
   );
   const latestChatMessageIdRef = useRef("");
+
+  const postPublicAction = useCallback(async (
+    action: string,
+    payload: Record<string, unknown> & { successMessage?: string } = {}
+  ) => {
+    setBusy(true);
+    setError("");
+    setAuthNotice("");
+
+    try {
+      const response = await fetch(portalApiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, email: payload.email || loginEmail, ...payload }),
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Portal API returned ${contentType || "non-JSON"} from ${portalApiUrl}. Check NEXT_PUBLIC_API_BASE_URL.`);
+      }
+
+      const nextData = await response.json();
+      if (!response.ok) {
+        throw new Error(nextData.error || "Action failed.");
+      }
+
+      if (nextData.currentUser) {
+        setData(nextData);
+        setLoginEmail(nextData.currentUser.email);
+        if (nextData.sessionToken) {
+          setSessionToken(nextData.sessionToken);
+          window.localStorage.setItem("bidderPortalSessionToken", nextData.sessionToken);
+        }
+        window.localStorage.setItem("bidderPortalEmail", nextData.currentUser.email);
+      } else {
+        setAuthNotice(payload.successMessage || nextData.message || "Done.");
+      }
+
+      return nextData as PortalData | { ok: boolean; message?: string };
+    } catch (publicActionError) {
+      setError(publicActionError instanceof Error ? publicActionError.message : "Action failed.");
+    } finally {
+      setBusy(false);
+    }
+  }, [loginEmail]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const resetEmail = params.get("resetEmail") || "";
+    const nextResetToken = params.get("resetToken") || "";
+    const verifyEmailAddress = params.get("verifyEmail") || "";
+    const verifyToken = params.get("verifyToken") || "";
+
+    if (resetEmail && nextResetToken) {
+      window.history.replaceState({}, "", window.location.pathname);
+      const timeout = window.setTimeout(() => {
+        setLoginEmail(resetEmail);
+        setResetToken(nextResetToken);
+        setLoginPassword("");
+        setAuthMode("resetPassword");
+        setAuthNotice("Enter a new password for this account.");
+      }, 0);
+      return () => window.clearTimeout(timeout);
+    }
+
+    if (verifyEmailAddress && verifyToken) {
+      window.history.replaceState({}, "", window.location.pathname);
+      const timeout = window.setTimeout(() => {
+        setLoginEmail(verifyEmailAddress);
+        void postPublicAction("verifyEmail", {
+          email: verifyEmailAddress,
+          verifyToken,
+          successMessage: "Email verified. You can sign in now.",
+        });
+      }, 0);
+      return () => window.clearTimeout(timeout);
+    }
+  }, [postPublicAction]);
 
   const refreshPortalData = useCallback(async (email: string, token: string, silent = false) => {
     if (!email || !token) {
@@ -448,16 +553,16 @@ export default function PortalApp() {
   }
 
   async function postAction(action: string, payload: Record<string, unknown> = {}) {
-    if (!data && action !== "signIn" && action !== "signUp") {
+    if (!data && action !== "signIn" && action !== "signUp" && action !== "resetPassword") {
       return;
     }
 
     setBusy(true);
     setError("");
     try {
-      const email = action === "signIn" || action === "signUp" ? loginEmail : data?.currentUser.email;
+      const email = action === "signIn" || action === "signUp" || action === "resetPassword" ? loginEmail : data?.currentUser.email;
       const authPayload =
-        action === "signIn" || action === "signUp"
+        action === "signIn" || action === "signUp" || action === "resetPassword"
           ? { password: loginPassword }
           : { sessionToken };
       const response = await fetch(portalApiUrl, {
@@ -504,13 +609,32 @@ export default function PortalApp() {
 
   async function handleLogin(event: FormEvent) {
     event.preventDefault();
+    if (authMode === "resetPassword") {
+      await postAction("resetPassword", { resetToken });
+      return;
+    }
+
     await postAction(authMode, { name: loginName });
   }
 
   function switchAuthMode(nextAuthMode: AuthMode) {
     setAuthMode(nextAuthMode);
     setLoginPassword(nextAuthMode === "signIn" && !isLiveMode ? demoPassword : "");
+    setResetToken("");
+    setAuthNotice("");
     setError("");
+  }
+
+  async function requestForgotPassword() {
+    if (!loginEmail) {
+      setError("Enter your email first.");
+      return;
+    }
+
+    await postPublicAction("requestPasswordReset", {
+      email: loginEmail,
+      successMessage: "If that account exists, a reset email has been sent.",
+    });
   }
 
   if (!data) {
@@ -527,10 +651,17 @@ export default function PortalApp() {
           </div>
 
           <form className="login-form" onSubmit={handleLogin}>
-            <h2>{authMode === "signUp" ? "Sign up" : "Email and password sign-in"}</h2>
-            <p>{authMode === "signUp" ? "New users enter as pending bidders until admin approval." : "Use your approved email and password to enter the portal."}</p>
+            <h2>{authMode === "signUp" ? "Sign up" : authMode === "resetPassword" ? "Reset password" : "Email and password sign-in"}</h2>
+            <p>
+              {authMode === "signUp"
+                ? "New users enter as pending bidders until admin approval."
+                : authMode === "resetPassword"
+                  ? "Create a new password from your reset email."
+                  : "Use your approved email and password to enter the portal."}
+            </p>
 
-            <div className="auth-toggle" role="tablist" aria-label="Authentication mode">
+            {authMode !== "resetPassword" ? (
+              <div className="auth-toggle" role="tablist" aria-label="Authentication mode">
               <button
                 type="button"
                 className={authMode === "signIn" ? "active" : ""}
@@ -545,7 +676,8 @@ export default function PortalApp() {
               >
                 Sign up
               </button>
-            </div>
+              </div>
+            ) : null}
 
             {!isLiveMode && authMode === "signIn" ? (
               <div className="quick-login">
@@ -583,7 +715,7 @@ export default function PortalApp() {
                   type="password"
                   value={loginPassword}
                   onChange={(event) => setLoginPassword(event.target.value)}
-                  placeholder={authMode === "signUp" ? "Create at least 8 characters" : "Your password"}
+                  placeholder={authMode === "signUp" || authMode === "resetPassword" ? "Create at least 8 characters" : "Your password"}
                   minLength={8}
                   required
                 />
@@ -603,10 +735,21 @@ export default function PortalApp() {
 
             <div className="actions" style={{ marginTop: 18 }}>
               <button className="primary-button" type="submit" disabled={busy}>
-                {busy ? "Please wait" : authMode === "signUp" ? "Create account" : "Sign in"}
+                {busy ? "Please wait" : authMode === "signUp" ? "Create account" : authMode === "resetPassword" ? "Reset password" : "Sign in"}
               </button>
+              {authMode === "signIn" ? (
+                <button className="ghost-button" type="button" disabled={busy} onClick={requestForgotPassword}>
+                  Forgot password?
+                </button>
+              ) : null}
+              {authMode === "resetPassword" ? (
+                <button className="ghost-button" type="button" onClick={() => switchAuthMode("signIn")}>
+                  Back to sign in
+                </button>
+              ) : null}
             </div>
 
+            {authNotice ? <div className="status-strip compact">{authNotice}</div> : null}
             {error ? <div className="error">{error}</div> : null}
           </form>
         </section>
@@ -617,7 +760,7 @@ export default function PortalApp() {
   const currentUser = data.currentUser;
   const isAdmin = currentUser.role === "admin";
   const availableViews = isAdmin
-    ? ["overview", "people", "work", "payments", "chat"]
+    ? ["overview", "people", "bidderSettings", "work", "payments", "chat"]
     : currentUser.role === "bidder"
       ? ["dashboard", "work", "payments", "chat"]
       : ["payments", "chat"];
@@ -667,7 +810,7 @@ export default function PortalApp() {
         <header className="topbar">
           <div>
             <h1>{viewTitle(safeView)}</h1>
-            <p>{isAdmin ? "Approve users, set rates, schedule payouts, and keep bidder records tidy." : "Log your bidder activity and keep payment details current."}</p>
+            <p>{viewSubtitle(safeView, isAdmin)}</p>
           </div>
           <div className="badge-row">
             <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
@@ -683,6 +826,7 @@ export default function PortalApp() {
           <>
             {safeView === "overview" && isAdmin ? <AdminOverview data={data} /> : null}
             {safeView === "people" && isAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
+            {safeView === "bidderSettings" && isAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
             {safeView === "work" ? <WorkView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "payments" ? <PaymentsView data={data} busy={busy} onAction={postAction} /> : null}
@@ -807,7 +951,7 @@ function PeopleView({
       <div className="section-heading">
         <div>
           <h2>User Management</h2>
-          <p>Approve bidders, assign roles, and set payment rates.</p>
+          <p>Manage accounts, approval status, roles, passwords, and email verification.</p>
         </div>
       </div>
       <div className="people-list">
@@ -832,13 +976,8 @@ function UserEditor({
     name: user.name,
     role: user.role,
     status: user.status,
-    ratePerApplication: String(user.ratePerApplication),
-    bonusPerInterview: String(user.bonusPerInterview),
-    nextPaymentDate: user.nextPaymentDate,
-    paymentSchedule: user.paymentSchedule,
   });
-
-  const adminRole = draft.role === "admin";
+  const [passwordDraft, setPasswordDraft] = useState("");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -847,27 +986,46 @@ function UserEditor({
       name: draft.name,
       role: draft.role,
       status: draft.status,
-      ratePerApplication: Number(draft.ratePerApplication),
-      bonusPerInterview: Number(draft.bonusPerInterview),
-      nextPaymentDate: draft.nextPaymentDate,
-      paymentSchedule: draft.paymentSchedule,
     });
   }
 
+  async function submitPassword(event: FormEvent) {
+    event.preventDefault();
+    const nextData = await onSave("setUserPassword", {
+      targetUserId: user.id,
+      password: passwordDraft,
+    });
+    if (nextData) {
+      setPasswordDraft("");
+    }
+  }
+
+  async function sendVerificationEmail() {
+    await onSave("requestEmailVerification", { targetUserId: user.id });
+  }
+
   return (
-    <form className="person-editor" onSubmit={submit}>
+    <div className="person-editor">
       <div className="person-title">
         <div>
           <h3>{user.name}</h3>
           <p>{user.email}</p>
+          <div className="account-meta">
+            <span>Password: {user.passwordSet ? "Set" : "Not set"}</span>
+            <span>Updated: {optionalDateTime(user.passwordUpdatedAt)}</span>
+            <span>Email: {user.emailVerifiedAt ? "Verified" : "Not verified"}</span>
+          </div>
         </div>
         <div className="badge-row">
           <span className={`badge ${user.role}`}>{roleLabel(user.role)}</span>
           <span className={`badge ${user.status}`}>{statusLabel(user.status)}</span>
+          <span className={`badge ${user.emailVerifiedAt ? "bidder" : "pending"}`}>
+            {user.emailVerifiedAt ? "Email verified" : "Email pending"}
+          </span>
         </div>
       </div>
 
-      <div className="form-grid">
+      <form className="form-grid" onSubmit={submit}>
         <label className="field">
           <span>Name</span>
           <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
@@ -888,15 +1046,108 @@ function UserEditor({
             <option value="paused">Paused</option>
           </select>
         </label>
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy}>
+            Save account
+          </button>
+          <button className="ghost-button" type="button" disabled={busy || Boolean(user.emailVerifiedAt)} onClick={sendVerificationEmail}>
+            Send verification
+          </button>
+        </div>
+      </form>
+
+      <form className="form-grid account-tools" onSubmit={submitPassword}>
         <label className="field">
-          <span>Next payment</span>
+          <span>Temporary password</span>
           <input
-            type="date"
-            value={draft.nextPaymentDate}
-            disabled={adminRole}
-            onChange={(event) => setDraft({ ...draft, nextPaymentDate: event.target.value })}
+            type="password"
+            value={passwordDraft}
+            minLength={8}
+            onChange={(event) => setPasswordDraft(event.target.value)}
+            placeholder="At least 8 characters"
+            required
           />
         </label>
+        <button className="secondary-button" type="submit" disabled={busy || passwordDraft.length < 8}>
+          Set password
+        </button>
+        <div className="muted full">
+          Passwords are encrypted and cannot be viewed after they are saved.
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function BidderSettingsView({
+  data,
+  busy,
+  onSave,
+}: {
+  data: PortalData;
+  busy: boolean;
+  onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
+  const bidders = data.users.filter((user) => user.role === "bidder");
+
+  return (
+    <section className="panel">
+      <div className="section-heading">
+        <div>
+          <h2>Bidder Settings</h2>
+          <p>Manage bidder rates, bonuses, and payment schedules separately from user accounts.</p>
+        </div>
+      </div>
+      <div className="people-list">
+        {bidders.map((user) => (
+          <BidderSettingsEditor key={user.id} user={user} busy={busy} onSave={onSave} />
+        ))}
+        {!bidders.length ? <div className="empty-state">No bidders yet.</div> : null}
+      </div>
+    </section>
+  );
+}
+
+function BidderSettingsEditor({
+  user,
+  busy,
+  onSave,
+}: {
+  user: PortalUser;
+  busy: boolean;
+  onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
+  const [draft, setDraft] = useState({
+    ratePerApplication: String(user.ratePerApplication),
+    bonusPerInterview: String(user.bonusPerInterview),
+    nextPaymentDate: user.nextPaymentDate,
+    paymentSchedule: user.paymentSchedule,
+  });
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSave("updateUser", {
+      targetUserId: user.id,
+      name: user.name,
+      role: user.role,
+      status: user.status,
+      ratePerApplication: Number(draft.ratePerApplication),
+      bonusPerInterview: Number(draft.bonusPerInterview),
+      nextPaymentDate: draft.nextPaymentDate,
+      paymentSchedule: draft.paymentSchedule,
+    });
+  }
+
+  return (
+    <form className="person-editor" onSubmit={submit}>
+      <div className="person-title">
+        <div>
+          <h3>{user.name}</h3>
+          <p>{user.email}</p>
+        </div>
+        <span className={`badge ${user.status}`}>{statusLabel(user.status)}</span>
+      </div>
+      <div className="form-grid">
         <label className="field">
           <span>Rate per applied job</span>
           <input
@@ -904,7 +1155,6 @@ function UserEditor({
             min="0"
             step="0.01"
             value={draft.ratePerApplication}
-            disabled={adminRole}
             onChange={(event) => setDraft({ ...draft, ratePerApplication: event.target.value })}
           />
         </label>
@@ -915,28 +1165,29 @@ function UserEditor({
             min="0"
             step="0.01"
             value={draft.bonusPerInterview}
-            disabled={adminRole}
             onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })}
           />
         </label>
-        <label className="field full">
+        <label className="field">
+          <span>Next payment</span>
+          <input
+            type="date"
+            value={draft.nextPaymentDate}
+            onChange={(event) => setDraft({ ...draft, nextPaymentDate: event.target.value })}
+          />
+        </label>
+        <label className="field">
           <span>Payment schedule</span>
           <input
             value={draft.paymentSchedule}
-            disabled={adminRole}
             onChange={(event) => setDraft({ ...draft, paymentSchedule: event.target.value })}
             placeholder="Weekly on Friday, biweekly, monthly..."
           />
         </label>
       </div>
-
-      {draft.role === "developer" ? (
-        <div className="developer-note">Developer work tracking is reserved for the next phase; payment records can still be managed manually.</div>
-      ) : null}
-
       <div className="actions">
         <button className="primary-button" type="submit" disabled={busy}>
-          Save user
+          Save bidder settings
         </button>
       </div>
     </form>
