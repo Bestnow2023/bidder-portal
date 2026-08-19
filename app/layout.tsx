@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     apple: "/favicon.png",
   },
   other: {
-    cryptomus: "a364d755",
+    cryptomus: "d8702318",
   },
 };
 
