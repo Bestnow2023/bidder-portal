@@ -6,6 +6,7 @@ import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "
 import type {
   ChatAttachment,
   ChatMessage,
+  ContractRecord,
   DepositRecord,
   EscrowRecord,
   PaymentFrequency,
@@ -14,6 +15,7 @@ import type {
   PaymentWeekday,
   PortalData,
   PortalNotification,
+  PortalPost,
   PortalUser,
   Role,
   UserStatus,
@@ -21,7 +23,7 @@ import type {
 } from "./portal-types";
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
-type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "people" | "bidderSettings" | "work" | "billing" | "payments" | "chat";
+type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "people" | "bidderSettings" | "work" | "billing" | "payments" | "chat";
 
 const payoutCurrencies = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB"];
 const payoutNetworks = ["TRON", "BSC", "ETH", "BTC", "LTC", "TRX"];
@@ -88,6 +90,8 @@ const viewRoutes: Record<PortalView, string> = {
   profile: "/profile",
   clients: "/clients",
   bidders: "/bidders",
+  posts: "/posts",
+  contracts: "/contracts",
   people: "/people",
   bidderSettings: "/bidder-settings",
   work: "/work",
@@ -101,6 +105,8 @@ const routeViews: Record<string, PortalView> = {
   "/profile": "profile",
   "/clients": "clients",
   "/bidders": "bidders",
+  "/posts": "posts",
+  "/contracts": "contracts",
   "/people": "people",
   "/bidder-settings": "bidderSettings",
   "/work": "work",
@@ -328,6 +334,8 @@ function viewTitle(view: string) {
     profile: "Profile",
     clients: "Clients",
     bidders: "Bidders",
+    posts: "Posts",
+    contracts: "Contracts",
     people: "People",
     bidderSettings: "Bidder Settings",
     work: "Work Logs",
@@ -342,6 +350,8 @@ function viewSubtitle(view: string, isAdmin: boolean) {
   if (!isAdmin) {
     if (view === "clients") return "Search client profiles and review payment history signals.";
     if (view === "bidders") return "Search bidder profiles and contracting status.";
+    if (view === "posts") return "Browse client posts, publish bidder availability, and start contracts.";
+    if (view === "contracts") return "Review requests, active contracts, criteria, and connected client credit.";
     if (view === "profile") return "Complete your public profile so matched people understand who they are working with.";
     return "Log your bidder activity and keep payment details current.";
   }
@@ -351,6 +361,8 @@ function viewSubtitle(view: string, isAdmin: boolean) {
     profile: "Complete your public profile and escrow readiness.",
     clients: "Review client profiles and hiring signals.",
     bidders: "Search bidders and see who is available or already contracted.",
+    posts: "Publish posts, review marketplace listings, and turn them into contract requests.",
+    contracts: "Manage client-bidder contract requests, active criteria, and assignments.",
     people: "Manage user accounts, approval status, roles, passwords, and email verification.",
     bidderSettings: "Set bidder rates, interview bonuses, payment dates, and schedules.",
     work: "Review bidder work logs and Google Sheet links.",
@@ -364,18 +376,18 @@ function viewSubtitle(view: string, isAdmin: boolean) {
 
 function viewsForUser(user: PortalUser): PortalView[] {
   if (isSuperAdminRole(user.role)) {
-    return ["people", "billing", "chat"];
+    return ["people", "contracts", "posts", "billing", "chat"];
   }
 
   if (isClientRole(user.role)) {
-    return ["overview", "profile", "bidders", "work", "billing", "chat"];
+    return ["overview", "profile", "bidders", "posts", "contracts", "work", "billing", "chat"];
   }
 
   if (user.role === "bidder") {
-    return ["dashboard", "profile", "clients", "work", "payments", "chat"];
+    return ["dashboard", "profile", "clients", "posts", "contracts", "work", "payments", "chat"];
   }
 
-  return ["profile", "payments", "chat"];
+  return ["profile", "contracts", "payments", "chat"];
 }
 
 function safeViewForUser(user: PortalUser, view: PortalView) {
@@ -440,8 +452,34 @@ function creditsSpentForClient(clientId: string, payments: PaymentRecord[]) {
     .reduce((total, payment) => total + payment.amount, 0);
 }
 
-function creditBalanceForClient(clientId: string, deposits: DepositRecord[], payments: PaymentRecord[]) {
-  return Math.max(0, creditsDepositedForClient(clientId, deposits) - creditsSpentForClient(clientId, payments));
+function moneyCreditSpentOnPosts(userId: string, posts: PortalPost[] = []) {
+  return posts
+    .filter((post) => post.authorId === userId)
+    .reduce((total, post) => total + (post.moneyCreditUsed || 0), 0);
+}
+
+function creditBalanceForClient(clientId: string, deposits: DepositRecord[], payments: PaymentRecord[], posts: PortalPost[] = []) {
+  return Math.max(0, creditsDepositedForClient(clientId, deposits) - creditsSpentForClient(clientId, payments) - moneyCreditSpentOnPosts(clientId, posts));
+}
+
+function userCreditBalances(user: PortalUser, data: PortalData) {
+  if (user.creditBalances) {
+    return user.creditBalances;
+  }
+
+  const moneyCreditBalance = isClientRole(user.role)
+    ? creditBalanceForClient(user.id, data.deposits || [], data.payments || [], data.posts || [])
+    : 0;
+  const giftCreditUsed = (data.posts || [])
+    .filter((post) => post.authorId === user.id)
+    .reduce((total, post) => total + (post.giftCreditUsed || 0), 0);
+  const giftCreditBalance = Math.max(0, 10 - giftCreditUsed);
+
+  return {
+    moneyCreditBalance,
+    giftCreditBalance,
+    postingCreditBalance: Math.max(0, moneyCreditBalance + giftCreditBalance),
+  };
 }
 
 function userById(users: PortalUser[], userId: string) {
@@ -471,7 +509,7 @@ function initialsForName(name: string) {
 }
 
 function assignedClientName(users: PortalUser[], user: PortalUser) {
-  if (user.role !== "bidder") {
+  if (!isWorkerUser(user)) {
     return "-";
   }
 
@@ -488,6 +526,27 @@ function isProfileComplete(user: PortalUser) {
 
 function clientUsers(users: PortalUser[]) {
   return users.filter((user) => isClientRole(user.role) && user.status === "approved");
+}
+
+function workerUsers(users: PortalUser[]) {
+  return users.filter((user) => isWorkerUser(user) && user.status === "approved");
+}
+
+function contractStatusLabel(status: string) {
+  if (status === "active") return "Active";
+  if (status === "rejected") return "Rejected";
+  if (status === "ended") return "Ended";
+  return "Requested";
+}
+
+function contractStatusClass(status: string) {
+  if (status === "active") return "approved";
+  if (status === "requested") return "pending";
+  return "paused";
+}
+
+function postAudienceLabel(post: PortalPost) {
+  return post.type === "client" ? "Visible to bidders" : "Visible to clients";
 }
 
 function userMatchesSearch(user: PortalUser, query: string) {
@@ -1590,6 +1649,8 @@ export default function PortalApp() {
             {safeView === "profile" ? <ProfileView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "clients" ? <ClientDirectoryView data={data} onMessageClient={openInboxForUser} /> : null}
             {safeView === "bidders" ? <BiddersDirectoryView data={data} onMessageBidder={openInboxForUser} /> : null}
+            {safeView === "posts" ? <PostsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
+            {safeView === "contracts" ? <ContractsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
             {safeView === "people" && isSuperAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "bidderSettings" && isSuperAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
@@ -2146,6 +2207,14 @@ function ClientDirectoryView({
                   {selectedClient.allowDirectMessages === false ? "Messages off" : "Message client"}
                 </button>
               </article>
+
+              {selectedClient.creditBalances ? (
+                <article className="profile-card">
+                  <h3>Client Credit Balance</h3>
+                  <p>Visible because you are connected with this client.</p>
+                  <CreditBalanceStrip balances={selectedClient.creditBalances} />
+                </article>
+              ) : null}
             </div>
 
             <div className="two-column">
@@ -2296,6 +2365,503 @@ function BiddersDirectoryView({
       </div>
       {!bidders.length ? <div className="empty-state">No bidders match this search.</div> : null}
     </section>
+  );
+}
+
+function CreditBalanceStrip({ balances }: { balances: { moneyCreditBalance: number; giftCreditBalance: number; postingCreditBalance: number } }) {
+  return (
+    <div className="credit-strip">
+      <span>
+        <strong>{money(balances.moneyCreditBalance)}</strong>
+        Money credit
+      </span>
+      <span>
+        <strong>{money(balances.giftCreditBalance)}</strong>
+        Gift credit
+      </span>
+      <span>
+        <strong>{money(balances.postingCreditBalance)}</strong>
+        Posting balance
+      </span>
+    </div>
+  );
+}
+
+function PostsView({
+  data,
+  busy,
+  onAction,
+  onMessageUser,
+}: {
+  data: PortalData;
+  busy: boolean;
+  onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onMessageUser: (userId: string) => void;
+}) {
+  const currentUser = data.currentUser;
+  const balances = userCreditBalances(currentUser, data);
+  const canPublish = isClientRole(currentUser.role) || currentUser.role === "bidder";
+  const [query, setQuery] = useState("");
+  const [draft, setDraft] = useState({
+    title: "",
+    criteria: "",
+    budgetAmount: "",
+    preferredRate: "",
+    bonusPerInterview: "",
+    paymentFrequency: "weekly" as PaymentFrequency,
+    paymentWeekday: "friday" as PaymentWeekday,
+  });
+  const posts = data.posts || [];
+  const myPosts = posts.filter((post) => post.authorId === currentUser.id);
+  const availablePosts = posts
+    .filter((post) => post.authorId !== currentUser.id)
+    .filter((post) => isSuperAdminRole(currentUser.role) || post.status === "active")
+    .filter((post) => {
+      if (isSuperAdminRole(currentUser.role)) return true;
+      if (isClientRole(currentUser.role)) return post.type === "bidder";
+      if (currentUser.role === "bidder") return post.type === "client";
+      return false;
+    })
+    .filter((post) => {
+      const author = userById(data.users, post.authorId);
+      const search = `${post.title} ${post.criteria} ${author?.name || ""} ${author?.email || ""}`.toLowerCase();
+      return !query.trim() || search.includes(query.trim().toLowerCase());
+    });
+
+  async function submitPost(event: FormEvent) {
+    event.preventDefault();
+    const nextData = await onAction("createPost", {
+      title: draft.title,
+      criteria: draft.criteria,
+      budgetAmount: Number(draft.budgetAmount),
+      preferredRate: Number(draft.preferredRate),
+      bonusPerInterview: Number(draft.bonusPerInterview),
+      paymentFrequency: draft.paymentFrequency,
+      paymentWeekday: draft.paymentWeekday,
+    });
+    if (nextData) {
+      setDraft({
+        title: "",
+        criteria: "",
+        budgetAmount: "",
+        preferredRate: "",
+        bonusPerInterview: "",
+        paymentFrequency: "weekly",
+        paymentWeekday: "friday",
+      });
+    }
+  }
+
+  async function closePost(post: PortalPost) {
+    await onAction("updatePostStatus", { postId: post.id, status: "closed" });
+  }
+
+  async function startContractFromPost(post: PortalPost) {
+    const author = userById(data.users, post.authorId);
+    if (!author) {
+      return;
+    }
+
+    await onAction("createContract", {
+      targetUserId: author.id,
+      title: post.title,
+      criteria: post.criteria,
+      ratePerApplication: post.preferredRate || author.ratePerApplication || 0,
+      bonusPerInterview: post.bonusPerInterview || author.bonusPerInterview || 0,
+      paymentFrequency: post.paymentFrequency || "weekly",
+      paymentWeekday: post.paymentWeekday || "friday",
+      startDate: today(),
+      sourcePostId: post.id,
+    });
+  }
+
+  function canStartContractFromPost(post: PortalPost) {
+    if (isSuperAdminRole(currentUser.role)) {
+      return false;
+    }
+    return (isClientRole(currentUser.role) && post.type === "bidder") || (currentUser.role === "bidder" && post.type === "client");
+  }
+
+  return (
+    <div className="dashboard-stack">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Post Credit</h2>
+            <p>Posts cost $1. Money credit can be used anywhere; gift credit can only be used for posting.</p>
+          </div>
+          <span className="badge approved">$1 per post</span>
+        </div>
+        <CreditBalanceStrip balances={balances} />
+      </section>
+
+      {canPublish ? (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Create Post</h2>
+              <p>{isClientRole(currentUser.role) ? "Client posts are visible to bidders." : "Bidder posts are visible to clients."}</p>
+            </div>
+            <span className={`badge ${currentUser.role}`}>{isClientRole(currentUser.role) ? "Client post" : "Bidder post"}</span>
+          </div>
+          <form className="form-grid" onSubmit={submitPost}>
+            <label className="field">
+              <span>Post title</span>
+              <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="What you need or what you offer" required />
+            </label>
+            <label className="field">
+              <span>Budget</span>
+              <input type="number" min="0" step="0.01" value={draft.budgetAmount} onChange={(event) => setDraft({ ...draft, budgetAmount: event.target.value })} placeholder="Optional budget" />
+            </label>
+            <label className="field">
+              <span>Preferred rate</span>
+              <input type="number" min="0" step="0.01" value={draft.preferredRate} onChange={(event) => setDraft({ ...draft, preferredRate: event.target.value })} placeholder="Per applied job" />
+            </label>
+            <label className="field">
+              <span>Interview bonus</span>
+              <input type="number" min="0" step="0.01" value={draft.bonusPerInterview} onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })} placeholder="Per interview" />
+            </label>
+            <label className="field">
+              <span>Frequency</span>
+              <select value={draft.paymentFrequency} onChange={(event) => setDraft({ ...draft, paymentFrequency: event.target.value as PaymentFrequency })}>
+                {paymentFrequencies.filter((frequency) => frequency.value).map((frequency) => (
+                  <option key={frequency.value} value={frequency.value}>{frequency.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Weekday</span>
+              <select value={draft.paymentWeekday} onChange={(event) => setDraft({ ...draft, paymentWeekday: event.target.value as PaymentWeekday })}>
+                {paymentWeekdays.filter((weekday) => weekday.value).map((weekday) => (
+                  <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field full">
+              <span>Specific criteria</span>
+              <textarea value={draft.criteria} onChange={(event) => setDraft({ ...draft, criteria: event.target.value })} placeholder="Describe the requirements, expectations, schedule, and success criteria." required />
+            </label>
+            <div className="actions full">
+              <button className="primary-button" type="submit" disabled={busy || balances.postingCreditBalance < 1}>
+                Publish post
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Available Posts</h2>
+            <p>{isClientRole(currentUser.role) ? "Bidder posts available to clients." : currentUser.role === "bidder" ? "Client posts available to bidders." : "All visible marketplace posts."}</p>
+          </div>
+        </div>
+        <div className="filter-bar">
+          <label className="field">
+            <span>Search posts</span>
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Title, criteria, author" />
+          </label>
+        </div>
+        <div className="post-grid">
+          {availablePosts.map((post) => {
+            const author = userById(data.users, post.authorId);
+            return (
+              <article className="profile-card post-card" key={post.id}>
+                <div className="person-title">
+                  <div>
+                    <h3>{post.title}</h3>
+                    <span className="table-subtext">{author?.name || "Unknown"} - {postAudienceLabel(post)}</span>
+                  </div>
+                  <span className={`badge ${post.status === "active" ? "approved" : "paused"}`}>{titleCase(post.status)}</span>
+                </div>
+                <p>{post.criteria}</p>
+                <div className="mini-metrics">
+                  <span><strong>{money(post.budgetAmount || 0)}</strong> budget</span>
+                  <span><strong>{money(post.preferredRate || 0)}</strong> rate</span>
+                  <span><strong>{money(post.bonusPerInterview || 0)}</strong> bonus</span>
+                  <span><strong>{paymentScheduleLabel(post.paymentFrequency, post.paymentWeekday) || "Flexible"}</strong> schedule</span>
+                </div>
+                <div className="actions">
+                  {author?.allowDirectMessages === false ? null : (
+                    <button className="ghost-button compact-button" type="button" onClick={() => author && onMessageUser(author.id)}>
+                      Message
+                    </button>
+                  )}
+                  {canStartContractFromPost(post) ? (
+                    <button className="primary-button compact-button" type="button" disabled={busy} onClick={() => startContractFromPost(post)}>
+                      Start contract
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        {!availablePosts.length ? <div className="empty-state">No posts are available for this view.</div> : null}
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>My Posts</h2>
+            <p>Your published posts and posting-credit usage.</p>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Post</th>
+                <th>Audience</th>
+                <th>Cost</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {myPosts.map((post) => (
+                <tr key={post.id}>
+                  <td>
+                    <strong>{post.title}</strong>
+                    <span className="table-subtext">{post.criteria}</span>
+                  </td>
+                  <td>{postAudienceLabel(post)}</td>
+                  <td>{money((post.giftCreditUsed || 0) + (post.moneyCreditUsed || 0))}</td>
+                  <td><span className={`badge ${post.status === "active" ? "approved" : "paused"}`}>{titleCase(post.status)}</span></td>
+                  <td>{dateTime(post.createdAt)}</td>
+                  <td>
+                    {post.status === "active" ? (
+                      <button className="ghost-button compact-button" type="button" disabled={busy} onClick={() => closePost(post)}>
+                        Close
+                      </button>
+                    ) : (
+                      "-"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!myPosts.length ? <div className="empty-state">No posts published yet.</div> : null}
+      </section>
+    </div>
+  );
+}
+
+function ContractsView({
+  data,
+  busy,
+  onAction,
+  onMessageUser,
+}: {
+  data: PortalData;
+  busy: boolean;
+  onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onMessageUser: (userId: string) => void;
+}) {
+  const currentUser = data.currentUser;
+  const canCreateContract = !isSuperAdminRole(currentUser.role) && (isClientRole(currentUser.role) || isWorkerUser(currentUser));
+  const targets = isClientRole(currentUser.role)
+    ? workerUsers(data.users).filter((user) => !user.assignedAdminId || user.assignedAdminId === currentUser.id)
+    : clientUsers(data.users);
+  const [draft, setDraft] = useState({
+    targetUserId: targets[0]?.id || "",
+    title: "",
+    criteria: "",
+    ratePerApplication: "",
+    bonusPerInterview: "",
+    paymentFrequency: "weekly" as PaymentFrequency,
+    paymentWeekday: "friday" as PaymentWeekday,
+    startDate: today(),
+  });
+  const contracts = data.contracts || [];
+
+  async function submitContract(event: FormEvent) {
+    event.preventDefault();
+    const nextTargetId = draft.targetUserId || targets[0]?.id || "";
+    const nextData = await onAction("createContract", {
+      targetUserId: nextTargetId,
+      title: draft.title,
+      criteria: draft.criteria,
+      ratePerApplication: Number(draft.ratePerApplication),
+      bonusPerInterview: Number(draft.bonusPerInterview),
+      paymentFrequency: draft.paymentFrequency,
+      paymentWeekday: draft.paymentWeekday,
+      startDate: draft.startDate,
+    });
+    if (nextData) {
+      setDraft({
+        ...draft,
+        targetUserId: nextTargetId,
+        title: "",
+        criteria: "",
+        ratePerApplication: "",
+        bonusPerInterview: "",
+      });
+    }
+  }
+
+  function contractCounterparty(contract: ContractRecord) {
+    return currentUser.id === contract.clientId ? userById(data.users, contract.workerId) : userById(data.users, contract.clientId);
+  }
+
+  function canAcceptContract(contract: ContractRecord) {
+    return contract.status === "requested" && (isSuperAdminRole(currentUser.role) || contract.requestedByUserId !== currentUser.id);
+  }
+
+  function canRejectContract(contract: ContractRecord) {
+    return canAcceptContract(contract);
+  }
+
+  function canEndContract(contract: ContractRecord) {
+    return contract.status === "active";
+  }
+
+  async function updateContract(contract: ContractRecord, status: "active" | "rejected" | "ended") {
+    await onAction("updateContractStatus", { contractId: contract.id, status });
+  }
+
+  return (
+    <div className="dashboard-stack">
+      {canCreateContract ? (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Start Contract</h2>
+              <p>Create a client-bidder contract request with specific criteria, rate, bonus, and payment schedule.</p>
+            </div>
+          </div>
+          <form className="form-grid" onSubmit={submitContract}>
+            <label className="field">
+              <span>{isClientRole(currentUser.role) ? "Bidder" : "Client"}</span>
+              <select value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value })} required>
+                <option value="">Select member</option>
+                {targets.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.name} - {roleLabel(target.role)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Contract title</span>
+              <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Weekly bidder support" required />
+            </label>
+            <label className="field">
+              <span>Rate per applied job</span>
+              <input type="number" min="0" step="0.01" value={draft.ratePerApplication} onChange={(event) => setDraft({ ...draft, ratePerApplication: event.target.value })} />
+            </label>
+            <label className="field">
+              <span>Interview bonus</span>
+              <input type="number" min="0" step="0.01" value={draft.bonusPerInterview} onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })} />
+            </label>
+            <label className="field">
+              <span>Frequency</span>
+              <select value={draft.paymentFrequency} onChange={(event) => setDraft({ ...draft, paymentFrequency: event.target.value as PaymentFrequency })}>
+                {paymentFrequencies.filter((frequency) => frequency.value).map((frequency) => (
+                  <option key={frequency.value} value={frequency.value}>{frequency.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Weekday</span>
+              <select value={draft.paymentWeekday} onChange={(event) => setDraft({ ...draft, paymentWeekday: event.target.value as PaymentWeekday })}>
+                {paymentWeekdays.filter((weekday) => weekday.value).map((weekday) => (
+                  <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Start date</span>
+              <input type="date" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} />
+            </label>
+            <label className="field full">
+              <span>Specific criteria</span>
+              <textarea value={draft.criteria} onChange={(event) => setDraft({ ...draft, criteria: event.target.value })} placeholder="Define the work, required logs, reporting cadence, target jobs, and acceptance criteria." required />
+            </label>
+            <div className="actions full">
+              <button className="primary-button" type="submit" disabled={busy || !targets.length}>
+                Send contract request
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Contract Management</h2>
+            <p>Requested, active, rejected, and ended contracts between clients and bidders.</p>
+          </div>
+          <span className="badge">{contracts.length} contracts</span>
+        </div>
+        <div className="contract-grid">
+          {contracts.map((contract) => {
+            const client = userById(data.users, contract.clientId);
+            const worker = userById(data.users, contract.workerId);
+            const counterparty = contractCounterparty(contract);
+            const requester = userById(data.users, contract.requestedByUserId);
+            const connectedClient = currentUser.id === worker?.id ? client : null;
+            const connectedClientBalances = connectedClient?.creditBalances;
+            return (
+              <article className="profile-card contract-card" key={contract.id}>
+                <div className="person-title">
+                  <div>
+                    <h3>{contract.title}</h3>
+                    <span className="table-subtext">{client?.name || "Client"} / {worker?.name || "Bidder"}</span>
+                  </div>
+                  <span className={`badge ${contractStatusClass(contract.status)}`}>{contractStatusLabel(contract.status)}</span>
+                </div>
+                <p>{contract.criteria}</p>
+                <div className="mini-metrics">
+                  <span><strong>{money(contract.ratePerApplication || 0)}</strong> rate</span>
+                  <span><strong>{money(contract.bonusPerInterview || 0)}</strong> bonus</span>
+                  <span><strong>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday)}</strong> schedule</span>
+                  <span><strong>{shortDate(contract.startDate)}</strong> start</span>
+                </div>
+                <p className="muted">
+                  Requested by {requester?.name || "Unknown"} on {dateTime(contract.createdAt)}
+                  {contract.acceptedAt ? ` - accepted ${dateTime(contract.acceptedAt)}` : ""}
+                </p>
+                {connectedClientBalances ? (
+                  <div className="connected-credit">
+                    <strong>Connected client credit</strong>
+                    <CreditBalanceStrip balances={connectedClientBalances} />
+                  </div>
+                ) : null}
+                <div className="actions">
+                  {counterparty?.allowDirectMessages === false ? null : (
+                    <button className="ghost-button compact-button" type="button" onClick={() => counterparty && onMessageUser(counterparty.id)}>
+                      Message
+                    </button>
+                  )}
+                  {canAcceptContract(contract) ? (
+                    <button className="primary-button compact-button" type="button" disabled={busy} onClick={() => updateContract(contract, "active")}>
+                      Accept
+                    </button>
+                  ) : null}
+                  {canRejectContract(contract) ? (
+                    <button className="ghost-button compact-button" type="button" disabled={busy} onClick={() => updateContract(contract, "rejected")}>
+                      Reject
+                    </button>
+                  ) : null}
+                  {canEndContract(contract) ? (
+                    <button className="ghost-button compact-button" type="button" disabled={busy} onClick={() => updateContract(contract, "ended")}>
+                      End contract
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        {!contracts.length ? <div className="empty-state">No contracts yet.</div> : null}
+      </section>
+    </div>
   );
 }
 
@@ -3522,8 +4088,8 @@ function AdminPayments({
     ? selectedUser?.assignedAdminId || depositDraft.clientId
     : data.currentUser.id;
   const depositClientId = isSuperAdminRole(data.currentUser.role) ? depositDraft.clientId : data.currentUser.id;
-  const creditBalance = paymentClientId ? creditBalanceForClient(paymentClientId, data.deposits || [], data.payments) : 0;
-  const releaseCreditBalance = depositClientId ? creditBalanceForClient(depositClientId, data.deposits || [], data.payments) : 0;
+  const creditBalance = paymentClientId ? creditBalanceForClient(paymentClientId, data.deposits || [], data.payments, data.posts || []) : 0;
+  const releaseCreditBalance = depositClientId ? creditBalanceForClient(depositClientId, data.deposits || [], data.payments, data.posts || []) : 0;
   const depositAmount = Number(depositDraft.amount) || 0;
   const depositFee = Math.round(depositAmount * 0.05 * 100) / 100;
   const depositCredit = Math.max(0, Math.round((depositAmount - depositFee) * 100) / 100);
@@ -3791,7 +4357,7 @@ function AdminPayments({
           <div className="metric-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
             <div className="metric">
               <span>Credit balance</span>
-              <strong>{money(depositClientId ? creditBalanceForClient(depositClientId, data.deposits || [], data.payments) : 0)}</strong>
+              <strong>{money(depositClientId ? creditBalanceForClient(depositClientId, data.deposits || [], data.payments, data.posts || []) : 0)}</strong>
             </div>
             <div className="metric">
               <span>Total deposited</span>

@@ -794,6 +794,13 @@ td > strong {
   gap: 12px;
 }
 
+.post-grid,
+.contract-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+
 .profile-card {
   min-height: 220px;
   display: grid;
@@ -821,6 +828,43 @@ td > strong {
 .profile-card h3 {
   margin: 0;
   font-size: 16px;
+}
+
+.post-card,
+.contract-card {
+  min-height: 0;
+}
+
+.credit-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.credit-strip span {
+  display: grid;
+  gap: 4px;
+  min-height: 78px;
+  align-content: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(242, 247, 245, 0.72);
+  padding: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.credit-strip strong {
+  color: var(--foreground);
+  font-size: 20px;
+}
+
+.connected-credit {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
 }
 
 .mini-metrics {
@@ -1398,7 +1442,8 @@ td > strong {
   .metric-grid,
   .form-grid,
   .filter-bar,
-  .profile-detail-grid {
+  .profile-detail-grid,
+  .credit-strip {
     grid-template-columns: 1fr;
   }
 

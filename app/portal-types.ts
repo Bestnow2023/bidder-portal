@@ -3,6 +3,15 @@ export type UserStatus = "pending" | "approved" | "paused";
 export type PaymentStatus = "scheduled" | "processing" | "paid" | "failed";
 export type PaymentFrequency = "" | "weekly" | "biweekly" | "monthly";
 export type PaymentWeekday = "" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday";
+export type ContractStatus = "requested" | "active" | "rejected" | "ended";
+export type PostStatus = "active" | "closed";
+export type PostType = "client" | "bidder";
+
+export type CreditBalances = {
+  moneyCreditBalance: number;
+  giftCreditBalance: number;
+  postingCreditBalance: number;
+};
 
 export type PortalUser = {
   id: string;
@@ -19,6 +28,7 @@ export type PortalUser = {
   profileCompletedAt?: string;
   allowDirectMessages?: boolean;
   clientRating?: number;
+  creditBalances?: CreditBalances;
   clientStats?: {
     assignedBidderCount: number;
     flaggedNoHires: boolean;
@@ -48,6 +58,47 @@ export type PortalUser = {
   emailVerificationSentAt?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ContractRecord = {
+  id: string;
+  clientId: string;
+  workerId: string;
+  requestedByUserId: string;
+  title: string;
+  criteria: string;
+  ratePerApplication: number;
+  bonusPerInterview: number;
+  paymentFrequency: PaymentFrequency;
+  paymentWeekday: PaymentWeekday;
+  startDate: string;
+  status: ContractStatus;
+  sourcePostId?: string;
+  acceptedAt?: string;
+  acceptedByUserId?: string;
+  rejectedAt?: string;
+  endedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PortalPost = {
+  id: string;
+  authorId: string;
+  type: PostType;
+  title: string;
+  criteria: string;
+  budgetAmount: number;
+  preferredRate: number;
+  bonusPerInterview: number;
+  paymentFrequency: PaymentFrequency;
+  paymentWeekday: PaymentWeekday;
+  status: PostStatus;
+  giftCreditUsed: number;
+  moneyCreditUsed: number;
+  createdAt: string;
+  updatedAt: string;
+  closedAt?: string;
 };
 
 export type PaymentMethod = {
@@ -187,6 +238,8 @@ export type PortalData = {
   payments: PaymentRecord[];
   escrows: EscrowRecord[];
   deposits: DepositRecord[];
+  contracts: ContractRecord[];
+  posts: PortalPost[];
   notifications: PortalNotification[];
   chatContacts?: PortalUser[];
   chatMessages: ChatMessage[];
