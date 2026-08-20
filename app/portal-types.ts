@@ -259,6 +259,7 @@ export type ChatMessage = {
   authorRole: Role;
   body: string;
   attachments?: ChatAttachment[];
+  relatedPostId?: string;
   authorTimeZone?: string;
   createdAt: string;
   updatedAt?: string;

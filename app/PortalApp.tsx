@@ -25,7 +25,7 @@ import type {
 } from "./portal-types";
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
-type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "disputes" | "people" | "bidderSettings" | "work" | "billing" | "payments" | "chat";
+type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "people" | "bidderSettings" | "work" | "billing" | "payments" | "chat";
 
 const payoutCurrencies = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB"];
 const payoutNetworks = ["TRON", "BSC", "ETH", "BTC", "LTC", "TRX"];
@@ -103,12 +103,11 @@ const timeZoneOptions = [
 const viewRoutes: Record<PortalView, string> = {
   overview: "/operations",
   dashboard: "/dashboard",
-  profile: "/profile",
+  profile: "/settings",
   clients: "/clients",
   bidders: "/bidders",
   posts: "/posts",
   contracts: "/contracts",
-  disputes: "/disputes",
   people: "/people",
   bidderSettings: "/bidder-settings",
   work: "/work",
@@ -120,11 +119,12 @@ const routeViews: Record<string, PortalView> = {
   "/operations": "overview",
   "/dashboard": "dashboard",
   "/profile": "profile",
+  "/settings": "profile",
   "/clients": "clients",
   "/bidders": "bidders",
   "/posts": "posts",
   "/contracts": "contracts",
-  "/disputes": "disputes",
+  "/disputes": "contracts",
   "/people": "people",
   "/bidder-settings": "bidderSettings",
   "/work": "work",
@@ -349,12 +349,11 @@ function viewTitle(view: string) {
   const titles: Record<string, string> = {
     dashboard: "Dashboard",
     overview: "Dashboard",
-    profile: "Profile",
+    profile: "Settings",
     clients: "Clients",
     bidders: "Bidders",
     posts: "Posts",
     contracts: "Contracts",
-    disputes: "Disputes",
     people: "People",
     bidderSettings: "Bidder Settings",
     work: "Work Logs",
@@ -370,26 +369,24 @@ function viewSubtitle(view: string, isAdmin: boolean) {
     if (view === "clients") return "Search client profiles and review payment history signals.";
     if (view === "bidders") return "Search bidder profiles and contracting status.";
     if (view === "posts") return "Review bidder posts, publish bidder availability, and start contracts.";
-    if (view === "contracts") return "Review requests, active contracts, criteria, and connected client credit.";
-    if (view === "disputes") return "Open and track dispute resolution requests.";
-    if (view === "profile") return "Complete your public profile so matched people understand who they are working with.";
+    if (view === "contracts") return "Review requests, active contracts, disputes, criteria, and connected client credit.";
+    if (view === "profile") return "Complete your profile, direct-message preference, email, and password.";
     return "Log your bidder activity and keep payment details current.";
   }
 
   const subtitles: Record<string, string> = {
     overview: "Review work, clients, payments, and escrow snapshots.",
-    profile: "Complete your public profile and escrow readiness.",
+    profile: "Complete your profile, direct-message preference, email, and password.",
     clients: "Review client profiles and hiring signals.",
     bidders: "Search bidders and see who is available or already contracted.",
     posts: "Review marketplace listings and turn bidder posts into contract requests.",
-    contracts: "Manage client-bidder contract requests, active criteria, and assignments.",
-    disputes: "Monitor and resolve client dispute center requests.",
+    contracts: "Manage client-bidder contract requests, active criteria, assignments, and disputes.",
     people: "Manage user accounts, approval status, roles, passwords, and email verification.",
     bidderSettings: "Set bidder rates, interview bonuses, payment dates, and schedules.",
     work: "Review bidder work logs and Google Sheet links.",
     billing: "Deposit credits and release bidder payouts through Cryptomus.",
     payments: "Record payouts, review payment methods, and track client escrow.",
-    chat: "Direct member messaging with super admin monitoring.",
+    chat: "Client-bidder direct messaging with super admin monitoring.",
   };
 
   return subtitles[view] || "Manage the bidder portal.";
@@ -397,11 +394,11 @@ function viewSubtitle(view: string, isAdmin: boolean) {
 
 function viewsForUser(user: PortalUser): PortalView[] {
   if (isSuperAdminRole(user.role)) {
-    return ["people", "contracts", "posts", "disputes", "billing", "chat"];
+    return ["people", "contracts", "posts", "billing", "chat", "profile"];
   }
 
   if (isClientRole(user.role)) {
-    return ["overview", "profile", "bidders", "posts", "contracts", "disputes", "work", "billing", "chat"];
+    return ["overview", "profile", "bidders", "posts", "contracts", "work", "billing", "chat"];
   }
 
   if (user.role === "bidder") {
@@ -882,10 +879,13 @@ type UpcomingPaymentItem = {
   id: string;
   user?: PortalUser;
   scheduledDate: string;
+  periodStart: string;
+  periodEnd: string;
   amount: number;
   daysUntil: number;
   description: string;
   sourceLabel: string;
+  sourcePaymentId?: string;
 };
 
 type DateRange = {
@@ -1032,6 +1032,13 @@ export default function PortalApp() {
 
     return new URLSearchParams(window.location.search).get("recipient") || "";
   });
+  const [chatPostId, setChatPostId] = useState(() => {
+    if (typeof window === "undefined" || window.location.pathname !== viewRoutes.chat) {
+      return "";
+    }
+
+    return new URLSearchParams(window.location.search).get("post") || "";
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
@@ -1160,8 +1167,10 @@ export default function PortalApp() {
     }
 
     const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
       setActiveView(viewFromPath(window.location.pathname));
-      setChatRecipientId(new URLSearchParams(window.location.search).get("recipient") || "");
+      setChatRecipientId(params.get("recipient") || "");
+      setChatPostId(params.get("post") || "");
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -1371,11 +1380,7 @@ export default function PortalApp() {
       if (!nextData.currentUser) {
         if (nextData.needsEmailVerification) {
           const nextEmail = nextData.email || email || loginEmail;
-          setVerificationPendingEmail(nextEmail);
-          setVerificationSuccessEmail("");
-          setLoginEmail(nextEmail);
-          setLoginPassword("");
-          setAuthNotice(nextData.message || "Check your email to verify your account before signing in.");
+          handleEmailVerificationRequired(nextEmail, nextData.message || "Check your email to verify your account before signing in.");
         } else {
           setAuthNotice(nextData.message || "Done.");
         }
@@ -1414,6 +1419,8 @@ export default function PortalApp() {
     setSessionToken("");
     setLoginPassword(isLiveMode ? "" : demoPassword);
     setActiveView("overview");
+    setChatRecipientId("");
+    setChatPostId("");
     setChatUnreadCount(0);
     latestChatMessageIdRef.current = "";
     setVerificationPendingEmail("");
@@ -1648,19 +1655,25 @@ export default function PortalApp() {
 
     setActiveView(view);
     setChatRecipientId("");
+    setChatPostId("");
     if (view === "chat") {
       setChatUnreadCount(0);
     }
   }
 
-  function openInboxForUser(userId: string) {
-    const nextPath = `${viewRoutes.chat}?recipient=${encodeURIComponent(userId)}`;
+  function openInboxForUser(userId: string, relatedPostId = "") {
+    const params = new URLSearchParams({ recipient: userId });
+    if (relatedPostId) {
+      params.set("post", relatedPostId);
+    }
+    const nextPath = `${viewRoutes.chat}?${params.toString()}`;
 
     if (typeof window !== "undefined") {
       window.history.pushState({}, "", nextPath);
     }
 
     setChatRecipientId(userId);
+    setChatPostId(relatedPostId);
     setActiveView("chat");
     setChatUnreadCount(0);
     setPortalNavVisible(true);
@@ -1753,7 +1766,6 @@ export default function PortalApp() {
             {safeView === "bidders" ? <BiddersDirectoryView data={data} onMessageBidder={openInboxForUser} /> : null}
             {safeView === "posts" ? <PostsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
             {safeView === "contracts" ? <ContractsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
-            {safeView === "disputes" ? <DisputesView data={data} busy={busy} onAction={postAction} /> : null}
             {safeView === "people" && isSuperAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "bidderSettings" && isSuperAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
@@ -1767,6 +1779,7 @@ export default function PortalApp() {
                 onEnableNotifications={enableChatNotifications}
                 onSend={postAction}
                 requestedRecipientId={chatRecipientId}
+                requestedPostId={chatPostId}
               />
             ) : null}
           </>
@@ -1955,6 +1968,17 @@ function ProfileView({
     clientPreferences: user.clientPreferences || [],
     allowDirectMessages: user.allowDirectMessages !== false,
   });
+  const [emailDraft, setEmailDraft] = useState({
+    newEmail: user.email || "",
+    currentPassword: "",
+  });
+  const [passwordDraft, setPasswordDraft] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [accountNotice, setAccountNotice] = useState("");
+  const [accountError, setAccountError] = useState("");
   const isClientProfile = isClientRole(user.role);
   const isWorkerProfile = isWorkerUser(user);
   const profileTimeZoneOptions = timeZoneOptions.includes(draft.profileTimeZone)
@@ -1995,12 +2019,45 @@ function ProfileView({
     });
   }
 
+  async function submitEmail(event: FormEvent) {
+    event.preventDefault();
+    setAccountNotice("");
+    setAccountError("");
+    const nextData = await onSave("updateOwnEmail", {
+      newEmail: emailDraft.newEmail,
+      currentPassword: emailDraft.currentPassword,
+    });
+    if (nextData) {
+      setEmailDraft({ newEmail: nextData.currentUser.email, currentPassword: "" });
+      setAccountNotice("Email settings saved.");
+    }
+  }
+
+  async function submitPassword(event: FormEvent) {
+    event.preventDefault();
+    setAccountNotice("");
+    setAccountError("");
+    if (passwordDraft.newPassword !== passwordDraft.confirmPassword) {
+      setAccountError("New passwords do not match.");
+      return;
+    }
+
+    const nextData = await onSave("updateOwnPassword", {
+      currentPassword: passwordDraft.currentPassword,
+      newPassword: passwordDraft.newPassword,
+    });
+    if (nextData) {
+      setPasswordDraft({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setAccountNotice("Password updated.");
+    }
+  }
+
   return (
     <div className="dashboard-stack">
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>My Profile</h2>
+            <h2>Profile Settings</h2>
             <p>Complete the profile that matched clients and bidders can view.</p>
           </div>
           <span className={`badge ${isProfileComplete(user) ? "approved" : "pending"}`}>
@@ -2135,6 +2192,91 @@ function ProfileView({
             </button>
           </div>
         </form>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Account Settings</h2>
+            <p>Update the email used for sign-in and manage your password.</p>
+          </div>
+          <div className="badge-row">
+            <span className={`badge ${user.emailVerifiedAt ? "approved" : "pending"}`}>
+              {user.emailVerifiedAt ? "Email verified" : "Email not verified"}
+            </span>
+            <span className="badge">{user.passwordSet ? "Password set" : "Password needed"}</span>
+          </div>
+        </div>
+
+        {accountNotice ? <div className="status-strip compact success">{accountNotice}</div> : null}
+        {accountError ? <div className="error">{accountError}</div> : null}
+
+        <div className="settings-grid">
+          <form className="form-grid account-settings-form" onSubmit={submitEmail}>
+            <label className="field full">
+              <span>Email</span>
+              <input
+                type="email"
+                value={emailDraft.newEmail}
+                onChange={(event) => setEmailDraft({ ...emailDraft, newEmail: event.target.value })}
+                required
+              />
+            </label>
+            <label className="field full">
+              <span>Current password</span>
+              <input
+                type="password"
+                value={emailDraft.currentPassword}
+                onChange={(event) => setEmailDraft({ ...emailDraft, currentPassword: event.target.value })}
+                placeholder={user.passwordSet ? "Required to change email" : "Only needed if password is set"}
+              />
+            </label>
+            <div className="actions full">
+              <button className="primary-button" type="submit" disabled={busy || emailDraft.newEmail === user.email}>
+                Save email
+              </button>
+            </div>
+          </form>
+
+          <form className="form-grid account-settings-form" onSubmit={submitPassword}>
+            <label className="field">
+              <span>Current password</span>
+              <input
+                type="password"
+                value={passwordDraft.currentPassword}
+                onChange={(event) => setPasswordDraft({ ...passwordDraft, currentPassword: event.target.value })}
+                placeholder={user.passwordSet ? "Current password" : "Only needed if password is set"}
+              />
+            </label>
+            <label className="field">
+              <span>New password</span>
+              <input
+                type="password"
+                minLength={8}
+                value={passwordDraft.newPassword}
+                onChange={(event) => setPasswordDraft({ ...passwordDraft, newPassword: event.target.value })}
+                placeholder="At least 8 characters"
+                required
+              />
+            </label>
+            <label className="field">
+              <span>Confirm password</span>
+              <input
+                type="password"
+                minLength={8}
+                value={passwordDraft.confirmPassword}
+                onChange={(event) => setPasswordDraft({ ...passwordDraft, confirmPassword: event.target.value })}
+                placeholder="Repeat new password"
+                required
+              />
+            </label>
+            <div className="actions">
+              <button className="primary-button" type="submit" disabled={busy}>
+                Save password
+              </button>
+            </div>
+          </form>
+        </div>
       </section>
 
       {isClientProfile ? <ClientBidProfilesManager data={data} busy={busy} onSave={onSave} /> : null}
@@ -2909,7 +3051,7 @@ function PostsView({
   data: PortalData;
   busy: boolean;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
-  onMessageUser: (userId: string) => void;
+  onMessageUser: (userId: string, relatedPostId?: string) => void;
 }) {
   const currentUser = data.currentUser;
   const balances = userCreditBalances(currentUser, data);
@@ -3182,7 +3324,7 @@ function PostsView({
           onClose={() => setSelectedPost(null)}
           onMessage={(userId) => {
             setSelectedPost(null);
-            onMessageUser(userId);
+            onMessageUser(userId, selectedPost.id);
           }}
           onStartContract={() => startContractFromPost(selectedPost)}
           onClosePost={() => closePost(selectedPost)}
@@ -3209,7 +3351,7 @@ function PostReviewModal({
   canStartContract: boolean;
   canClosePost: boolean;
   onClose: () => void;
-  onMessage: (userId: string) => void;
+  onMessage: (userId: string, relatedPostId?: string) => void;
   onStartContract: () => void;
   onClosePost: () => void;
 }) {
@@ -3232,7 +3374,7 @@ function PostReviewModal({
           <p>{author?.profileTitle || author?.email || "No profile details available."}</p>
           <div className="actions">
             {author && author.allowDirectMessages !== false ? (
-              <button className="ghost-button compact-button" type="button" onClick={() => onMessage(author.id)}>
+              <button className="ghost-button compact-button" type="button" onClick={() => onMessage(author.id, post.id)}>
                 Message
               </button>
             ) : null}
@@ -3414,6 +3556,7 @@ function ContractsView({
         </div>
         {!contracts.length ? <div className="empty-state">No contracts yet.</div> : null}
       </section>
+      <DisputesView data={data} busy={busy} onAction={onAction} embedded />
       {showCreateModal ? (
         <ModalFrame title="Start Contract" subtitle="Send a contract request to a selected member." onClose={() => setShowCreateModal(false)}>
           <form className="form-grid" onSubmit={submitContract}>
@@ -3487,10 +3630,12 @@ function DisputesView({
   data,
   busy,
   onAction,
+  embedded = false,
 }: {
   data: PortalData;
   busy: boolean;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  embedded?: boolean;
 }) {
   const currentUser = data.currentUser;
   const canCreateDispute = isClientRole(currentUser.role);
@@ -3543,7 +3688,8 @@ function DisputesView({
   }
 
   return (
-    <div className="dashboard-stack">
+    <div className={embedded ? "dashboard-stack embedded-disputes" : "dashboard-stack"}>
+      {!embedded ? (
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -3557,14 +3703,26 @@ function DisputesView({
           ) : null}
         </div>
       </section>
+      ) : null}
 
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Disputes</h2>
-            <p>Resolution requests are tracked here with status and notes.</p>
+            <h2>{embedded ? "Contract Disputes" : "Disputes"}</h2>
+            <p>
+              {embedded
+                ? "Open and track conflicts tied to contracts, bidder work, or released payments."
+                : "Resolution requests are tracked here with status and notes."}
+            </p>
           </div>
-          <span className="badge">{(data.disputes || []).length} total</span>
+          <div className="actions">
+            <span className="badge">{(data.disputes || []).length} total</span>
+            {embedded && canCreateDispute ? (
+              <button className="primary-button compact-button" type="button" onClick={() => setShowCreateModal(true)}>
+                Open dispute
+              </button>
+            ) : null}
+          </div>
         </div>
         <div className="table-wrap">
           <table>
@@ -4981,8 +5139,10 @@ function AdminPayments({
     userId: payableUsers[0]?.id || "",
     periodStart: today(),
     periodEnd: today(),
+    baseAmount: "",
     tipAmount: "",
     paymentMethodId: "",
+    sourcePaymentId: "",
     memo: "",
   });
   const creditClients = isSuperAdminRole(data.currentUser.role) ? clientUsers(data.users) : [data.currentUser].filter((user) => isClientRole(user.role));
@@ -4999,6 +5159,7 @@ function AdminPayments({
     memo: "",
   });
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
+  const [showReleaseModal, setShowReleaseModal] = useState(false);
 
   const selectedUser = payableUsers.find((user) => user.id === draft.userId);
   const selectedReleaseUser = payableUsers.find((user) => user.id === releaseDraft.userId);
@@ -5013,9 +5174,11 @@ function AdminPayments({
   const depositAmount = Number(depositDraft.amount) || 0;
   const depositFee = Math.round(depositAmount * 0.05 * 100) / 100;
   const depositCredit = Math.max(0, Math.round((depositAmount - depositFee) * 100) / 100);
-  const releaseBaseAmount = selectedReleaseUser
-    ? estimateForUserInRange(selectedReleaseUser, data.workLogs, releaseDraft.periodStart, releaseDraft.periodEnd)
-    : 0;
+  const releaseBaseAmount = releaseDraft.baseAmount !== ""
+    ? Number(releaseDraft.baseAmount) || 0
+    : selectedReleaseUser
+      ? estimateForUserInRange(selectedReleaseUser, data.workLogs, releaseDraft.periodStart, releaseDraft.periodEnd)
+      : 0;
   const releaseTipAmount = Number(releaseDraft.tipAmount) || 0;
   const releaseTotalAmount = Math.max(0, Math.round((releaseBaseAmount + releaseTipAmount) * 100) / 100);
   const suggestedAmount = selectedUser
@@ -5029,10 +5192,13 @@ function AdminPayments({
         id: payment.id,
         user,
         scheduledDate: payment.scheduledDate,
+        periodStart: payment.periodStart,
+        periodEnd: payment.periodEnd,
         amount: payment.amount,
         daysUntil: daysUntil(payment.scheduledDate),
         description: `${shortDate(payment.periodStart)} - ${shortDate(payment.periodEnd)}`,
         sourceLabel: "Scheduled record",
+        sourcePaymentId: payment.id,
       };
     });
   const scheduledKeys = new Set(
@@ -5040,15 +5206,25 @@ function AdminPayments({
   );
   const paydayItems: UpcomingPaymentItem[] = payableUsers
     .filter((user) => user.nextPaymentDate && !scheduledKeys.has(`${user.id}:${user.nextPaymentDate}`))
-    .map((user) => ({
-      id: `payday-${user.id}`,
-      user,
-      scheduledDate: user.nextPaymentDate,
-      amount: Math.max(0, estimateForUser(user, data.workLogs) - paidForUser(user.id, data.payments)),
-      daysUntil: daysUntil(user.nextPaymentDate),
-      description: user.paymentSchedule || "From next payment date",
-      sourceLabel: "Needs payment record",
-    }));
+    .map((user) => {
+      const unpaidLogs = data.workLogs
+        .filter((log) => log.userId === user.id && !isWorkLogPaid(log, data.payments))
+        .sort((left, right) => left.workDate.localeCompare(right.workDate));
+      const periodStart = unpaidLogs[0]?.workDate || user.nextPaymentDate;
+      const periodEnd = unpaidLogs[unpaidLogs.length - 1]?.workDate || user.nextPaymentDate;
+
+      return {
+        id: `payday-${user.id}`,
+        user,
+        scheduledDate: user.nextPaymentDate,
+        periodStart,
+        periodEnd,
+        amount: Math.max(0, estimateForUser(user, unpaidLogs)),
+        daysUntil: daysUntil(user.nextPaymentDate),
+        description: unpaidLogs.length ? `${shortDate(periodStart)} - ${shortDate(periodEnd)}` : user.paymentSchedule || "From next payment date",
+        sourceLabel: "Needs payment record",
+      };
+    });
   const upcomingPayments = [...scheduledPaymentItems, ...paydayItems]
     .filter((item) => item.daysUntil >= 0)
     .sort((left, right) => left.daysUntil - right.daysUntil || left.scheduledDate.localeCompare(right.scheduledDate))
@@ -5093,12 +5269,15 @@ function AdminPayments({
       userId: releaseDraft.userId,
       periodStart: releaseDraft.periodStart,
       periodEnd: releaseDraft.periodEnd,
+      baseAmount: releaseBaseAmount,
       tipAmount: Number(releaseDraft.tipAmount),
       paymentMethodId: selectedReleaseMethodId,
+      sourcePaymentId: releaseDraft.sourcePaymentId,
       memo: releaseDraft.memo,
     });
     if (nextData) {
-      setReleaseDraft({ ...releaseDraft, tipAmount: "", memo: "" });
+      setReleaseDraft({ ...releaseDraft, tipAmount: "", memo: "", sourcePaymentId: "" });
+      setShowReleaseModal(false);
     }
   }
 
@@ -5135,80 +5314,52 @@ function AdminPayments({
   }
 
   function handleReleaseUserChange(userId: string) {
-    setReleaseDraft({ ...releaseDraft, userId, paymentMethodId: "" });
+    setReleaseDraft({ ...releaseDraft, userId, paymentMethodId: "", baseAmount: "", sourcePaymentId: "" });
+  }
+
+  function setReleasePeriod(field: "periodStart" | "periodEnd", value: string) {
+    setReleaseDraft({ ...releaseDraft, [field]: value, baseAmount: "", sourcePaymentId: "" });
+  }
+
+  function openReleaseModal(item?: UpcomingPaymentItem) {
+    const nextUser = item?.user || selectedReleaseUser || payableUsers[0];
+    if (!nextUser) {
+      return;
+    }
+
+    const methods = data.paymentMethods.filter((method) => method.userId === nextUser.id && method.address);
+    const primaryMethod = methods.find((method) => method.isPrimary) || methods[0];
+    setReleaseDraft({
+      userId: nextUser.id,
+      periodStart: item?.periodStart || today(),
+      periodEnd: item?.periodEnd || today(),
+      baseAmount: item ? item.amount.toFixed(2) : "",
+      tipAmount: "",
+      paymentMethodId: primaryMethod?.id || "",
+      sourcePaymentId: item?.sourcePaymentId || "",
+      memo: item ? `${item.sourceLabel} - ${item.description}` : "",
+    });
+    setShowReleaseModal(true);
   }
 
   return (
     <div className="two-column">
-      <PaydayReminder reminders={paydayReminders} />
+      <PaydayReminder reminders={paydayReminders} onRelease={canReleasePayments ? openReleaseModal : undefined} />
 
       {canReleasePayments ? (
         <section className="panel">
           <div className="panel-header">
             <div>
               <h2>Release Payment</h2>
-              <p>Select a date range, add an optional tip, and pay the bidder wallet through Cryptomus.</p>
+              <p>Click an upcoming payment to autofill the payout, or release a custom date range.</p>
             </div>
-            <span className="badge paid">{money(releaseCreditBalance)} credits</span>
-          </div>
-          <form className="form-grid" onSubmit={submitReleasePayment}>
-            <label className="field full">
-              <span>Bidder</span>
-              <select value={releaseDraft.userId} onChange={(event) => handleReleaseUserChange(event.target.value)} required>
-                {payableUsers.map((user) => (
-                  <option key={user.id} value={user.id}>{user.name} - {roleLabel(user.role)}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Period start</span>
-              <input type="date" value={releaseDraft.periodStart} onChange={(event) => setReleaseDraft({ ...releaseDraft, periodStart: event.target.value })} required />
-            </label>
-            <label className="field">
-              <span>Period end</span>
-              <input type="date" value={releaseDraft.periodEnd} onChange={(event) => setReleaseDraft({ ...releaseDraft, periodEnd: event.target.value })} required />
-            </label>
-            <label className="field full">
-              <span>Bidder payout wallet</span>
-              <select
-                value={selectedReleaseMethodId}
-                onChange={(event) => setReleaseDraft({ ...releaseDraft, paymentMethodId: event.target.value })}
-                required
-              >
-                {!releaseMethods.length ? <option value="">Bidder needs a crypto payout method</option> : null}
-                {releaseMethods.map((method) => (
-                  <option key={method.id} value={method.id}>
-                    {payoutMethodLabel(method)} - {method.address}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Work amount</span>
-              <input value={money(releaseBaseAmount)} readOnly />
-            </label>
-            <label className="field">
-              <span>Tip</span>
-              <input type="number" min="0" step="0.01" value={releaseDraft.tipAmount} onChange={(event) => setReleaseDraft({ ...releaseDraft, tipAmount: event.target.value })} placeholder="$0.00" />
-            </label>
-            <label className="field">
-              <span>Total release</span>
-              <input value={money(releaseTotalAmount)} readOnly />
-            </label>
-            <label className="field full">
-              <span>Memo</span>
-              <textarea value={releaseDraft.memo} onChange={(event) => setReleaseDraft({ ...releaseDraft, memo: event.target.value })} />
-            </label>
-            <div className="actions full">
-              <button
-                className="primary-button"
-                type="submit"
-                disabled={busy || !payableUsers.length || !selectedReleaseMethodId || releaseTotalAmount <= 0 || releaseTotalAmount > releaseCreditBalance}
-              >
+            <div className="actions">
+              <span className="badge paid">{money(releaseCreditBalance)} credits</span>
+              <button className="primary-button compact-button" type="button" disabled={busy || !payableUsers.length} onClick={() => openReleaseModal()}>
                 Release payment
               </button>
             </div>
-          </form>
+          </div>
         </section>
       ) : null}
 
@@ -5265,7 +5416,7 @@ function AdminPayments({
       ) : null}
 
       <div className="payment-side-column">
-        <UpcomingPaymentsPanel payments={upcomingPayments} />
+        <UpcomingPaymentsPanel payments={upcomingPayments} onRelease={canReleasePayments ? openReleaseModal : undefined} />
 
         <section className="panel">
           <div className="panel-header">
@@ -5434,6 +5585,69 @@ function AdminPayments({
         <EscrowTable escrows={data.escrows || []} users={data.users} />
       </section>
 
+      {showReleaseModal ? (
+        <ModalFrame title="Release Payment" subtitle="Pay the bidder wallet through Cryptomus." onClose={() => setShowReleaseModal(false)}>
+          <form className="form-grid" onSubmit={submitReleasePayment}>
+            <label className="field full">
+              <span>Bidder</span>
+              <select value={releaseDraft.userId} onChange={(event) => handleReleaseUserChange(event.target.value)} required>
+                {payableUsers.map((user) => (
+                  <option key={user.id} value={user.id}>{user.name} - {roleLabel(user.role)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Period start</span>
+              <input type="date" value={releaseDraft.periodStart} onChange={(event) => setReleasePeriod("periodStart", event.target.value)} required />
+            </label>
+            <label className="field">
+              <span>Period end</span>
+              <input type="date" value={releaseDraft.periodEnd} onChange={(event) => setReleasePeriod("periodEnd", event.target.value)} required />
+            </label>
+            <label className="field full">
+              <span>Bidder payout wallet</span>
+              <select
+                value={selectedReleaseMethodId}
+                onChange={(event) => setReleaseDraft({ ...releaseDraft, paymentMethodId: event.target.value })}
+                required
+              >
+                {!releaseMethods.length ? <option value="">Bidder needs a crypto payout method</option> : null}
+                {releaseMethods.map((method) => (
+                  <option key={method.id} value={method.id}>
+                    {payoutMethodLabel(method)} - {method.address}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Work amount</span>
+              <input value={money(releaseBaseAmount)} readOnly />
+            </label>
+            <label className="field">
+              <span>Tip</span>
+              <input type="number" min="0" step="0.01" value={releaseDraft.tipAmount} onChange={(event) => setReleaseDraft({ ...releaseDraft, tipAmount: event.target.value })} placeholder="$0.00" />
+            </label>
+            <label className="field">
+              <span>Total release</span>
+              <input value={money(releaseTotalAmount)} readOnly />
+            </label>
+            <label className="field full">
+              <span>Memo</span>
+              <textarea value={releaseDraft.memo} onChange={(event) => setReleaseDraft({ ...releaseDraft, memo: event.target.value })} />
+            </label>
+            <div className="actions full">
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={busy || !payableUsers.length || !selectedReleaseMethodId || releaseTotalAmount <= 0 || releaseTotalAmount > releaseCreditBalance}
+              >
+                Release payment
+              </button>
+            </div>
+          </form>
+        </ModalFrame>
+      ) : null}
+
       {editingPayment ? (
         <PaymentEditModal
           key={editingPayment.id}
@@ -5453,7 +5667,13 @@ function AdminPayments({
   );
 }
 
-function PaydayReminder({ reminders }: { reminders: UpcomingPaymentItem[] }) {
+function PaydayReminder({
+  reminders,
+  onRelease,
+}: {
+  reminders: UpcomingPaymentItem[];
+  onRelease?: (item: UpcomingPaymentItem) => void;
+}) {
   if (!reminders.length) {
     return null;
   }
@@ -5466,7 +5686,13 @@ function PaydayReminder({ reminders }: { reminders: UpcomingPaymentItem[] }) {
       </div>
       <div className="payment-method-list">
         {reminders.map((item) => (
-          <div className="payment-row urgent" key={item.id}>
+          <button
+            className="payment-row urgent payment-row-button"
+            key={item.id}
+            type="button"
+            disabled={!onRelease}
+            onClick={() => onRelease?.(item)}
+          >
             <div>
               <strong>{item.user?.name || "Unknown user"}</strong>
               <span className="muted">
@@ -5477,14 +5703,20 @@ function PaydayReminder({ reminders }: { reminders: UpcomingPaymentItem[] }) {
               <strong>{money(item.amount)}</strong>
               <span className="mini-label">{item.description}</span>
             </div>
-          </div>
+          </button>
         ))}
       </div>
     </section>
   );
 }
 
-function UpcomingPaymentsPanel({ payments }: { payments: UpcomingPaymentItem[] }) {
+function UpcomingPaymentsPanel({
+  payments,
+  onRelease,
+}: {
+  payments: UpcomingPaymentItem[];
+  onRelease?: (item: UpcomingPaymentItem) => void;
+}) {
   return (
     <section className="panel">
       <div className="panel-header">
@@ -5496,7 +5728,13 @@ function UpcomingPaymentsPanel({ payments }: { payments: UpcomingPaymentItem[] }
       {payments.length ? (
         <div className="payment-method-list">
           {payments.map((item) => (
-            <div className="payment-row" key={item.id}>
+            <button
+              className="payment-row payment-row-button"
+              key={item.id}
+              type="button"
+              disabled={!onRelease}
+              onClick={() => onRelease?.(item)}
+            >
               <div>
                 <strong>{item.user?.name || "Unknown user"}</strong>
                 <span className="muted">
@@ -5507,7 +5745,7 @@ function UpcomingPaymentsPanel({ payments }: { payments: UpcomingPaymentItem[] }
                 <strong>{money(item.amount)}</strong>
                 <span className="mini-label">{item.sourceLabel}</span>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       ) : (
@@ -5796,6 +6034,59 @@ function ChatAttachments({ attachments }: { attachments: ChatAttachmentDraft[] }
   );
 }
 
+function ChatProfileContext({ user }: { user: PortalUser }) {
+  const profileTags = [
+    ...(user.clientPreferences || []),
+    ...(user.profileSkills || []),
+    ...(user.profileLanguages || []),
+  ].slice(0, 6);
+
+  return (
+    <div className="chat-context-card">
+      <div className="person-title">
+        <div>
+          <h3>{userDisplayName(user)}</h3>
+          <p>{roleLabel(user.role)} - {user.companyName || user.profileTitle || user.email}</p>
+        </div>
+        <span className={`badge ${user.role}`}>{roleLabel(user.role)}</span>
+      </div>
+      <div className="mini-metrics">
+        <span><strong>{user.country || user.profileLocation || "Not set"}</strong> location</span>
+        <span><strong>{user.profileTimeZone || "Not set"}</strong> timezone</span>
+        <span><strong>{user.allowDirectMessages === false ? "Off" : "On"}</strong> direct messages</span>
+      </div>
+      {user.profileBio ? <p>{user.profileBio}</p> : null}
+      {profileTags.length ? (
+        <div className="badge-row">
+          {profileTags.map((tag) => (
+            <span className="badge" key={tag}>{tag}</span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ChatPostContext({ post, author }: { post: PortalPost; author?: PortalUser }) {
+  return (
+    <div className="chat-context-card post-context-card">
+      <div className="person-title">
+        <div>
+          <h3>Related post</h3>
+          <p>{post.title} - {author?.name || "Unknown author"}</p>
+        </div>
+        <span className={`badge ${post.status === "active" ? "approved" : "paused"}`}>{titleCase(post.status)}</span>
+      </div>
+      <p>{post.criteria}</p>
+      <div className="mini-metrics">
+        <span><strong>{money(post.preferredRate || 0)}</strong> rate</span>
+        <span><strong>{money(post.bonusPerInterview || 0)}</strong> bonus</span>
+        <span><strong>{paymentScheduleLabel(post.paymentFrequency, post.paymentWeekday) || "Flexible"}</strong> schedule</span>
+      </div>
+    </div>
+  );
+}
+
 function ChatView({
   data,
   busy,
@@ -5803,6 +6094,7 @@ function ChatView({
   onEnableNotifications,
   onSend,
   requestedRecipientId,
+  requestedPostId,
 }: {
   data: PortalData;
   busy: boolean;
@@ -5810,6 +6102,7 @@ function ChatView({
   onEnableNotifications: () => Promise<void>;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
   requestedRecipientId: string;
+  requestedPostId: string;
 }) {
   const [body, setBody] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachmentDraft[]>([]);
@@ -5829,7 +6122,7 @@ function ChatView({
     membersById.set(user.id, user);
   });
   const contactUsers = (data.chatContacts || []).filter((user) => {
-    if (user.id === currentUser.id) {
+    if (user.id === currentUser.id || isSuperAdminRole(currentUser.role) || isSuperAdminRole(user.role)) {
       return false;
     }
 
@@ -5837,7 +6130,11 @@ function ChatView({
     const hasConversation = data.chatMessages.some((message) => chatConversationIdForMessage(message) === conversationId);
     const isRequestedRecipient = user.id === requestedRecipientId;
 
-    if (currentUser.role === "bidder" && !isClientRole(user.role)) {
+    if (isClientRole(currentUser.role) && !isWorkerUser(user)) {
+      return false;
+    }
+
+    if (isWorkerUser(currentUser) && !isClientRole(user.role)) {
       return false;
     }
 
@@ -5908,6 +6205,26 @@ function ChatView({
         : [],
     [activeConversationId, data.chatMessages]
   );
+  const activeRecipient = activeConversation?.recipientId ? membersById.get(activeConversation.recipientId) : null;
+  const activeParticipantIds = activeConversation?.monitored
+    ? Array.from(new Set(activeMessages.flatMap((message) => [message.userId, message.recipientId || ""]).filter(Boolean)))
+    : [];
+  const activeParticipants = activeParticipantIds
+    .map((participantId) => membersById.get(participantId))
+    .filter((participant): participant is PortalUser => Boolean(participant));
+  const activeRelatedPostId =
+    requestedPostId ||
+    [...activeMessages].reverse().find((message) => message.relatedPostId)?.relatedPostId ||
+    "";
+  const activeRelatedPost = data.posts.find((post) => {
+    if (post.id !== activeRelatedPostId) {
+      return false;
+    }
+    if (activeConversation?.monitored) {
+      return activeParticipantIds.includes(post.authorId);
+    }
+    return post.authorId === currentUser.id || post.authorId === activeConversation?.recipientId;
+  });
   const canSubmit =
     canSend &&
     Boolean(activeConversation) &&
@@ -5960,6 +6277,7 @@ function ChatView({
       recipientId: activeConversation?.recipientId || "",
       body,
       attachments,
+      relatedPostId: activeRelatedPost?.id || "",
       authorTimeZone: userTimeZone,
     });
     if (nextData) {
@@ -6109,6 +6427,28 @@ function ChatView({
         </div>
 
         <div className="messages">
+          {activeRecipient ? <ChatProfileContext user={activeRecipient} /> : null}
+          {activeConversation?.monitored && activeParticipants.length ? (
+            <div className="chat-context-card">
+              <div className="person-title">
+                <div>
+                  <h3>Monitored conversation</h3>
+                  <p>Super admin can review client-bidder communication but cannot send direct messages.</p>
+                </div>
+                <span className="badge super_admin">Read only</span>
+              </div>
+              <div className="badge-row">
+                {activeParticipants.map((participant) => (
+                  <span className={`badge ${participant.role}`} key={participant.id}>
+                    {userDisplayName(participant)} - {roleLabel(participant.role)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {activeRelatedPost ? (
+            <ChatPostContext post={activeRelatedPost} author={membersById.get(activeRelatedPost.authorId)} />
+          ) : null}
           {activeMessages.map((message) => {
             const deleted = Boolean(message.deletedAt);
             const isMine = message.userId === currentUser.id;
@@ -6174,62 +6514,70 @@ function ChatView({
           })}
           {activeConversation && !activeMessages.length ? <div className="empty-state">No messages yet.</div> : null}
           <div ref={messagesEndRef} />
-        </div>
-      </div>
 
-      <form className="chat-composer" onSubmit={submit}>
-        {attachments.length ? (
-          <div className="attachment-preview-list">
-            {attachments.map((attachment, index) => (
-              <div className="attachment-preview" key={`${attachment.name}-${attachment.size}-${index}`}>
-                <span>{attachment.name} - {formatBytes(attachment.size)}</span>
-                <button className="ghost-button" type="button" onClick={() => removeAttachment(index)}>
-                  Remove
+          {activeConversation && !activeConversation.monitored ? (
+            <form className="chat-composer" onSubmit={submit}>
+              {attachments.length ? (
+                <div className="attachment-preview-list">
+                  {attachments.map((attachment, index) => (
+                    <div className="attachment-preview" key={`${attachment.name}-${attachment.size}-${index}`}>
+                      <span>{attachment.name} - {formatBytes(attachment.size)}</span>
+                      <button className="ghost-button" type="button" onClick={() => removeAttachment(index)}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="composer-shell">
+                <button
+                  className="ghost-button compact-button"
+                  type="button"
+                  disabled={!canSend || !activeConversation.recipientAllowsContact || attachments.length >= chatAttachmentLimit}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Attach
+                </button>
+                <textarea
+                  aria-label="Message"
+                  placeholder="Message"
+                  value={body}
+                  onChange={(event) => setBody(event.target.value)}
+                  onKeyDown={handleComposerKeyDown}
+                  disabled={!canSend || !activeConversation.recipientAllowsContact}
+                  required={!attachments.length}
+                />
+                <button className="primary-button" type="submit" disabled={busy || !canSubmit}>
+                  Send
                 </button>
               </div>
-            ))}
-          </div>
-        ) : null}
 
-        <div className="composer-shell">
-          <button
-            className="ghost-button compact-button"
-            type="button"
-            disabled={!canSend || !activeConversation || activeConversation.monitored || !activeConversation.recipientAllowsContact || attachments.length >= chatAttachmentLimit}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            Attach
-          </button>
-          <textarea
-            aria-label="Message"
-            placeholder="Message"
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-            onKeyDown={handleComposerKeyDown}
-            disabled={!canSend || !activeConversation || activeConversation.monitored || !activeConversation.recipientAllowsContact}
-            required={!attachments.length}
-          />
-          <button className="primary-button" type="submit" disabled={busy || !canSubmit}>
-            Send
-          </button>
+              <input
+                ref={fileInputRef}
+                className="file-input"
+                type="file"
+                multiple
+                disabled={!canSend || !activeConversation.recipientAllowsContact}
+                onChange={handleFileSelection}
+              />
+              {!canSend ? <span className="muted">Approval is required before sending inbox messages.</span> : null}
+              {!activeConversation.recipientAllowsContact ? (
+                <span className="muted">This member is not accepting direct messages.</span>
+              ) : null}
+              {chatError ? <div className="error full">{chatError}</div> : null}
+            </form>
+          ) : (
+            <div className="chat-composer read-only-composer">
+              <span className="muted">
+                {activeConversation?.monitored
+                  ? "Read-only monitoring. Client and bidder messages stay in their own direct thread."
+                  : "No approved inbox contacts are available yet."}
+              </span>
+            </div>
+          )}
         </div>
-
-        <input
-          ref={fileInputRef}
-          className="file-input"
-          type="file"
-          multiple
-          disabled={!canSend || !activeConversation || activeConversation.monitored || !activeConversation.recipientAllowsContact}
-          onChange={handleFileSelection}
-        />
-        {!canSend ? <span className="muted">Approval is required before sending inbox messages.</span> : null}
-        {activeConversation?.monitored ? <span className="muted">Monitoring conversation. Select a direct inbox contact to send.</span> : null}
-        {activeConversation && !activeConversation.monitored && !activeConversation.recipientAllowsContact ? (
-          <span className="muted">This member is not accepting direct messages.</span>
-        ) : null}
-        {!activeConversation && canSend ? <span className="muted">No approved inbox contacts are available yet.</span> : null}
-        {chatError ? <div className="error full">{chatError}</div> : null}
-      </form>
+      </div>
     </section>
   );
 }

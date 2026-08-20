@@ -788,6 +788,20 @@ td > strong {
   padding-top: 14px;
 }
 
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px;
+}
+
+.account-settings-form {
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(242, 247, 245, 0.62);
+  padding: 14px;
+}
+
 .profile-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -964,6 +978,26 @@ td > strong {
   background: #fffaf8;
 }
 
+.payment-row-button {
+  width: 100%;
+  color: var(--foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.payment-row-button:hover:not(:disabled),
+.payment-row-button:focus-visible {
+  border-color: rgba(15, 118, 110, 0.36);
+  box-shadow: 0 12px 28px rgba(18, 32, 30, 0.1);
+  transform: translateY(-1px);
+}
+
+.payment-row-button:disabled {
+  cursor: default;
+}
+
 .manual-credit-box {
   margin-top: 18px;
   padding-top: 18px;
@@ -996,7 +1030,7 @@ td > strong {
 
 .chat-panel {
   display: grid;
-  grid-template-rows: auto minmax(420px, 1fr) auto;
+  grid-template-rows: auto minmax(420px, 1fr);
   gap: 0;
   min-height: 680px;
   overflow: hidden;
@@ -1120,8 +1154,8 @@ td > strong {
 }
 
 .messages {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   overflow: auto;
   padding: 16px 4px;
@@ -1130,6 +1164,31 @@ td > strong {
   background:
     linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(36, 89, 166, 0.06)),
     var(--surface-soft);
+}
+
+.chat-context-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.84);
+  padding: 12px;
+}
+
+.chat-context-card h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.chat-context-card p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.post-context-card {
+  background: rgba(232, 246, 243, 0.9);
 }
 
 .message-row {
@@ -1203,7 +1262,15 @@ td > strong {
   display: grid;
   gap: 10px;
   border-top: 1px solid var(--line);
+  margin-top: auto;
   padding-top: 12px;
+}
+
+.read-only-composer {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 12px;
 }
 
 .composer-shell {
@@ -1475,6 +1542,7 @@ td > strong {
   .metric-grid,
   .form-grid,
   .filter-bar,
+  .settings-grid,
   .profile-detail-grid,
   .credit-strip,
   .bid-profile-grid {

@@ -3,9 +3,10 @@ import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 test("keeps the bidder portal as the primary screen", async () => {
-  const [page, operationsPage, chatPage, biddersPage, postsPage, contractsPage, billingPage, layout, portalApp, packageJson] = await Promise.all([
+  const [page, operationsPage, settingsPage, chatPage, biddersPage, postsPage, contractsPage, billingPage, layout, portalApp, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/operations/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/settings/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/bidders/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/posts/page.tsx", import.meta.url), "utf8"),
@@ -18,6 +19,7 @@ test("keeps the bidder portal as the primary screen", async () => {
 
   assert.match(page, /<PortalApp \/>/);
   assert.match(operationsPage, /<PortalApp \/>/);
+  assert.match(settingsPage, /<PortalApp \/>/);
   assert.match(chatPage, /<PortalApp \/>/);
   assert.match(biddersPage, /<PortalApp \/>/);
   assert.match(postsPage, /<PortalApp \/>/);
@@ -36,7 +38,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Approved client/);
   assert.match(portalApp, /Assigned client/);
   assert.match(portalApp, /Dashboard/);
-  assert.match(portalApp, /My Profile/);
+  assert.match(portalApp, /Settings/);
+  assert.match(portalApp, /Profile Settings/);
+  assert.match(portalApp, /Account Settings/);
   assert.match(portalApp, /Client Search/);
   assert.match(portalApp, /Search clients/);
   assert.match(portalApp, /Bidder Search/);
@@ -47,6 +51,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Publish post/);
   assert.match(portalApp, /Start Contract/);
   assert.match(portalApp, /Contract Management/);
+  assert.match(portalApp, /Contract Disputes/);
   assert.match(portalApp, /Connected client credit/);
   assert.match(portalApp, /Contracted with another client/);
   assert.match(portalApp, /Client Work History/);
@@ -71,6 +76,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Upcoming Payments/);
   assert.match(portalApp, /Inbox/);
   assert.match(portalApp, /Monitored conversation/);
+  assert.match(portalApp, /Related post/);
   assert.match(portalApp, /portal-nav/);
   assert.match(portalApp, /portalNavVisible/);
   assert.match(portalApp, /Enable notifications/);
@@ -82,6 +88,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Forgot password/);
   assert.match(portalApp, /Send verification/);
   assert.match(portalApp, /Set password/);
+  assert.match(portalApp, /Save email/);
+  assert.match(portalApp, /Save password/);
   assert.match(portalApp, /Check your email/);
   assert.match(portalApp, /Email verified successfully/);
   assert.match(portalApp, /isEmailVerificationError/);
@@ -125,7 +133,11 @@ test("declares the requested frontend records", async () => {
   for (const label of [
     "User Management",
     "Manage accounts, approval status, roles, passwords, and email verification.",
-    "My Profile",
+    "Settings",
+    "Profile Settings",
+    "Account Settings",
+    "Save email",
+    "Save password",
     "Client Search",
     "Bidder Search",
     "Posts",
@@ -137,6 +149,7 @@ test("declares the requested frontend records", async () => {
     "Start Contract",
     "Contract Management",
     "Specific criteria",
+    "Contract Disputes",
     "Money credit",
     "Post credit",
     "Dispute Resolution Center",
@@ -193,6 +206,8 @@ test("declares the requested frontend records", async () => {
     "requestEmailVerification",
     "signUp",
     "saveProfile",
+    "updateOwnEmail",
+    "updateOwnPassword",
     "createCreditDeposit",
     "addManualCredit",
     "createPost",
@@ -252,6 +267,8 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /authorTimeZone/);
   assert.match(portalApp, /chatContacts/);
   assert.match(portalApp, /recipientId/);
+  assert.match(portalApp, /relatedPostId/);
+  assert.match(portalApp, /requestedPostId/);
   assert.match(portalApp, /conversation-list/);
   assert.match(portalApp, /conversation-badge/);
   assert.match(portalApp, /readReceipts/);
@@ -264,9 +281,10 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /viewRoutes/);
   assert.match(portalApp, /routeViews/);
   assert.match(portalApp, /navigateToView/);
-  assert.match(portalApp, /\["people", "contracts", "posts", "disputes", "billing", "chat"\]/);
+  assert.match(portalApp, /\["people", "contracts", "posts", "billing", "chat", "profile"\]/);
   assert.match(portalApp, /\/bidder-settings/);
   assert.match(portalApp, /\/payments/);
+  assert.match(portalApp, /\/settings/);
   assert.match(portalApp, /\/profile/);
   assert.match(portalApp, /\/clients/);
   assert.match(portalApp, /\/bidders/);
@@ -305,6 +323,7 @@ test("declares the requested frontend records", async () => {
   for (const routePage of [
     "operations/page.tsx",
     "dashboard/page.tsx",
+    "settings/page.tsx",
     "profile/page.tsx",
     "clients/page.tsx",
     "bidders/page.tsx",
