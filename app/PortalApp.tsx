@@ -2,12 +2,13 @@
 
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
+import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import type {
   ChatAttachment,
   ChatMessage,
   BidProfileRecord,
   ContractRecord,
+  DisputeRecord,
   DepositRecord,
   EscrowRecord,
   PaymentFrequency,
@@ -24,7 +25,7 @@ import type {
 } from "./portal-types";
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
-type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "people" | "bidderSettings" | "work" | "billing" | "payments" | "chat";
+type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "disputes" | "people" | "bidderSettings" | "work" | "billing" | "payments" | "chat";
 
 const payoutCurrencies = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB"];
 const payoutNetworks = ["TRON", "BSC", "ETH", "BTC", "LTC", "TRX"];
@@ -107,6 +108,7 @@ const viewRoutes: Record<PortalView, string> = {
   bidders: "/bidders",
   posts: "/posts",
   contracts: "/contracts",
+  disputes: "/disputes",
   people: "/people",
   bidderSettings: "/bidder-settings",
   work: "/work",
@@ -122,6 +124,7 @@ const routeViews: Record<string, PortalView> = {
   "/bidders": "bidders",
   "/posts": "posts",
   "/contracts": "contracts",
+  "/disputes": "disputes",
   "/people": "people",
   "/bidder-settings": "bidderSettings",
   "/work": "work",
@@ -351,6 +354,7 @@ function viewTitle(view: string) {
     bidders: "Bidders",
     posts: "Posts",
     contracts: "Contracts",
+    disputes: "Disputes",
     people: "People",
     bidderSettings: "Bidder Settings",
     work: "Work Logs",
@@ -365,8 +369,9 @@ function viewSubtitle(view: string, isAdmin: boolean) {
   if (!isAdmin) {
     if (view === "clients") return "Search client profiles and review payment history signals.";
     if (view === "bidders") return "Search bidder profiles and contracting status.";
-    if (view === "posts") return "Browse client posts, publish bidder availability, and start contracts.";
+    if (view === "posts") return "Review bidder posts, publish bidder availability, and start contracts.";
     if (view === "contracts") return "Review requests, active contracts, criteria, and connected client credit.";
+    if (view === "disputes") return "Open and track dispute resolution requests.";
     if (view === "profile") return "Complete your public profile so matched people understand who they are working with.";
     return "Log your bidder activity and keep payment details current.";
   }
@@ -376,8 +381,9 @@ function viewSubtitle(view: string, isAdmin: boolean) {
     profile: "Complete your public profile and escrow readiness.",
     clients: "Review client profiles and hiring signals.",
     bidders: "Search bidders and see who is available or already contracted.",
-    posts: "Publish posts, review marketplace listings, and turn them into contract requests.",
+    posts: "Review marketplace listings and turn bidder posts into contract requests.",
     contracts: "Manage client-bidder contract requests, active criteria, and assignments.",
+    disputes: "Monitor and resolve client dispute center requests.",
     people: "Manage user accounts, approval status, roles, passwords, and email verification.",
     bidderSettings: "Set bidder rates, interview bonuses, payment dates, and schedules.",
     work: "Review bidder work logs and Google Sheet links.",
@@ -391,11 +397,11 @@ function viewSubtitle(view: string, isAdmin: boolean) {
 
 function viewsForUser(user: PortalUser): PortalView[] {
   if (isSuperAdminRole(user.role)) {
-    return ["people", "contracts", "posts", "billing", "chat"];
+    return ["people", "contracts", "posts", "disputes", "billing", "chat"];
   }
 
   if (isClientRole(user.role)) {
-    return ["overview", "profile", "bidders", "posts", "contracts", "work", "billing", "chat"];
+    return ["overview", "profile", "bidders", "posts", "contracts", "disputes", "work", "billing", "chat"];
   }
 
   if (user.role === "bidder") {
@@ -487,7 +493,7 @@ function userCreditBalances(user: PortalUser, data: PortalData) {
     return {
       ...user.creditBalances,
       postCreditBalance,
-      postingCreditBalance: user.creditBalances.postingCreditBalance ?? user.creditBalances.moneyCreditBalance + postCreditBalance,
+      postingCreditBalance: postCreditBalance,
     };
   }
 
@@ -502,7 +508,7 @@ function userCreditBalances(user: PortalUser, data: PortalData) {
   return {
     moneyCreditBalance,
     postCreditBalance,
-    postingCreditBalance: Math.max(0, moneyCreditBalance + postCreditBalance),
+    postingCreditBalance: postCreditBalance,
   };
 }
 
@@ -814,6 +820,43 @@ function ActionMenu({ label = "...", items }: { label?: string; items: ActionMen
         ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ModalFrame({
+  title,
+  subtitle,
+  children,
+  className = "",
+  onClose,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+  className?: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className={`modal-panel ${className}`.trim()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button className="modal-x-button" type="button" aria-label="Close modal" onClick={onClose}>
+          ×
+        </button>
+        <div className="modal-header">
+          <div>
+            <h2>{title}</h2>
+            {subtitle ? <p>{subtitle}</p> : null}
+          </div>
+        </div>
+        {children}
+      </section>
     </div>
   );
 }
@@ -1710,6 +1753,7 @@ export default function PortalApp() {
             {safeView === "bidders" ? <BiddersDirectoryView data={data} onMessageBidder={openInboxForUser} /> : null}
             {safeView === "posts" ? <PostsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
             {safeView === "contracts" ? <ContractsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
+            {safeView === "disputes" ? <DisputesView data={data} busy={busy} onAction={postAction} /> : null}
             {safeView === "people" && isSuperAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "bidderSettings" && isSuperAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
@@ -2495,18 +2539,7 @@ function ClientDirectoryView({
       {!clients.length ? <div className="empty-state">No clients match these filters.</div> : null}
 
       {selectedClient ? (
-        <div className="modal-backdrop">
-          <section className="modal-panel client-detail-modal" role="dialog" aria-modal="true" aria-labelledby="client-detail-title">
-            <div className="modal-header">
-              <div>
-                <h2 id="client-detail-title">{selectedClient.name}</h2>
-                <p>{selectedClient.email}</p>
-              </div>
-              <button className="ghost-button compact-button" type="button" onClick={() => setSelectedClient(null)}>
-                Close
-              </button>
-            </div>
-
+        <ModalFrame title={selectedClient.name} subtitle={selectedClient.email} className="client-detail-modal" onClose={() => setSelectedClient(null)}>
             <div className="profile-detail-grid">
               <article className="profile-card">
                 <h3>Profile Info</h3>
@@ -2644,8 +2677,7 @@ function ClientDirectoryView({
                 </div>
               </section>
             </div>
-          </section>
-        </div>
+        </ModalFrame>
       ) : null}
     </section>
   );
@@ -2759,18 +2791,7 @@ function BiddersDirectoryView({
       {!bidders.length ? <div className="empty-state">No bidders match this search.</div> : null}
 
       {selectedBidder ? (
-        <div className="modal-backdrop">
-          <section className="modal-panel client-detail-modal" role="dialog" aria-modal="true" aria-labelledby="bidder-detail-title">
-            <div className="modal-header">
-              <div>
-                <h2 id="bidder-detail-title">{selectedBidder.name}</h2>
-                <p>{selectedBidder.email}</p>
-              </div>
-              <button className="ghost-button compact-button" type="button" onClick={() => setSelectedBidder(null)}>
-                Close
-              </button>
-            </div>
-
+        <ModalFrame title={selectedBidder.name} subtitle={selectedBidder.email} className="client-detail-modal" onClose={() => setSelectedBidder(null)}>
             <div className="profile-detail-grid">
               <article className="profile-card">
                 <h3>Profile Info</h3>
@@ -2857,14 +2878,13 @@ function BiddersDirectoryView({
                 </div>
               </section>
             </div>
-          </section>
-        </div>
+        </ModalFrame>
       ) : null}
     </section>
   );
 }
 
-function CreditBalanceStrip({ balances }: { balances: { moneyCreditBalance: number; postCreditBalance: number; giftCreditBalance?: number; postingCreditBalance: number } }) {
+function CreditBalanceStrip({ balances }: { balances: { moneyCreditBalance: number; postCreditBalance: number; giftCreditBalance?: number; postingCreditBalance?: number } }) {
   const postCreditBalance = balances.postCreditBalance ?? balances.giftCreditBalance ?? 0;
   return (
     <div className="credit-strip">
@@ -2875,10 +2895,6 @@ function CreditBalanceStrip({ balances }: { balances: { moneyCreditBalance: numb
       <span>
         <strong>{money(postCreditBalance)}</strong>
         Post credit
-      </span>
-      <span>
-        <strong>{money(balances.postingCreditBalance)}</strong>
-        Posting balance
       </span>
     </div>
   );
@@ -2897,8 +2913,10 @@ function PostsView({
 }) {
   const currentUser = data.currentUser;
   const balances = userCreditBalances(currentUser, data);
-  const canPublish = isClientRole(currentUser.role) || currentUser.role === "bidder";
+  const canPublish = currentUser.role === "bidder";
   const [query, setQuery] = useState("");
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedPost, setSelectedPost] = useState<PortalPost | null>(null);
   const [draft, setDraft] = useState({
     title: "",
     criteria: "",
@@ -2907,7 +2925,7 @@ function PostsView({
     bonusPerInterview: "",
     paymentFrequency: "weekly" as PaymentFrequency,
     paymentWeekday: "friday" as PaymentWeekday,
-  });
+    });
   const posts = data.posts || [];
   const myPosts = posts.filter((post) => post.authorId === currentUser.id);
   const availablePosts = posts
@@ -2916,7 +2934,6 @@ function PostsView({
     .filter((post) => {
       if (isSuperAdminRole(currentUser.role)) return true;
       if (isClientRole(currentUser.role)) return post.type === "bidder";
-      if (currentUser.role === "bidder") return post.type === "client";
       return false;
     })
     .filter((post) => {
@@ -2946,11 +2963,15 @@ function PostsView({
         paymentFrequency: "weekly",
         paymentWeekday: "friday",
       });
+      setShowCreateModal(false);
     }
   }
 
   async function closePost(post: PortalPost) {
-    await onAction("updatePostStatus", { postId: post.id, status: "closed" });
+    const nextData = await onAction("updatePostStatus", { postId: post.id, status: "closed" });
+    if (nextData) {
+      setSelectedPost(null);
+    }
   }
 
   async function startContractFromPost(post: PortalPost) {
@@ -2959,7 +2980,7 @@ function PostsView({
       return;
     }
 
-    await onAction("createContract", {
+    const nextData = await onAction("createContract", {
       targetUserId: author.id,
       title: post.title,
       criteria: post.criteria,
@@ -2970,6 +2991,9 @@ function PostsView({
       startDate: today(),
       sourcePostId: post.id,
     });
+    if (nextData) {
+      setSelectedPost(null);
+    }
   }
 
   function canStartContractFromPost(post: PortalPost) {
@@ -2985,73 +3009,30 @@ function PostsView({
         <div className="panel-header">
           <div>
             <h2>Post Credit</h2>
-            <p>Posts cost $1. Money credit can be used anywhere; post credit can only be used for posting.</p>
+            <p>Posts cost $1 post credit. Money credit is separate and is not used for publishing posts.</p>
           </div>
-          <span className="badge approved">$1 per post</span>
+          <div className="actions">
+            <span className="badge approved">$1 per post</span>
+            {canPublish ? (
+              <button
+                className="primary-button compact-button"
+                type="button"
+                disabled={busy || balances.postCreditBalance < 1}
+                onClick={() => setShowCreateModal(true)}
+              >
+                Create post
+              </button>
+            ) : null}
+          </div>
         </div>
         <CreditBalanceStrip balances={balances} />
       </section>
-
-      {canPublish ? (
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <h2>Create Post</h2>
-              <p>{isClientRole(currentUser.role) ? "Client posts are visible to bidders." : "Bidder posts are visible to clients."}</p>
-            </div>
-            <span className={`badge ${currentUser.role}`}>{isClientRole(currentUser.role) ? "Client post" : "Bidder post"}</span>
-          </div>
-          <form className="form-grid" onSubmit={submitPost}>
-            <label className="field">
-              <span>Post title</span>
-              <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="What you need or what you offer" required />
-            </label>
-            <label className="field">
-              <span>Budget</span>
-              <input type="number" min="0" step="0.01" value={draft.budgetAmount} onChange={(event) => setDraft({ ...draft, budgetAmount: event.target.value })} placeholder="Optional budget" />
-            </label>
-            <label className="field">
-              <span>Preferred rate</span>
-              <input type="number" min="0" step="0.01" value={draft.preferredRate} onChange={(event) => setDraft({ ...draft, preferredRate: event.target.value })} placeholder="Per applied job" />
-            </label>
-            <label className="field">
-              <span>Interview bonus</span>
-              <input type="number" min="0" step="0.01" value={draft.bonusPerInterview} onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })} placeholder="Per interview" />
-            </label>
-            <label className="field">
-              <span>Frequency</span>
-              <select value={draft.paymentFrequency} onChange={(event) => setDraft({ ...draft, paymentFrequency: event.target.value as PaymentFrequency })}>
-                {paymentFrequencies.filter((frequency) => frequency.value).map((frequency) => (
-                  <option key={frequency.value} value={frequency.value}>{frequency.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Weekday</span>
-              <select value={draft.paymentWeekday} onChange={(event) => setDraft({ ...draft, paymentWeekday: event.target.value as PaymentWeekday })}>
-                {paymentWeekdays.filter((weekday) => weekday.value).map((weekday) => (
-                  <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field full">
-              <span>Specific criteria</span>
-              <textarea value={draft.criteria} onChange={(event) => setDraft({ ...draft, criteria: event.target.value })} placeholder="Describe the requirements, expectations, schedule, and success criteria." required />
-            </label>
-            <div className="actions full">
-              <button className="primary-button" type="submit" disabled={busy || balances.postingCreditBalance < 1}>
-                Publish post
-              </button>
-            </div>
-          </form>
-        </section>
-      ) : null}
 
       <section className="panel">
         <div className="panel-header">
           <div>
             <h2>Available Posts</h2>
-            <p>{isClientRole(currentUser.role) ? "Bidder posts available to clients." : currentUser.role === "bidder" ? "Client posts available to bidders." : "All visible marketplace posts."}</p>
+            <p>{isClientRole(currentUser.role) ? "Review bidder posts, start contracts, or close posts from the detail modal." : "All visible marketplace posts."}</p>
           </div>
         </div>
         <div className="filter-bar">
@@ -3064,7 +3045,7 @@ function PostsView({
           {availablePosts.map((post) => {
             const author = userById(data.users, post.authorId);
             return (
-              <article className="profile-card post-card" key={post.id}>
+              <article className="profile-card post-card clickable-row" key={post.id} onClick={() => setSelectedPost(post)}>
                 <div className="person-title">
                   <div>
                     <h3>{post.title}</h3>
@@ -3080,16 +3061,12 @@ function PostsView({
                   <span><strong>{paymentScheduleLabel(post.paymentFrequency, post.paymentWeekday) || "Flexible"}</strong> schedule</span>
                 </div>
                 <div className="actions">
-                  {author?.allowDirectMessages === false ? null : (
-                    <button className="ghost-button compact-button" type="button" onClick={() => author && onMessageUser(author.id)}>
-                      Message
-                    </button>
-                  )}
-                  {canStartContractFromPost(post) ? (
-                    <button className="primary-button compact-button" type="button" disabled={busy} onClick={() => startContractFromPost(post)}>
-                      Start contract
-                    </button>
-                  ) : null}
+                  <button className="ghost-button compact-button" type="button" onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedPost(post);
+                  }}>
+                    Review
+                  </button>
                 </div>
               </article>
             );
@@ -3098,6 +3075,7 @@ function PostsView({
         {!availablePosts.length ? <div className="empty-state">No posts are available for this view.</div> : null}
       </section>
 
+      {myPosts.length || canPublish ? (
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -3144,7 +3122,134 @@ function PostsView({
         </div>
         {!myPosts.length ? <div className="empty-state">No posts published yet.</div> : null}
       </section>
+      ) : null}
+
+      {showCreateModal ? (
+        <ModalFrame title="Create Post" subtitle="Bidder posts are visible to clients." onClose={() => setShowCreateModal(false)}>
+          <form className="form-grid" onSubmit={submitPost}>
+            <label className="field">
+              <span>Post title</span>
+              <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="What you offer" required />
+            </label>
+            <label className="field">
+              <span>Preferred rate</span>
+              <input type="number" min="0" step="0.01" value={draft.preferredRate} onChange={(event) => setDraft({ ...draft, preferredRate: event.target.value })} placeholder="Per applied job" />
+            </label>
+            <label className="field">
+              <span>Interview bonus</span>
+              <input type="number" min="0" step="0.01" value={draft.bonusPerInterview} onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })} placeholder="Per interview" />
+            </label>
+            <label className="field">
+              <span>Frequency</span>
+              <select value={draft.paymentFrequency} onChange={(event) => setDraft({ ...draft, paymentFrequency: event.target.value as PaymentFrequency })}>
+                {paymentFrequencies.filter((frequency) => frequency.value).map((frequency) => (
+                  <option key={frequency.value} value={frequency.value}>{frequency.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Weekday</span>
+              <select value={draft.paymentWeekday} onChange={(event) => setDraft({ ...draft, paymentWeekday: event.target.value as PaymentWeekday })}>
+                {paymentWeekdays.filter((weekday) => weekday.value).map((weekday) => (
+                  <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Post credit cost</span>
+              <input value={money(1)} readOnly />
+            </label>
+            <label className="field full">
+              <span>Specific criteria</span>
+              <textarea value={draft.criteria} onChange={(event) => setDraft({ ...draft, criteria: event.target.value })} placeholder="Describe your skills, availability, work expectations, and preferred client criteria." required />
+            </label>
+            <div className="actions full">
+              <button className="primary-button" type="submit" disabled={busy || balances.postCreditBalance < 1}>
+                Publish post
+              </button>
+            </div>
+          </form>
+        </ModalFrame>
+      ) : null}
+
+      {selectedPost ? (
+        <PostReviewModal
+          post={selectedPost}
+          author={userById(data.users, selectedPost.authorId)}
+          busy={busy}
+          canStartContract={canStartContractFromPost(selectedPost)}
+          canClosePost={isSuperAdminRole(currentUser.role) || selectedPost.authorId === currentUser.id || (isClientRole(currentUser.role) && selectedPost.type === "bidder")}
+          onClose={() => setSelectedPost(null)}
+          onMessage={(userId) => {
+            setSelectedPost(null);
+            onMessageUser(userId);
+          }}
+          onStartContract={() => startContractFromPost(selectedPost)}
+          onClosePost={() => closePost(selectedPost)}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function PostReviewModal({
+  post,
+  author,
+  busy,
+  canStartContract,
+  canClosePost,
+  onClose,
+  onMessage,
+  onStartContract,
+  onClosePost,
+}: {
+  post: PortalPost;
+  author?: PortalUser;
+  busy: boolean;
+  canStartContract: boolean;
+  canClosePost: boolean;
+  onClose: () => void;
+  onMessage: (userId: string) => void;
+  onStartContract: () => void;
+  onClosePost: () => void;
+}) {
+  return (
+    <ModalFrame title={post.title} subtitle={`${author?.name || "Unknown"} - ${postAudienceLabel(post)}`} className="client-detail-modal" onClose={onClose}>
+      <div className="profile-detail-grid">
+        <article className="profile-card">
+          <h3>Post Details</h3>
+          <p>{post.criteria}</p>
+          <div className="mini-metrics">
+            <span><strong>{money(post.preferredRate || 0)}</strong> rate</span>
+            <span><strong>{money(post.bonusPerInterview || 0)}</strong> bonus</span>
+            <span><strong>{paymentScheduleLabel(post.paymentFrequency, post.paymentWeekday) || "Flexible"}</strong> schedule</span>
+            <span><strong>{titleCase(post.status)}</strong> status</span>
+          </div>
+        </article>
+        <article className="profile-card">
+          <h3>Author</h3>
+          <strong>{author?.name || "Unknown member"}</strong>
+          <p>{author?.profileTitle || author?.email || "No profile details available."}</p>
+          <div className="actions">
+            {author && author.allowDirectMessages !== false ? (
+              <button className="ghost-button compact-button" type="button" onClick={() => onMessage(author.id)}>
+                Message
+              </button>
+            ) : null}
+            {canStartContract ? (
+              <button className="primary-button compact-button" type="button" disabled={busy} onClick={onStartContract}>
+                Start contract
+              </button>
+            ) : null}
+            {canClosePost && post.status === "active" ? (
+              <button className="ghost-button compact-button" type="button" disabled={busy} onClick={onClosePost}>
+                Close post
+              </button>
+            ) : null}
+          </div>
+        </article>
+      </div>
+    </ModalFrame>
   );
 }
 
@@ -3174,6 +3279,7 @@ function ContractsView({
     paymentWeekday: "friday" as PaymentWeekday,
     startDate: today(),
   });
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const contracts = data.contracts || [];
 
   async function submitContract(event: FormEvent) {
@@ -3198,6 +3304,7 @@ function ContractsView({
         ratePerApplication: "",
         bonusPerInterview: "",
       });
+      setShowCreateModal(false);
     }
   }
 
@@ -3228,63 +3335,12 @@ function ContractsView({
           <div className="panel-header">
             <div>
               <h2>Start Contract</h2>
-              <p>Create a client-bidder contract request with specific criteria, rate, bonus, and payment schedule.</p>
+              <p>Create a client-bidder request with specific criteria, rate, bonus, and payment schedule.</p>
             </div>
+            <button className="primary-button compact-button" type="button" disabled={busy || !targets.length} onClick={() => setShowCreateModal(true)}>
+              Start contract
+            </button>
           </div>
-          <form className="form-grid" onSubmit={submitContract}>
-            <label className="field">
-              <span>{isClientRole(currentUser.role) ? "Bidder" : "Client"}</span>
-              <select value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value })} required>
-                <option value="">Select member</option>
-                {targets.map((target) => (
-                  <option key={target.id} value={target.id}>
-                    {target.name} - {roleLabel(target.role)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Contract title</span>
-              <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Weekly bidder support" required />
-            </label>
-            <label className="field">
-              <span>Rate per applied job</span>
-              <input type="number" min="0" step="0.01" value={draft.ratePerApplication} onChange={(event) => setDraft({ ...draft, ratePerApplication: event.target.value })} />
-            </label>
-            <label className="field">
-              <span>Interview bonus</span>
-              <input type="number" min="0" step="0.01" value={draft.bonusPerInterview} onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })} />
-            </label>
-            <label className="field">
-              <span>Frequency</span>
-              <select value={draft.paymentFrequency} onChange={(event) => setDraft({ ...draft, paymentFrequency: event.target.value as PaymentFrequency })}>
-                {paymentFrequencies.filter((frequency) => frequency.value).map((frequency) => (
-                  <option key={frequency.value} value={frequency.value}>{frequency.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Weekday</span>
-              <select value={draft.paymentWeekday} onChange={(event) => setDraft({ ...draft, paymentWeekday: event.target.value as PaymentWeekday })}>
-                {paymentWeekdays.filter((weekday) => weekday.value).map((weekday) => (
-                  <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Start date</span>
-              <input type="date" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} />
-            </label>
-            <label className="field full">
-              <span>Specific criteria</span>
-              <textarea value={draft.criteria} onChange={(event) => setDraft({ ...draft, criteria: event.target.value })} placeholder="Define the work, required logs, reporting cadence, target jobs, and acceptance criteria." required />
-            </label>
-            <div className="actions full">
-              <button className="primary-button" type="submit" disabled={busy || !targets.length}>
-                Send contract request
-              </button>
-            </div>
-          </form>
         </section>
       ) : null}
 
@@ -3358,6 +3414,275 @@ function ContractsView({
         </div>
         {!contracts.length ? <div className="empty-state">No contracts yet.</div> : null}
       </section>
+      {showCreateModal ? (
+        <ModalFrame title="Start Contract" subtitle="Send a contract request to a selected member." onClose={() => setShowCreateModal(false)}>
+          <form className="form-grid" onSubmit={submitContract}>
+            <label className="field">
+              <span>{isClientRole(currentUser.role) ? "Bidder" : "Client"}</span>
+              <select value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value })} required>
+                <option value="">Select member</option>
+                {targets.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.name} - {roleLabel(target.role)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Contract title</span>
+              <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Weekly bidder support" required />
+            </label>
+            <label className="field">
+              <span>Rate per applied job</span>
+              <input type="number" min="0" step="0.01" value={draft.ratePerApplication} onChange={(event) => setDraft({ ...draft, ratePerApplication: event.target.value })} />
+            </label>
+            <label className="field">
+              <span>Interview bonus</span>
+              <input type="number" min="0" step="0.01" value={draft.bonusPerInterview} onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })} />
+            </label>
+            <label className="field">
+              <span>Frequency</span>
+              <select value={draft.paymentFrequency} onChange={(event) => setDraft({ ...draft, paymentFrequency: event.target.value as PaymentFrequency })}>
+                {paymentFrequencies.filter((frequency) => frequency.value).map((frequency) => (
+                  <option key={frequency.value} value={frequency.value}>{frequency.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Weekday</span>
+              <select value={draft.paymentWeekday} onChange={(event) => setDraft({ ...draft, paymentWeekday: event.target.value as PaymentWeekday })}>
+                {paymentWeekdays.filter((weekday) => weekday.value).map((weekday) => (
+                  <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Start date</span>
+              <input type="date" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} />
+            </label>
+            <label className="field full">
+              <span>Specific criteria</span>
+              <textarea value={draft.criteria} onChange={(event) => setDraft({ ...draft, criteria: event.target.value })} placeholder="Define the work, required logs, reporting cadence, target jobs, and acceptance criteria." required />
+            </label>
+            <div className="actions full">
+              <button className="primary-button" type="submit" disabled={busy || !targets.length}>
+                Send contract request
+              </button>
+            </div>
+          </form>
+        </ModalFrame>
+      ) : null}
+    </div>
+  );
+}
+
+function disputeStatusClass(status: string) {
+  if (status === "resolved") return "approved";
+  if (status === "closed") return "paused";
+  if (status === "reviewing") return "pending";
+  return "bidder";
+}
+
+function DisputesView({
+  data,
+  busy,
+  onAction,
+}: {
+  data: PortalData;
+  busy: boolean;
+  onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
+  const currentUser = data.currentUser;
+  const canCreateDispute = isClientRole(currentUser.role);
+  const canResolveDisputes = isSuperAdminRole(currentUser.role);
+  const clientWorkers = data.users.filter((user) => isWorkerUser(user) && user.assignedAdminId === currentUser.id);
+  const clientPayments = data.payments.filter((payment) => payment.clientId === currentUser.id);
+  const clientContracts = data.contracts.filter((contract) => contract.clientId === currentUser.id);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingDispute, setEditingDispute] = useState<DisputeRecord | null>(null);
+  const [draft, setDraft] = useState({
+    targetUserId: clientWorkers[0]?.id || "",
+    contractId: "",
+    paymentId: "",
+    subject: "",
+    body: "",
+  });
+  const [resolutionDraft, setResolutionDraft] = useState({
+    status: "reviewing",
+    resolution: "",
+  });
+
+  async function submitDispute(event: FormEvent) {
+    event.preventDefault();
+    const nextData = await onAction("createDispute", draft);
+    if (nextData) {
+      setDraft({ targetUserId: clientWorkers[0]?.id || "", contractId: "", paymentId: "", subject: "", body: "" });
+      setShowCreateModal(false);
+    }
+  }
+
+  function startResolve(dispute: DisputeRecord) {
+    setEditingDispute(dispute);
+    setResolutionDraft({ status: dispute.status === "open" ? "reviewing" : dispute.status, resolution: dispute.resolution || "" });
+  }
+
+  async function submitResolution(event: FormEvent) {
+    event.preventDefault();
+    if (!editingDispute) {
+      return;
+    }
+
+    const nextData = await onAction("updateDispute", {
+      disputeId: editingDispute.id,
+      status: resolutionDraft.status,
+      resolution: resolutionDraft.resolution,
+    });
+    if (nextData) {
+      setEditingDispute(null);
+    }
+  }
+
+  return (
+    <div className="dashboard-stack">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Dispute Resolution Center</h2>
+            <p>{canCreateDispute ? "Open and track issues related to bidder work, contracts, or payments." : "Review and resolve client dispute requests."}</p>
+          </div>
+          {canCreateDispute ? (
+            <button className="primary-button compact-button" type="button" onClick={() => setShowCreateModal(true)}>
+              Open dispute
+            </button>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Disputes</h2>
+            <p>Resolution requests are tracked here with status and notes.</p>
+          </div>
+          <span className="badge">{(data.disputes || []).length} total</span>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Subject</th>
+                <th>Client</th>
+                <th>Bidder</th>
+                <th>Status</th>
+                <th>Updated</th>
+                {canResolveDisputes ? <th>Actions</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {(data.disputes || []).map((dispute) => {
+                const client = userById(data.users, dispute.clientId);
+                const target = userById(data.users, dispute.targetUserId);
+                return (
+                  <tr key={dispute.id}>
+                    <td>
+                      <strong>{dispute.subject}</strong>
+                      <span className="table-subtext">{dispute.body}</span>
+                      {dispute.resolution ? <span className="table-subtext">Resolution: {dispute.resolution}</span> : null}
+                    </td>
+                    <td>{client?.name || "Unknown client"}</td>
+                    <td>{target?.name || "-"}</td>
+                    <td><span className={`badge ${disputeStatusClass(dispute.status)}`}>{titleCase(dispute.status)}</span></td>
+                    <td>{dateTime(dispute.updatedAt)}</td>
+                    {canResolveDisputes ? (
+                      <td>
+                        <ActionMenu items={[{ label: "Resolve", onClick: () => startResolve(dispute) }]} />
+                      </td>
+                    ) : null}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {!data.disputes?.length ? <div className="empty-state">No disputes yet.</div> : null}
+      </section>
+
+      {showCreateModal ? (
+        <ModalFrame title="Open Dispute" subtitle="Describe the issue for super admin review." onClose={() => setShowCreateModal(false)}>
+          <form className="form-grid" onSubmit={submitDispute}>
+            <label className="field">
+              <span>Bidder</span>
+              <select value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value })}>
+                <option value="">General issue</option>
+                {clientWorkers.map((worker) => (
+                  <option key={worker.id} value={worker.id}>{worker.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Contract</span>
+              <select value={draft.contractId} onChange={(event) => setDraft({ ...draft, contractId: event.target.value })}>
+                <option value="">No contract selected</option>
+                {clientContracts.map((contract) => (
+                  <option key={contract.id} value={contract.id}>{contract.title}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Payment</span>
+              <select value={draft.paymentId} onChange={(event) => setDraft({ ...draft, paymentId: event.target.value })}>
+                <option value="">No payment selected</option>
+                {clientPayments.map((payment) => {
+                  const worker = userById(data.users, payment.userId);
+                  return (
+                    <option key={payment.id} value={payment.id}>
+                      {worker?.name || "Bidder"} - {money(payment.amount)} - {shortDate(payment.scheduledDate)}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <label className="field full">
+              <span>Subject</span>
+              <input value={draft.subject} onChange={(event) => setDraft({ ...draft, subject: event.target.value })} required />
+            </label>
+            <label className="field full">
+              <span>Details</span>
+              <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} required />
+            </label>
+            <div className="actions full">
+              <button className="primary-button" type="submit" disabled={busy}>
+                Submit dispute
+              </button>
+            </div>
+          </form>
+        </ModalFrame>
+      ) : null}
+
+      {editingDispute ? (
+        <ModalFrame title="Resolve Dispute" subtitle={editingDispute.subject} onClose={() => setEditingDispute(null)}>
+          <form className="form-grid" onSubmit={submitResolution}>
+            <label className="field">
+              <span>Status</span>
+              <select value={resolutionDraft.status} onChange={(event) => setResolutionDraft({ ...resolutionDraft, status: event.target.value })}>
+                <option value="open">Open</option>
+                <option value="reviewing">Reviewing</option>
+                <option value="resolved">Resolved</option>
+                <option value="closed">Closed</option>
+              </select>
+            </label>
+            <label className="field full">
+              <span>Resolution note</span>
+              <textarea value={resolutionDraft.resolution} onChange={(event) => setResolutionDraft({ ...resolutionDraft, resolution: event.target.value })} />
+            </label>
+            <div className="actions full">
+              <button className="primary-button" type="submit" disabled={busy}>
+                Save resolution
+              </button>
+            </div>
+          </form>
+        </ModalFrame>
+      ) : null}
     </div>
   );
 }
@@ -3543,24 +3868,14 @@ function UserEditModal({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation">
-      <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="edit-user-title">
-        <div className="panel-header">
-          <div>
-            <h2 id="edit-user-title">Edit User</h2>
-            <p>{user.email}</p>
-            <div className="account-meta">
-              <span>Password: {user.passwordSet ? "Set" : "Not set"}</span>
-              <span>Updated: {optionalDateTime(user.passwordUpdatedAt)}</span>
-              <span>Email: {user.emailVerifiedAt ? "Verified" : "Not verified"}</span>
-            </div>
-          </div>
-          <button className="ghost-button compact-button" type="button" onClick={onClose}>
-            Close
-          </button>
-        </div>
+    <ModalFrame title="Edit User" subtitle={user.email} onClose={onClose}>
+      <div className="account-meta">
+        <span>Password: {user.passwordSet ? "Set" : "Not set"}</span>
+        <span>Updated: {optionalDateTime(user.passwordUpdatedAt)}</span>
+        <span>Email: {user.emailVerifiedAt ? "Verified" : "Not verified"}</span>
+      </div>
 
-        <form className="form-grid" onSubmit={submit}>
+      <form className="form-grid" onSubmit={submit}>
           <label className="field">
             <span>Name</span>
             <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
@@ -3609,9 +3924,9 @@ function UserEditModal({
               Send verification
             </button>
           </div>
-        </form>
+      </form>
 
-        <form className="form-grid account-tools" onSubmit={submitPassword}>
+      <form className="form-grid account-tools" onSubmit={submitPassword}>
           <label className="field">
             <span>Temporary password</span>
             <input
@@ -3629,9 +3944,8 @@ function UserEditModal({
           <div className="muted full">
             Passwords are encrypted and cannot be viewed after they are saved.
           </div>
-        </form>
-      </section>
-    </div>
+      </form>
+    </ModalFrame>
   );
 }
 
@@ -3764,20 +4078,10 @@ function BidderSettingsModal({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation">
-      <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="edit-bidder-settings-title">
-        <div className="panel-header">
-          <div>
-            <h2 id="edit-bidder-settings-title">Edit Bidder Settings</h2>
-            <p>{user.name} - {user.email}</p>
-          </div>
-          <button className="ghost-button compact-button" type="button" onClick={onClose}>
-            Close
-          </button>
-        </div>
+    <ModalFrame title="Edit Bidder Settings" subtitle={`${user.name} - ${user.email}`} onClose={onClose}>
 
-        <form onSubmit={submit}>
-          <div className="form-grid">
+      <form onSubmit={submit}>
+        <div className="form-grid">
             <label className="field">
               <span>Rate per applied job</span>
               <input
@@ -3832,18 +4136,17 @@ function BidderSettingsModal({
               <span>Payment schedule</span>
               <input value={scheduleLabel} readOnly placeholder="Select frequency and weekday" />
             </label>
-          </div>
-          <div className="actions" style={{ marginTop: 14 }}>
+        </div>
+        <div className="actions" style={{ marginTop: 14 }}>
             <button className="primary-button" type="submit" disabled={busy}>
               Save bidder settings
             </button>
             <button className="ghost-button" type="button" onClick={onClose}>
               Cancel
             </button>
-          </div>
-        </form>
-      </section>
-    </div>
+        </div>
+      </form>
+    </ModalFrame>
   );
 }
 
@@ -4221,18 +4524,8 @@ function WorkLogEditModal({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation">
-      <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="edit-work-log-title">
-        <div className="panel-header">
-          <div>
-            <h2 id="edit-work-log-title">Edit Work Log</h2>
-            <p>Update this unpaid work log before it is paid.</p>
-          </div>
-          <button className="ghost-button compact-button" type="button" onClick={onClose}>
-            Close
-          </button>
-        </div>
-        <form className="form-grid" onSubmit={submit}>
+    <ModalFrame title="Edit Work Log" subtitle="Update this unpaid work log before it is paid." onClose={onClose}>
+      <form className="form-grid" onSubmit={submit}>
           <label className="field">
             <span>Date</span>
             <input type="date" value={draft.workDate} onChange={(event) => setDraft({ ...draft, workDate: event.target.value })} required />
@@ -4261,9 +4554,8 @@ function WorkLogEditModal({
               Cancel
             </button>
           </div>
-        </form>
-      </section>
-    </div>
+      </form>
+    </ModalFrame>
   );
 }
 
@@ -4634,7 +4926,6 @@ function SuperAdminBillingView({
                 <th>Role</th>
                 <th>Money credit</th>
                 <th>Post credit</th>
-                <th>Posting balance</th>
               </tr>
             </thead>
             <tbody>
@@ -4649,7 +4940,6 @@ function SuperAdminBillingView({
                     <td><span className={`badge ${user.role}`}>{roleLabel(user.role)}</span></td>
                     <td>{money(balances.moneyCreditBalance)}</td>
                     <td>{money(balances.postCreditBalance)}</td>
-                    <td>{money(balances.postingCreditBalance)}</td>
                   </tr>
                 );
               })}
@@ -5270,18 +5560,8 @@ function PaymentEditModal({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation">
-      <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="edit-payment-title">
-        <div className="panel-header">
-          <div>
-            <h2 id="edit-payment-title">Edit Payment</h2>
-            <p>Update the paid payout record and receipt link.</p>
-          </div>
-          <button className="ghost-button compact-button" type="button" onClick={onClose}>
-            Close
-          </button>
-        </div>
-        <form className="form-grid" onSubmit={submit}>
+    <ModalFrame title="Edit Payment" subtitle="Update the paid payout record and receipt link." onClose={onClose}>
+      <form className="form-grid" onSubmit={submit}>
           <label className="field full">
             <span>User</span>
             <select value={draft.userId} onChange={(event) => handleUserChange(event.target.value)} required>
@@ -5322,9 +5602,8 @@ function PaymentEditModal({
               Cancel
             </button>
           </div>
-        </form>
-      </section>
-    </div>
+      </form>
+    </ModalFrame>
   );
 }
 

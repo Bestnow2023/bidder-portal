@@ -139,7 +139,9 @@ test("declares the requested frontend records", async () => {
     "Specific criteria",
     "Money credit",
     "Post credit",
-    "Posting balance",
+    "Dispute Resolution Center",
+    "Open dispute",
+    "Close post",
     "Search clients",
     "Search bidders",
     "Assigned client",
@@ -262,7 +264,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /viewRoutes/);
   assert.match(portalApp, /routeViews/);
   assert.match(portalApp, /navigateToView/);
-  assert.match(portalApp, /\["people", "contracts", "posts", "billing", "chat"\]/);
+  assert.match(portalApp, /\["people", "contracts", "posts", "disputes", "billing", "chat"\]/);
   assert.match(portalApp, /\/bidder-settings/);
   assert.match(portalApp, /\/payments/);
   assert.match(portalApp, /\/profile/);
@@ -270,6 +272,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /\/bidders/);
   assert.match(portalApp, /\/posts/);
   assert.match(portalApp, /\/contracts/);
+  assert.match(portalApp, /\/disputes/);
   assert.match(portalApp, /\/billing/);
   assert.match(portalApp, /aria-haspopup="menu"/);
   assert.match(portalApp, /fixed z-50/);

@@ -844,7 +844,7 @@ td > strong {
 
 .credit-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -1344,6 +1344,7 @@ td > strong {
 }
 
 .modal-panel {
+  position: relative;
   width: min(100%, 720px);
   max-height: calc(100vh - 40px);
   overflow: auto;
@@ -1352,6 +1353,31 @@ td > strong {
   background: var(--surface);
   box-shadow: 0 32px 90px rgba(12, 20, 19, 0.28);
   padding: 20px;
+}
+
+.modal-x-button {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--muted);
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.modal-x-button:hover {
+  background: #fff;
+  color: var(--foreground);
+  transform: translateY(-1px);
 }
 
 .client-detail-modal {

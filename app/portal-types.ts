@@ -6,6 +6,7 @@ export type PaymentWeekday = "" | "monday" | "tuesday" | "wednesday" | "thursday
 export type ContractStatus = "requested" | "active" | "rejected" | "ended";
 export type PostStatus = "active" | "closed";
 export type PostType = "client" | "bidder";
+export type DisputeStatus = "open" | "reviewing" | "resolved" | "closed";
 
 export type CreditBalances = {
   moneyCreditBalance: number;
@@ -121,6 +122,22 @@ export type BidProfileRecord = {
   notes: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type DisputeRecord = {
+  id: string;
+  clientId: string;
+  targetUserId: string;
+  contractId: string;
+  paymentId: string;
+  subject: string;
+  body: string;
+  status: DisputeStatus;
+  resolution: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string;
+  closedAt: string;
 };
 
 export type PaymentMethod = {
@@ -263,6 +280,7 @@ export type PortalData = {
   contracts: ContractRecord[];
   posts: PortalPost[];
   bidProfiles: BidProfileRecord[];
+  disputes: DisputeRecord[];
   notifications: PortalNotification[];
   chatContacts?: PortalUser[];
   chatMessages: ChatMessage[];
