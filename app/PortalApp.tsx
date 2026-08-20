@@ -6,6 +6,7 @@ import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "
 import type {
   ChatAttachment,
   ChatMessage,
+  BidProfileRecord,
   ContractRecord,
   DepositRecord,
   EscrowRecord,
@@ -65,6 +66,20 @@ const demoAccounts = [
   { label: "Approved bidder", email: "maya.bidder@example.com", name: "Maya Bidder" },
   { label: "Pending bidder", email: "pending.bidder@example.com", name: "Pending Bidder" },
 ];
+const clientPreferenceOptions = ["Remote", "Startup", "LinkedIn", "Dice", "Indeed", "Glassdoor", "Upwork", "W2", "Contract"];
+const jobTitleOptions = [
+  "React Developer",
+  "Node.js Developer",
+  "Full Stack Developer",
+  "Frontend Developer",
+  "Backend Developer",
+  "Python Developer",
+  "DevOps Engineer",
+  "QA Engineer",
+  "Data Engineer",
+  "Project Manager",
+];
+const languageLevelOptions = ["English - native", "English - fluent", "English - conversational", "Spanish - fluent", "French - fluent"];
 const timeZoneOptions = [
   "America/New_York",
   "America/Chicago",
@@ -391,6 +406,10 @@ function viewsForUser(user: PortalUser): PortalView[] {
 }
 
 function safeViewForUser(user: PortalUser, view: PortalView) {
+  if (user.status === "approved" && !isProfileComplete(user)) {
+    return "profile";
+  }
+
   const availableViews = viewsForUser(user);
   return availableViews.includes(view) ? view : availableViews[0];
 }
@@ -464,21 +483,26 @@ function creditBalanceForClient(clientId: string, deposits: DepositRecord[], pay
 
 function userCreditBalances(user: PortalUser, data: PortalData) {
   if (user.creditBalances) {
-    return user.creditBalances;
+    const postCreditBalance = user.creditBalances.postCreditBalance ?? user.creditBalances.giftCreditBalance ?? 0;
+    return {
+      ...user.creditBalances,
+      postCreditBalance,
+      postingCreditBalance: user.creditBalances.postingCreditBalance ?? user.creditBalances.moneyCreditBalance + postCreditBalance,
+    };
   }
 
   const moneyCreditBalance = isClientRole(user.role)
     ? creditBalanceForClient(user.id, data.deposits || [], data.payments || [], data.posts || [])
     : 0;
-  const giftCreditUsed = (data.posts || [])
+  const postCreditUsed = (data.posts || [])
     .filter((post) => post.authorId === user.id)
-    .reduce((total, post) => total + (post.giftCreditUsed || 0), 0);
-  const giftCreditBalance = Math.max(0, 10 - giftCreditUsed);
+    .reduce((total, post) => total + (post.postCreditUsed ?? post.giftCreditUsed ?? 0), 0);
+  const postCreditBalance = Math.max(0, 10 - postCreditUsed);
 
   return {
     moneyCreditBalance,
-    giftCreditBalance,
-    postingCreditBalance: Math.max(0, moneyCreditBalance + giftCreditBalance),
+    postCreditBalance,
+    postingCreditBalance: Math.max(0, moneyCreditBalance + postCreditBalance),
   };
 }
 
@@ -520,7 +544,32 @@ function profileSkillsText(user: PortalUser) {
   return (user.profileSkills || []).join(", ");
 }
 
+function profileLanguagesText(user: PortalUser) {
+  return (user.profileLanguages || []).join(", ");
+}
+
+function userDisplayName(user?: PortalUser | null) {
+  return user?.name || user?.email || "Unknown member";
+}
+
 function isProfileComplete(user: PortalUser) {
+  if (isSuperAdminRole(user.role)) {
+    return true;
+  }
+
+  const hasBaseProfile = Boolean(user.name && (user.country || user.profileLocation) && user.profileTimeZone);
+  if (!hasBaseProfile) {
+    return false;
+  }
+
+  if (isClientRole(user.role)) {
+    return Boolean(user.clientPreferences?.length);
+  }
+
+  if (isWorkerUser(user)) {
+    return Boolean(user.profileSkills?.length && user.profileLanguages?.length);
+  }
+
   return Boolean(user.profileCompletedAt);
 }
 
@@ -562,7 +611,11 @@ function userMatchesSearch(user: PortalUser, query: string) {
     user.profileTitle,
     user.profileBio,
     user.profileLocation,
+    user.companyName,
+    user.country,
     ...(user.profileSkills || []),
+    ...(user.profileLanguages || []),
+    ...(user.clientPreferences || []),
   ]
     .filter(Boolean)
     .some((value) => String(value).toLowerCase().includes(normalizedQuery));
@@ -1537,7 +1590,8 @@ export default function PortalApp() {
   const isSuperAdmin = isSuperAdminRole(currentUser.role);
   const canViewManaged = canViewManagedRecords(currentUser.role);
   const availableViews = viewsForUser(currentUser);
-  const safeView = availableViews.includes(activeView) ? activeView : availableViews[0];
+  const safeView = safeViewForUser(currentUser, activeView);
+  const mustCompleteProfile = currentUser.status === "approved" && !isProfileComplete(currentUser);
   const adminNotifications = isSuperAdmin ? data.notifications || [] : [];
   const unreadAdminNotifications = adminNotifications.filter((notification) => !notification.readAt).length;
 
@@ -1640,6 +1694,11 @@ export default function PortalApp() {
         </header>
 
         {error ? <div className="error" style={{ marginBottom: 16 }}>{error}</div> : null}
+        {mustCompleteProfile ? (
+          <div className="status-strip compact" style={{ marginBottom: 16 }}>
+            Complete your required profile fields before using the portal.
+          </div>
+        ) : null}
 
         {currentUser.status !== "approved" ? (
           <PendingView data={data} busy={busy} onSaveMethod={postAction} />
@@ -1840,13 +1899,20 @@ function ProfileView({
 }) {
   const user = data.currentUser;
   const [draft, setDraft] = useState({
+    name: user.name || "",
+    companyName: user.companyName || "",
+    country: user.country || user.profileLocation || "",
     profileTitle: user.profileTitle || "",
     profileBio: user.profileBio || "",
     profileSkills: profileSkillsText(user),
+    profileLanguages: profileLanguagesText(user),
     profileLocation: user.profileLocation || "",
     profileTimeZone: user.profileTimeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    clientPreferences: user.clientPreferences || [],
     allowDirectMessages: user.allowDirectMessages !== false,
   });
+  const isClientProfile = isClientRole(user.role);
+  const isWorkerProfile = isWorkerUser(user);
   const profileTimeZoneOptions = timeZoneOptions.includes(draft.profileTimeZone)
     ? timeZoneOptions
     : [draft.profileTimeZone, ...timeZoneOptions].filter(Boolean);
@@ -1863,9 +1929,26 @@ function ProfileView({
     return isClientRole(profileUser.role);
   });
 
+  function toggleClientPreference(preference: string) {
+    setDraft((current) => {
+      const exists = current.clientPreferences.includes(preference);
+      return {
+        ...current,
+        clientPreferences: exists
+          ? current.clientPreferences.filter((item) => item !== preference)
+          : [...current.clientPreferences, preference],
+      };
+    });
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await onSave("saveProfile", draft);
+    await onSave("saveProfile", {
+      ...draft,
+      profileSkills: parseListInput(draft.profileSkills),
+      profileLanguages: parseListInput(draft.profileLanguages),
+      profileLocation: draft.profileLocation || draft.country,
+    });
   }
 
   return (
@@ -1883,6 +1966,46 @@ function ProfileView({
 
         <form className="form-grid" onSubmit={submit}>
           <label className="field">
+            <span>Name *</span>
+            <input
+              value={draft.name}
+              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+              placeholder="Your public name"
+              required
+            />
+          </label>
+          {isClientProfile ? (
+            <label className="field">
+              <span>Company</span>
+              <input
+                value={draft.companyName}
+                onChange={(event) => setDraft({ ...draft, companyName: event.target.value })}
+                placeholder="Company or agency name"
+              />
+            </label>
+          ) : null}
+          <label className="field">
+            <span>Country *</span>
+            <input
+              value={draft.country}
+              onChange={(event) => setDraft({ ...draft, country: event.target.value, profileLocation: event.target.value })}
+              placeholder="Country"
+              required
+            />
+          </label>
+          <label className="field">
+            <span>Timezone *</span>
+            <select
+              value={draft.profileTimeZone}
+              onChange={(event) => setDraft({ ...draft, profileTimeZone: event.target.value })}
+              required
+            >
+              {profileTimeZoneOptions.map((timeZone) => (
+                <option key={timeZone} value={timeZone}>{timeZone}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
             <span>Profile title</span>
             <input
               value={draft.profileTitle}
@@ -1898,25 +2021,54 @@ function ProfileView({
               placeholder="City, country"
             />
           </label>
-          <label className="field">
-            <span>Timezone</span>
-            <select
-              value={draft.profileTimeZone}
-              onChange={(event) => setDraft({ ...draft, profileTimeZone: event.target.value })}
-            >
-              {profileTimeZoneOptions.map((timeZone) => (
-                <option key={timeZone} value={timeZone}>{timeZone}</option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Skills / focus</span>
-            <input
-              value={draft.profileSkills}
-              onChange={(event) => setDraft({ ...draft, profileSkills: event.target.value })}
-              placeholder="Upwork, LinkedIn, React, Backend"
-            />
-          </label>
+          {isWorkerProfile ? (
+            <>
+              <label className="field">
+                <span>Skills *</span>
+                <input
+                  value={draft.profileSkills}
+                  onChange={(event) => setDraft({ ...draft, profileSkills: event.target.value })}
+                  placeholder="Upwork, LinkedIn, React, Backend"
+                  required
+                />
+              </label>
+              <label className="field">
+                <span>Languages & level *</span>
+                <input
+                  value={draft.profileLanguages}
+                  onChange={(event) => setDraft({ ...draft, profileLanguages: event.target.value })}
+                  placeholder={languageLevelOptions.slice(0, 3).join(", ")}
+                  required
+                />
+              </label>
+            </>
+          ) : (
+            <label className="field">
+              <span>Focus</span>
+              <input
+                value={draft.profileSkills}
+                onChange={(event) => setDraft({ ...draft, profileSkills: event.target.value })}
+                placeholder="Remote hiring, SaaS, web agencies"
+              />
+            </label>
+          )}
+          {isClientProfile ? (
+            <div className="field full">
+              <span>Preferences *</span>
+              <div className="checkbox-grid">
+                {clientPreferenceOptions.map((preference) => (
+                  <label className="check-field" key={preference}>
+                    <input
+                      type="checkbox"
+                      checked={draft.clientPreferences.includes(preference)}
+                      onChange={() => toggleClientPreference(preference)}
+                    />
+                    <span>{preference}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <label className="field full">
             <span>Profile bio</span>
             <textarea
@@ -1941,6 +2093,8 @@ function ProfileView({
         </form>
       </section>
 
+      {isClientProfile ? <ClientBidProfilesManager data={data} busy={busy} onSave={onSave} /> : null}
+
       <section className="panel">
         <div className="section-heading">
           <div>
@@ -1951,6 +2105,185 @@ function ProfileView({
         <ProfileCardGrid users={relatedProfiles} />
       </section>
     </div>
+  );
+}
+
+function parseListInput(value: string | string[] | undefined) {
+  const parts = Array.isArray(value) ? value : String(value || "").split(",");
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+function parseExtraFieldsInput(value: string) {
+  return value
+    .split("\n")
+    .map((line) => {
+      const [label, ...valueParts] = line.split(":");
+      return {
+        label: (label || "").trim(),
+        value: valueParts.join(":").trim(),
+      };
+    })
+    .filter((field) => field.label || field.value);
+}
+
+function extraFieldsInput(fields: BidProfileRecord["extraFields"] = []) {
+  return fields.map((field) => `${field.label}: ${field.value}`).join("\n");
+}
+
+function bidProfileDraft(profile: BidProfileRecord | null, user: PortalUser) {
+  return {
+    bidProfileId: profile?.id || "",
+    profileName: profile?.profileName || "",
+    fullLegalName: profile?.fullLegalName || user.name || "",
+    contactEmail: profile?.contactEmail || user.email || "",
+    phone: profile?.phone || "",
+    targetSalary: profile?.targetSalary || "",
+    visaStatus: profile?.visaStatus || "",
+    jobTitles: (profile?.jobTitles || []).join(", "),
+    extraFieldsText: extraFieldsInput(profile?.extraFields || []),
+    notes: profile?.notes || "",
+  };
+}
+
+function ClientBidProfilesManager({
+  data,
+  busy,
+  onSave,
+}: {
+  data: PortalData;
+  busy: boolean;
+  onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
+  const user = data.currentUser;
+  const profiles = (data.bidProfiles || []).filter((profile) => profile.clientId === user.id);
+  const [editingProfile, setEditingProfile] = useState<BidProfileRecord | null>(null);
+  const [draft, setDraft] = useState(() => bidProfileDraft(null, user));
+
+  function editProfile(profile: BidProfileRecord) {
+    setEditingProfile(profile);
+    setDraft(bidProfileDraft(profile, user));
+  }
+
+  function resetDraft() {
+    setEditingProfile(null);
+    setDraft(bidProfileDraft(null, user));
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const nextData = await onSave("saveBidProfile", {
+      clientId: user.id,
+      bidProfileId: draft.bidProfileId,
+      profileName: draft.profileName,
+      fullLegalName: draft.fullLegalName,
+      contactEmail: draft.contactEmail,
+      phone: draft.phone,
+      targetSalary: draft.targetSalary,
+      visaStatus: draft.visaStatus,
+      jobTitles: parseListInput(draft.jobTitles),
+      extraFields: parseExtraFieldsInput(draft.extraFieldsText),
+      notes: draft.notes,
+    });
+    if (nextData) {
+      resetDraft();
+    }
+  }
+
+  async function deleteProfile(profile: BidProfileRecord) {
+    if (!window.confirm(`Delete bid profile "${profile.profileName}"?`)) {
+      return;
+    }
+    const nextData = await onSave("deleteBidProfile", { bidProfileId: profile.id });
+    if (nextData && editingProfile?.id === profile.id) {
+      resetDraft();
+    }
+  }
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <div>
+          <h2>Bid Profiles</h2>
+          <p>Create reusable client bid profiles for bidders to use when applying.</p>
+        </div>
+        <span className="badge bidder">{profiles.length} profiles</span>
+      </div>
+
+      <form className="form-grid" onSubmit={submit}>
+        <label className="field">
+          <span>Profile name *</span>
+          <input value={draft.profileName} onChange={(event) => setDraft({ ...draft, profileName: event.target.value })} placeholder="React frontend profile" required />
+        </label>
+        <label className="field">
+          <span>Full legal name *</span>
+          <input value={draft.fullLegalName} onChange={(event) => setDraft({ ...draft, fullLegalName: event.target.value })} required />
+        </label>
+        <label className="field">
+          <span>Email *</span>
+          <input type="email" value={draft.contactEmail} onChange={(event) => setDraft({ ...draft, contactEmail: event.target.value })} required />
+        </label>
+        <label className="field">
+          <span>Phone</span>
+          <input value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Target salary</span>
+          <input value={draft.targetSalary} onChange={(event) => setDraft({ ...draft, targetSalary: event.target.value })} placeholder="$120,000" />
+        </label>
+        <label className="field">
+          <span>Visa status</span>
+          <input value={draft.visaStatus} onChange={(event) => setDraft({ ...draft, visaStatus: event.target.value })} placeholder="US citizen, GC, H1B..." />
+        </label>
+        <label className="field full">
+          <span>Job titles *</span>
+          <input value={draft.jobTitles} onChange={(event) => setDraft({ ...draft, jobTitles: event.target.value })} placeholder={jobTitleOptions.slice(0, 4).join(", ")} required />
+        </label>
+        <label className="field full">
+          <span>Additional fields</span>
+          <textarea value={draft.extraFieldsText} onChange={(event) => setDraft({ ...draft, extraFieldsText: event.target.value })} placeholder="Portfolio: https://example.com" />
+        </label>
+        <label className="field full">
+          <span>Notes</span>
+          <textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
+        </label>
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy}>
+            {editingProfile ? "Save bid profile" : "Add bid profile"}
+          </button>
+          {editingProfile ? (
+            <button className="ghost-button" type="button" onClick={resetDraft}>
+              Cancel
+            </button>
+          ) : null}
+        </div>
+      </form>
+
+      <div className="bid-profile-grid">
+        {profiles.map((profile) => (
+          <article className="profile-card" key={profile.id}>
+            <div className="person-title">
+              <div>
+                <h3>{profile.profileName}</h3>
+                <span className="table-subtext">{profile.fullLegalName} - {profile.contactEmail}</span>
+              </div>
+              <ActionMenu
+                items={[
+                  { label: "Edit", onClick: () => editProfile(profile) },
+                  { label: "Delete", danger: true, onClick: () => void deleteProfile(profile) },
+                ]}
+              />
+            </div>
+            <div className="badge-row">
+              {profile.jobTitles.map((title) => (
+                <span className="badge" key={title}>{title}</span>
+              ))}
+            </div>
+            <p>{profile.notes || "No notes added."}</p>
+          </article>
+        ))}
+        {!profiles.length ? <div className="empty-state">No bid profiles yet.</div> : null}
+      </div>
+    </section>
   );
 }
 
@@ -2042,6 +2375,9 @@ function ClientDirectoryView({
     : [];
   const selectedClientPayments = selectedClient
     ? data.payments.filter((payment) => selectedClientWorkerIds.has(payment.userId)).slice(0, 8)
+    : [];
+  const selectedClientBidProfiles = selectedClient
+    ? (data.bidProfiles || []).filter((profile) => profile.clientId === selectedClient.id)
     : [];
 
   function messageSelectedClient(client: PortalUser) {
@@ -2176,7 +2512,10 @@ function ClientDirectoryView({
                 <h3>Profile Info</h3>
                 <strong>{selectedClient.profileTitle || "Profile title not set"}</strong>
                 <p>{selectedClient.profileBio || "No profile bio yet."}</p>
-                <p className="muted">{selectedClient.profileLocation || "Location not set"} - {selectedClient.profileTimeZone || "Timezone not set"}</p>
+                <p className="muted">
+                  {selectedClient.companyName ? `${selectedClient.companyName} - ` : ""}
+                  {selectedClient.country || selectedClient.profileLocation || "Country not set"} - {selectedClient.profileTimeZone || "Timezone not set"}
+                </p>
                 <p className="muted">
                   {selectedClient.allowDirectMessages === false
                     ? "Direct messages are turned off."
@@ -2187,6 +2526,11 @@ function ClientDirectoryView({
                     <span className="badge" key={skill}>{skill}</span>
                   ))}
                   {!selectedClient.profileSkills?.length ? <span className="badge">No skills listed</span> : null}
+                </div>
+                <div className="badge-row">
+                  {(selectedClient.clientPreferences || []).map((preference) => (
+                    <span className="badge bidder" key={preference}>{preference}</span>
+                  ))}
                 </div>
               </article>
 
@@ -2208,6 +2552,15 @@ function ClientDirectoryView({
                 </button>
               </article>
 
+              <article className="profile-card">
+                <h3>Reviews</h3>
+                <div className="mini-metrics">
+                  <span><strong>{(selectedClient.clientStats?.bidderRating || 0).toFixed(1)}</strong> bidder rating</span>
+                  <span><strong>{selectedClient.clientStats?.assignedBidderCount || 0}</strong> hired bidders</span>
+                </div>
+                <p>No written reviews yet.</p>
+              </article>
+
               {selectedClient.creditBalances ? (
                 <article className="profile-card">
                   <h3>Client Credit Balance</h3>
@@ -2216,6 +2569,31 @@ function ClientDirectoryView({
                 </article>
               ) : null}
             </div>
+
+            {selectedClientBidProfiles.length ? (
+              <section className="panel nested-panel" style={{ marginBottom: 18 }}>
+                <div className="panel-header">
+                  <div>
+                    <h2>Bid Profiles</h2>
+                    <p>Client-provided profiles bidders can use for outreach.</p>
+                  </div>
+                </div>
+                <div className="bid-profile-grid">
+                  {selectedClientBidProfiles.map((profile) => (
+                    <article className="profile-card" key={profile.id}>
+                      <h3>{profile.profileName}</h3>
+                      <p>{profile.fullLegalName} - {profile.contactEmail}</p>
+                      <div className="badge-row">
+                        {profile.jobTitles.map((title) => (
+                          <span className="badge" key={title}>{title}</span>
+                        ))}
+                      </div>
+                      {profile.notes ? <p>{profile.notes}</p> : null}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
 
             <div className="two-column">
               <section className="panel nested-panel">
@@ -2281,6 +2659,7 @@ function BiddersDirectoryView({
   onMessageBidder: (bidderId: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [selectedBidder, setSelectedBidder] = useState<PortalUser | null>(null);
   const bidders = data.users
     .filter((user) => isWorkerUser(user) && user.status === "approved")
     .filter((user) => userMatchesSearch(user, query))
@@ -2299,6 +2678,18 @@ function BiddersDirectoryView({
       return { label: "Contracting with you", className: "bidder" };
     }
     return { label: "Contracted with another client", className: "pending" };
+  }
+
+  const selectedBidderWorkLogs = selectedBidder
+    ? data.workLogs.filter((log) => log.userId === selectedBidder.id).slice(0, 8)
+    : [];
+  const selectedBidderPayments = selectedBidder
+    ? data.payments.filter((payment) => payment.userId === selectedBidder.id).slice(0, 8)
+    : [];
+
+  function messageSelectedBidder(bidder: PortalUser) {
+    setSelectedBidder(null);
+    onMessageBidder(bidder.id);
   }
 
   return (
@@ -2334,7 +2725,7 @@ function BiddersDirectoryView({
             {bidders.map((bidder) => {
               const status = contractStatus(bidder);
               return (
-                <tr key={bidder.id}>
+                <tr className="clickable-row" key={bidder.id} onClick={() => setSelectedBidder(bidder)}>
                   <td>
                     <strong>{bidder.name}</strong>
                     <span className="table-subtext">{bidder.email}</span>
@@ -2351,10 +2742,12 @@ function BiddersDirectoryView({
                     <button
                       className="ghost-button compact-button"
                       type="button"
-                      disabled={bidder.allowDirectMessages === false}
-                      onClick={() => onMessageBidder(bidder.id)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedBidder(bidder);
+                      }}
                     >
-                      {bidder.allowDirectMessages === false ? "Messages off" : "Message"}
+                      View
                     </button>
                   </td>
                 </tr>
@@ -2364,11 +2757,115 @@ function BiddersDirectoryView({
         </table>
       </div>
       {!bidders.length ? <div className="empty-state">No bidders match this search.</div> : null}
+
+      {selectedBidder ? (
+        <div className="modal-backdrop">
+          <section className="modal-panel client-detail-modal" role="dialog" aria-modal="true" aria-labelledby="bidder-detail-title">
+            <div className="modal-header">
+              <div>
+                <h2 id="bidder-detail-title">{selectedBidder.name}</h2>
+                <p>{selectedBidder.email}</p>
+              </div>
+              <button className="ghost-button compact-button" type="button" onClick={() => setSelectedBidder(null)}>
+                Close
+              </button>
+            </div>
+
+            <div className="profile-detail-grid">
+              <article className="profile-card">
+                <h3>Profile Info</h3>
+                <strong>{selectedBidder.profileTitle || "Profile title not set"}</strong>
+                <p>{selectedBidder.profileBio || "No profile bio yet."}</p>
+                <p className="muted">{selectedBidder.country || selectedBidder.profileLocation || "Country not set"} - {selectedBidder.profileTimeZone || "Timezone not set"}</p>
+                <div className="badge-row">
+                  {(selectedBidder.profileSkills || []).map((skill) => (
+                    <span className="badge" key={skill}>{skill}</span>
+                  ))}
+                  {!selectedBidder.profileSkills?.length ? <span className="badge">No skills listed</span> : null}
+                </div>
+                <div className="badge-row">
+                  {(selectedBidder.profileLanguages || []).map((language) => (
+                    <span className="badge bidder" key={language}>{language}</span>
+                  ))}
+                </div>
+              </article>
+
+              <article className="profile-card">
+                <h3>Work Summary</h3>
+                <div className="mini-metrics">
+                  <span><strong>{selectedBidder.bidderStats?.totalApplied || 0}</strong> applied</span>
+                  <span><strong>{selectedBidder.bidderStats?.totalInterviews || 0}</strong> interviews</span>
+                  <span><strong>{money(selectedBidder.bidderStats?.totalEarned || 0)}</strong> earned</span>
+                  <span><strong>{contractStatus(selectedBidder).label}</strong> status</span>
+                </div>
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={selectedBidder.allowDirectMessages === false}
+                  onClick={() => messageSelectedBidder(selectedBidder)}
+                >
+                  {selectedBidder.allowDirectMessages === false ? "Messages off" : "Message bidder"}
+                </button>
+              </article>
+
+              <article className="profile-card">
+                <h3>Reviews</h3>
+                <p>No written reviews yet.</p>
+              </article>
+            </div>
+
+            <div className="two-column">
+              <section className="panel nested-panel">
+                <div className="panel-header">
+                  <div>
+                    <h2>Work History</h2>
+                    <p>Recent bidder work logs visible to this client.</p>
+                  </div>
+                </div>
+                <div className="payment-method-list">
+                  {selectedBidderWorkLogs.map((log) => (
+                    <div className="log-row" key={log.id}>
+                      <div>
+                        <strong>{shortDate(log.workDate)}</strong>
+                        <span className="muted">{log.appliedJobs} applied - {log.interviewsScheduled} interviews</span>
+                      </div>
+                      {log.sheetLink ? <a href={log.sheetLink} target="_blank" rel="noreferrer">Sheet</a> : null}
+                    </div>
+                  ))}
+                  {!selectedBidderWorkLogs.length ? <div className="empty-state compact">No visible work history yet.</div> : null}
+                </div>
+              </section>
+
+              <section className="panel nested-panel">
+                <div className="panel-header">
+                  <div>
+                    <h2>Payment History</h2>
+                    <p>Recent payments released to this bidder.</p>
+                  </div>
+                </div>
+                <div className="payment-method-list">
+                  {selectedBidderPayments.map((payment) => (
+                    <div className="payment-row" key={payment.id}>
+                      <div>
+                        <strong>{money(payment.amount)} - {titleCase(payment.status)}</strong>
+                        <span className="muted">{shortDate(payment.scheduledDate)}</span>
+                      </div>
+                      {payment.paymentLink ? <a href={payment.paymentLink} target="_blank" rel="noreferrer">Receipt</a> : null}
+                    </div>
+                  ))}
+                  {!selectedBidderPayments.length ? <div className="empty-state compact">No visible payment history yet.</div> : null}
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }
 
-function CreditBalanceStrip({ balances }: { balances: { moneyCreditBalance: number; giftCreditBalance: number; postingCreditBalance: number } }) {
+function CreditBalanceStrip({ balances }: { balances: { moneyCreditBalance: number; postCreditBalance: number; giftCreditBalance?: number; postingCreditBalance: number } }) {
+  const postCreditBalance = balances.postCreditBalance ?? balances.giftCreditBalance ?? 0;
   return (
     <div className="credit-strip">
       <span>
@@ -2376,8 +2873,8 @@ function CreditBalanceStrip({ balances }: { balances: { moneyCreditBalance: numb
         Money credit
       </span>
       <span>
-        <strong>{money(balances.giftCreditBalance)}</strong>
-        Gift credit
+        <strong>{money(postCreditBalance)}</strong>
+        Post credit
       </span>
       <span>
         <strong>{money(balances.postingCreditBalance)}</strong>
@@ -2488,7 +2985,7 @@ function PostsView({
         <div className="panel-header">
           <div>
             <h2>Post Credit</h2>
-            <p>Posts cost $1. Money credit can be used anywhere; gift credit can only be used for posting.</p>
+            <p>Posts cost $1. Money credit can be used anywhere; post credit can only be used for posting.</p>
           </div>
           <span className="badge approved">$1 per post</span>
         </div>
@@ -2628,7 +3125,7 @@ function PostsView({
                     <span className="table-subtext">{post.criteria}</span>
                   </td>
                   <td>{postAudienceLabel(post)}</td>
-                  <td>{money((post.giftCreditUsed || 0) + (post.moneyCreditUsed || 0))}</td>
+                  <td>{money((post.postCreditUsed ?? post.giftCreditUsed ?? 0) + (post.moneyCreditUsed || 0))}</td>
                   <td><span className={`badge ${post.status === "active" ? "approved" : "paused"}`}>{titleCase(post.status)}</span></td>
                   <td>{dateTime(post.createdAt)}</td>
                   <td>
@@ -3849,7 +4346,11 @@ function PaymentsView({
   busy: boolean;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
-  if (canViewManagedRecords(data.currentUser.role)) {
+  if (isSuperAdminRole(data.currentUser.role)) {
+    return <SuperAdminBillingView data={data} busy={busy} onAction={onAction} />;
+  }
+
+  if (isClientRole(data.currentUser.role)) {
     return <AdminPayments data={data} busy={busy} onAction={onAction} />;
   }
 
@@ -4027,6 +4528,135 @@ function UserPayments({
           </div>
         </div>
         <PaymentTable payments={data.payments} users={[user]} />
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminBillingView({
+  data,
+  busy,
+  onAction,
+}: {
+  data: PortalData;
+  busy: boolean;
+  onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
+  const creditUsers = data.users.filter((user) => !isSuperAdminRole(user.role));
+  const [draft, setDraft] = useState({
+    targetUserId: creditUsers[0]?.id || "",
+    creditType: "money",
+    direction: "add",
+    amount: "",
+    referenceLink: "",
+    memo: "",
+  });
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const nextData = await onAction("adjustCredit", {
+      targetUserId: draft.targetUserId,
+      creditType: draft.creditType,
+      direction: draft.direction,
+      amount: Number(draft.amount),
+      referenceLink: draft.referenceLink,
+      memo: draft.memo,
+    });
+    if (nextData) {
+      setDraft({ ...draft, amount: "", referenceLink: "", memo: "" });
+    }
+  }
+
+  return (
+    <div className="dashboard-stack">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Credit Adjustment</h2>
+            <p>Add or deduct money credit and post credit for clients, bidders, and developers.</p>
+          </div>
+        </div>
+        <form className="form-grid" onSubmit={submit}>
+          <label className="field full">
+            <span>User</span>
+            <select value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value })} required>
+              {creditUsers.map((user) => (
+                <option key={user.id} value={user.id}>{user.name} - {roleLabel(user.role)}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Credit type</span>
+            <select value={draft.creditType} onChange={(event) => setDraft({ ...draft, creditType: event.target.value })}>
+              <option value="money">Money credit</option>
+              <option value="post">Post credit</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Action</span>
+            <select value={draft.direction} onChange={(event) => setDraft({ ...draft, direction: event.target.value })}>
+              <option value="add">Add</option>
+              <option value="deduct">Deduct</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Amount</span>
+            <input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Reference link</span>
+            <input value={draft.referenceLink} onChange={(event) => setDraft({ ...draft, referenceLink: event.target.value })} placeholder="Optional receipt or note link" />
+          </label>
+          <label className="field full">
+            <span>Memo</span>
+            <textarea value={draft.memo} onChange={(event) => setDraft({ ...draft, memo: event.target.value })} />
+          </label>
+          <div className="actions full">
+            <button className="primary-button" type="submit" disabled={busy || !creditUsers.length}>
+              Save credit adjustment
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Credit Balances</h2>
+            <p>Current balances for all non-super-admin users.</p>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Role</th>
+                <th>Money credit</th>
+                <th>Post credit</th>
+                <th>Posting balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {creditUsers.map((user) => {
+                const balances = userCreditBalances(user, data);
+                return (
+                  <tr key={user.id}>
+                    <td>
+                      <strong>{user.name}</strong>
+                      <span className="table-subtext">{user.email}</span>
+                    </td>
+                    <td><span className={`badge ${user.role}`}>{roleLabel(user.role)}</span></td>
+                    <td>{money(balances.moneyCreditBalance)}</td>
+                    <td>{money(balances.postCreditBalance)}</td>
+                    <td>{money(balances.postingCreditBalance)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {!creditUsers.length ? <div className="empty-state">No users available for credit management.</div> : null}
       </section>
     </div>
   );
@@ -4950,8 +5580,8 @@ function ChatView({
       conversationId,
       recipientId: contact.id,
       recipientAllowsContact: contact.allowDirectMessages !== false,
-      title: contact.name,
-      subtitle: `${roleLabel(contact.role)} - ${contact.email}`,
+      title: userDisplayName(contact),
+      subtitle: contact.companyName || contact.profileTitle || contact.email,
       preview: latestMessage?.deletedAt ? "Message deleted" : latestMessage?.body || latestMessage?.attachments?.[0]?.name || "No messages yet",
       avatar: initialsForName(contact.name),
       unreadCount,
@@ -4972,7 +5602,7 @@ function ChatView({
           const participantIds = Array.from(
             new Set(messages.flatMap((message) => [message.userId, message.recipientId || ""]).filter(Boolean))
           );
-          const participantNames = participantIds.map((id) => membersById.get(id)?.name || "Unknown member");
+          const participantNames = participantIds.map((id) => userDisplayName(membersById.get(id)));
 
           return {
             id: `monitor:${conversationId}`,
@@ -5208,6 +5838,7 @@ function ChatView({
             const isEditing = editingMessageId === message.id;
             const messageAttachments = message.attachments || [];
             const menuItems: ActionMenuItem[] = [];
+            const authorUser = membersById.get(message.userId);
 
             if (canEdit) {
               menuItems.push({ label: "Edit", onClick: () => startEditing(message) });
@@ -5221,8 +5852,8 @@ function ChatView({
                 <div className={`message ${isMine ? "mine" : ""} ${deleted ? "deleted" : ""}`}>
                   {!isMine ? (
                     <div className="message-author">
-                      <strong>{message.authorName}</strong>
-                      <span>{roleLabel(message.authorRole)}</span>
+                      <strong>{userDisplayName(authorUser) || message.authorName}</strong>
+                      <span>{authorUser?.companyName || authorUser?.profileTitle || roleLabel(authorUser?.role || message.authorRole)}</span>
                     </div>
                   ) : null}
 

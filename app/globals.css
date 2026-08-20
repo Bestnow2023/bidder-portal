@@ -794,8 +794,15 @@ td > strong {
   gap: 12px;
 }
 
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
 .post-grid,
-.contract-grid {
+.contract-grid,
+.bid-profile-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 12px;
@@ -1443,7 +1450,8 @@ td > strong {
   .form-grid,
   .filter-bar,
   .profile-detail-grid,
-  .credit-strip {
+  .credit-strip,
+  .bid-profile-grid {
     grid-template-columns: 1fr;
   }
 

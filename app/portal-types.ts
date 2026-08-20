@@ -9,7 +9,8 @@ export type PostType = "client" | "bidder";
 
 export type CreditBalances = {
   moneyCreditBalance: number;
-  giftCreditBalance: number;
+  postCreditBalance: number;
+  giftCreditBalance?: number;
   postingCreditBalance: number;
 };
 
@@ -25,6 +26,10 @@ export type PortalUser = {
   profileSkills?: string[];
   profileLocation?: string;
   profileTimeZone?: string;
+  companyName?: string;
+  country?: string;
+  clientPreferences?: string[];
+  profileLanguages?: string[];
   profileCompletedAt?: string;
   allowDirectMessages?: boolean;
   clientRating?: number;
@@ -94,11 +99,28 @@ export type PortalPost = {
   paymentFrequency: PaymentFrequency;
   paymentWeekday: PaymentWeekday;
   status: PostStatus;
-  giftCreditUsed: number;
+  postCreditUsed: number;
+  giftCreditUsed?: number;
   moneyCreditUsed: number;
   createdAt: string;
   updatedAt: string;
   closedAt?: string;
+};
+
+export type BidProfileRecord = {
+  id: string;
+  clientId: string;
+  profileName: string;
+  fullLegalName: string;
+  contactEmail: string;
+  phone: string;
+  targetSalary: string;
+  visaStatus: string;
+  jobTitles: string[];
+  extraFields: { label: string; value: string }[];
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type PaymentMethod = {
@@ -240,6 +262,7 @@ export type PortalData = {
   deposits: DepositRecord[];
   contracts: ContractRecord[];
   posts: PortalPost[];
+  bidProfiles: BidProfileRecord[];
   notifications: PortalNotification[];
   chatContacts?: PortalUser[];
   chatMessages: ChatMessage[];

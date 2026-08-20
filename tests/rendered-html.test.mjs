@@ -138,7 +138,7 @@ test("declares the requested frontend records", async () => {
     "Contract Management",
     "Specific criteria",
     "Money credit",
-    "Gift credit",
+    "Post credit",
     "Posting balance",
     "Search clients",
     "Search bidders",
