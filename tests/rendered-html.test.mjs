@@ -113,6 +113,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Credit balance/);
   assert.match(portalApp, /Open invoice/);
   assert.match(portalApp, /Notification center/);
+  assert.match(portalApp, /Processing Payouts/);
+  assert.match(portalApp, /Mark completed/);
   assert.match(portalApp, /Charge client credit/);
   assert.match(portalApp, /Charge credit/);
   assert.match(portalApp, /Edit Payment/);
@@ -183,6 +185,8 @@ test("declares the requested frontend records", async () => {
     "Credit Wallet",
     "Create Cryptomus invoice",
     "Notification center",
+    "Processing Payouts",
+    "Mark completed",
     "Charge client credit",
     "Credit amount",
     "Charge credit",
@@ -225,6 +229,7 @@ test("declares the requested frontend records", async () => {
     "updateContractStatus",
     "markNotificationsRead",
     "releasePayment",
+    "completePayment",
     "savePaymentMethod",
     "saveWorkLog",
     "deleteWorkLog",
@@ -252,6 +257,8 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /reviewStatus/);
   assert.match(portalApp, /reviewNote/);
   assert.match(portalApp, /portalNotifications/);
+  assert.match(portalApp, /paymentStatusLabel/);
+  assert.match(portalApp, /paymentStatusClass/);
   assert.match(portalApp, /NEXT_PUBLIC_ADMIN_TIME_ZONE/);
   assert.match(portalApp, /assignedAdminId/);
   assert.match(portalApp, /profileCompletedAt/);

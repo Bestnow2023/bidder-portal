@@ -192,6 +192,8 @@ export type PaymentRecord = {
   payoutAddress?: string;
   payoutTxid?: string;
   payoutError?: string;
+  completedAt?: string;
+  completedByUserId?: string;
   createdAt: string;
   updatedAt: string;
 };

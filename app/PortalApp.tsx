@@ -450,6 +450,16 @@ function isCreditSpentPayment(payment: PaymentRecord) {
   return payment.status === "paid" || payment.status === "processing";
 }
 
+function paymentStatusLabel(status: PaymentRecord["status"]) {
+  return status === "paid" ? "Completed" : titleCase(status);
+}
+
+function paymentStatusClass(status: PaymentRecord["status"]) {
+  if (status === "paid") return "bidder";
+  if (status === "failed") return "paused";
+  return "pending";
+}
+
 function paidForUser(userId: string, payments: PaymentRecord[]) {
   return payments
     .filter((payment) => payment.userId === userId && isCreditSpentPayment(payment))
@@ -2832,7 +2842,7 @@ function ClientDirectoryView({
                     return (
                       <div className="payment-row" key={payment.id}>
                         <div>
-                          <strong>{money(payment.amount)} - {titleCase(payment.status)}</strong>
+                          <strong>{money(payment.amount)} - {paymentStatusLabel(payment.status)}</strong>
                           <span className="muted">{user?.name || "Unknown bidder"} - {shortDate(payment.scheduledDate)}</span>
                         </div>
                         {payment.paymentLink ? <a href={payment.paymentLink} target="_blank" rel="noreferrer">Receipt</a> : null}
@@ -3034,7 +3044,7 @@ function BiddersDirectoryView({
                   {selectedBidderPayments.map((payment) => (
                     <div className="payment-row" key={payment.id}>
                       <div>
-                        <strong>{money(payment.amount)} - {titleCase(payment.status)}</strong>
+                        <strong>{money(payment.amount)} - {paymentStatusLabel(payment.status)}</strong>
                         <span className="muted">{shortDate(payment.scheduledDate)}</span>
                       </div>
                       {payment.paymentLink ? <a href={payment.paymentLink} target="_blank" rel="noreferrer">Receipt</a> : null}
@@ -5123,6 +5133,7 @@ function SuperAdminBillingView({
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
   const creditUsers = data.users.filter((user) => !isSuperAdminRole(user.role));
+  const processingPayments = data.payments.filter((payment) => payment.status === "processing");
   const [draft, setDraft] = useState({
     targetUserId: creditUsers[0]?.id || "",
     creditType: "money",
@@ -5145,6 +5156,16 @@ function SuperAdminBillingView({
     if (nextData) {
       setDraft({ ...draft, amount: "", referenceLink: "", memo: "" });
     }
+  }
+
+  async function completePayment(payment: PaymentRecord) {
+    const user = userById(data.users, payment.userId);
+    const label = `${user?.name || "this user"} - ${money(payment.amount)} for ${shortDate(payment.periodStart)} to ${shortDate(payment.periodEnd)}`;
+    if (!window.confirm(`Mark payout completed for ${label}?`)) {
+      return;
+    }
+
+    await onAction("completePayment", { paymentId: payment.id });
   }
 
   return (
@@ -5235,6 +5256,22 @@ function SuperAdminBillingView({
           </table>
         </div>
         {!creditUsers.length ? <div className="empty-state">No users available for credit management.</div> : null}
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Processing Payouts</h2>
+            <p>Client releases stay processing until super admin marks them completed.</p>
+          </div>
+          <span className="badge pending">{processingPayments.length} processing</span>
+        </div>
+        <PaymentTable
+          payments={processingPayments}
+          users={data.users}
+          onComplete={completePayment}
+          emptyMessage="No processing payouts need completion."
+        />
       </section>
     </div>
   );
@@ -5928,7 +5965,7 @@ function PaymentEditModal({
   }
 
   return (
-    <ModalFrame title="Edit Payment" subtitle="Update the paid payout record and receipt link." onClose={onClose}>
+    <ModalFrame title="Edit Payment" subtitle="Update the payout record and receipt link." onClose={onClose}>
       <form className="form-grid" onSubmit={submit}>
           <label className="field full">
             <span>User</span>
@@ -5947,7 +5984,7 @@ function PaymentEditModal({
             <input type="date" value={draft.periodEnd} onChange={(event) => setDraft({ ...draft, periodEnd: event.target.value })} required />
           </label>
           <label className="field">
-            <span>Paid date</span>
+            <span>Payment date</span>
             <input type="date" value={draft.scheduledDate} onChange={(event) => setDraft({ ...draft, scheduledDate: event.target.value })} required />
           </label>
           <label className="field">
@@ -5979,15 +6016,19 @@ function PaymentTable({
   payments,
   users,
   onEdit,
+  onComplete,
   onDelete,
+  emptyMessage = "No payment history yet.",
 }: {
   payments: PaymentRecord[];
   users: PortalUser[];
   onEdit?: (payment: PaymentRecord) => void;
+  onComplete?: (payment: PaymentRecord) => void;
   onDelete?: (payment: PaymentRecord) => void;
+  emptyMessage?: string;
 }) {
   if (!payments.length) {
-    return <div className="empty-state">No payment history yet.</div>;
+    return <div className="empty-state">{emptyMessage}</div>;
   }
 
   return (
@@ -5997,12 +6038,12 @@ function PaymentTable({
           <tr>
             <th>User</th>
             <th>Period</th>
-            <th>Paid date</th>
+            <th>Payment date</th>
             <th>Amount</th>
             <th>Status</th>
             <th>Link</th>
             <th>Memo</th>
-            {onEdit || onDelete ? <th>Actions</th> : null}
+            {onEdit || onComplete || onDelete ? <th>Actions</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -6010,6 +6051,11 @@ function PaymentTable({
             const user = userById(users, payment.userId);
             const linkValue = payment.paymentLink || payment.payoutTxid || payment.payoutUuid || "";
             const isWebLink = /^https?:\/\//i.test(linkValue);
+            const actionItems: ActionMenuItem[] = [
+              ...(onComplete && payment.status === "processing" ? [{ label: "Mark completed", onClick: () => onComplete(payment) }] : []),
+              ...(onEdit ? [{ label: "Edit", onClick: () => onEdit(payment) }] : []),
+              ...(onDelete ? [{ label: "Delete", danger: true, onClick: () => onDelete(payment) }] : []),
+            ];
             return (
               <tr key={payment.id}>
                 <td>{user?.name || "Unknown"}</td>
@@ -6019,17 +6065,12 @@ function PaymentTable({
                   {money(payment.amount)}
                   {payment.tipAmount ? <span className="table-subtext">Tip: {money(payment.tipAmount)}</span> : null}
                 </td>
-                <td><span className={`badge ${payment.status === "paid" ? "bidder" : payment.status === "failed" ? "paused" : "pending"}`}>{titleCase(payment.status)}</span></td>
+                <td><span className={`badge ${paymentStatusClass(payment.status)}`}>{paymentStatusLabel(payment.status)}</span></td>
                 <td>{linkValue ? (isWebLink ? <a href={linkValue} target="_blank" rel="noreferrer">Open link</a> : <span>{linkValue}</span>) : "-"}</td>
                 <td>{payment.memo || "-"}</td>
-                {onEdit || onDelete ? (
+                {actionItems.length ? (
                   <td>
-                    <ActionMenu
-                      items={[
-                        ...(onEdit ? [{ label: "Edit", onClick: () => onEdit(payment) }] : []),
-                        ...(onDelete ? [{ label: "Delete", danger: true, onClick: () => onDelete(payment) }] : []),
-                      ]}
-                    />
+                    <ActionMenu items={actionItems} />
                   </td>
                 ) : null}
               </tr>
