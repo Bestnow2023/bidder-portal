@@ -71,6 +71,10 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Yesterday/);
   assert.match(portalApp, /Custom range/);
   assert.match(portalApp, /Daily Bidder Log/);
+  assert.match(portalApp, /Pending review/);
+  assert.match(portalApp, /Request edit/);
+  assert.match(portalApp, /Request Work Log Edit/);
+  assert.match(portalApp, /Send edit request/);
   assert.match(portalApp, /Payment History/);
   assert.match(portalApp, /Payday Reminder/);
   assert.match(portalApp, /Upcoming Payments/);
@@ -108,7 +112,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Create Cryptomus invoice/);
   assert.match(portalApp, /Credit balance/);
   assert.match(portalApp, /Open invoice/);
-  assert.match(portalApp, /Credit notifications/);
+  assert.match(portalApp, /Notification center/);
   assert.match(portalApp, /Charge client credit/);
   assert.match(portalApp, /Charge credit/);
   assert.match(portalApp, /Edit Payment/);
@@ -162,6 +166,11 @@ test("declares the requested frontend records", async () => {
     "Work Summary",
     "Daily Bidder Log",
     "Unpaid Work Totals",
+    "Pending review",
+    "Approve",
+    "Request edit",
+    "Request Work Log Edit",
+    "Send edit request",
     "Payment Method",
     "Payment History",
     "Billing",
@@ -173,7 +182,7 @@ test("declares the requested frontend records", async () => {
     "Tip",
     "Credit Wallet",
     "Create Cryptomus invoice",
-    "Credit notifications",
+    "Notification center",
     "Charge client credit",
     "Credit amount",
     "Charge credit",
@@ -219,6 +228,7 @@ test("declares the requested frontend records", async () => {
     "savePaymentMethod",
     "saveWorkLog",
     "deleteWorkLog",
+    "reviewWorkLog",
     "addPayment",
     "editPayment",
     "deletePayment",
@@ -237,6 +247,11 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /dateRangeFromPreset/);
   assert.match(portalApp, /selectedUserId/);
   assert.match(portalApp, /isWorkLogPaid/);
+  assert.match(portalApp, /isWorkLogApproved/);
+  assert.match(portalApp, /workLogReviewStatus/);
+  assert.match(portalApp, /reviewStatus/);
+  assert.match(portalApp, /reviewNote/);
+  assert.match(portalApp, /portalNotifications/);
   assert.match(portalApp, /NEXT_PUBLIC_ADMIN_TIME_ZONE/);
   assert.match(portalApp, /assignedAdminId/);
   assert.match(portalApp, /profileCompletedAt/);
@@ -255,8 +270,8 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /payoutNetworks/);
   assert.match(portalApp, /payoutMethodLabel/);
   assert.match(portalApp, /estimateForUserInRange/);
-  assert.match(portalApp, /adminNotifications/);
-  assert.match(portalApp, /unreadAdminNotifications/);
+  assert.match(portalApp, /portalNotifications/);
+  assert.match(portalApp, /unreadPortalNotifications/);
   assert.match(portalApp, /creditBalanceForClient/);
   assert.match(portalApp, /creditsDepositedForClient/);
   assert.match(portalApp, /isSuperAdminRole/);

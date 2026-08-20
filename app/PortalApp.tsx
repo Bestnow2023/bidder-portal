@@ -424,7 +424,7 @@ function viewFromPath(pathname: string): PortalView {
 
 function estimateForUser(user: PortalUser, logs: WorkLog[]) {
   return logs
-    .filter((log) => log.userId === user.id)
+    .filter((log) => log.userId === user.id && isWorkLogApproved(log))
     .reduce(
       (total, log) =>
         total +
@@ -436,7 +436,7 @@ function estimateForUser(user: PortalUser, logs: WorkLog[]) {
 
 function estimateForUserInRange(user: PortalUser, logs: WorkLog[], periodStart: string, periodEnd: string) {
   return logs
-    .filter((log) => log.userId === user.id && log.workDate >= periodStart && log.workDate <= periodEnd)
+    .filter((log) => log.userId === user.id && isWorkLogApproved(log) && log.workDate >= periodStart && log.workDate <= periodEnd)
     .reduce(
       (total, log) =>
         total +
@@ -990,6 +990,32 @@ function isWorkLogPaid(log: WorkLog, payments: PaymentRecord[]) {
     const periodEnd = dateAtMidnight(payment.periodEnd)?.getTime();
     return periodStart != null && periodEnd != null && periodStart <= logDate && logDate <= periodEnd;
   });
+}
+
+function workLogReviewStatus(log: WorkLog, paid = false) {
+  if (log.reviewStatus === "approved" || log.reviewStatus === "changes_requested") {
+    return log.reviewStatus;
+  }
+
+  return paid ? "approved" : "pending";
+}
+
+function isWorkLogApproved(log: WorkLog) {
+  return log.reviewStatus === "approved";
+}
+
+function workLogReviewLabel(log: WorkLog, paid = false) {
+  const status = workLogReviewStatus(log, paid);
+  if (status === "approved") return "Approved";
+  if (status === "changes_requested") return "Edit requested";
+  return "Pending review";
+}
+
+function workLogReviewClass(log: WorkLog, paid = false) {
+  const status = workLogReviewStatus(log, paid);
+  if (status === "approved") return "approved";
+  if (status === "changes_requested") return "paused";
+  return "pending";
 }
 
 export default function PortalApp() {
@@ -1642,8 +1668,8 @@ export default function PortalApp() {
   const availableViews = viewsForUser(currentUser);
   const safeView = safeViewForUser(currentUser, activeView);
   const mustCompleteProfile = currentUser.status === "approved" && !isProfileComplete(currentUser);
-  const adminNotifications = isSuperAdmin ? data.notifications || [] : [];
-  const unreadAdminNotifications = adminNotifications.filter((notification) => !notification.readAt).length;
+  const portalNotifications = data.notifications || [];
+  const unreadPortalNotifications = portalNotifications.filter((notification) => !notification.readAt).length;
 
   function navigateToView(event: ReactMouseEvent<HTMLAnchorElement>, view: PortalView) {
     event.preventDefault();
@@ -1679,9 +1705,9 @@ export default function PortalApp() {
     setPortalNavVisible(true);
   }
 
-  async function markAdminNotificationsRead(notificationIds?: string[]) {
+  async function markPortalNotificationsRead(notificationIds?: string[]) {
     await postAction("markNotificationsRead", {
-      notificationIds: notificationIds?.length ? notificationIds : adminNotifications.filter((notification) => !notification.readAt).map((notification) => notification.id),
+      notificationIds: notificationIds?.length ? notificationIds : portalNotifications.filter((notification) => !notification.readAt).map((notification) => notification.id),
     });
   }
 
@@ -1716,16 +1742,14 @@ export default function PortalApp() {
           </nav>
 
           <div className="portal-account">
-            {isSuperAdmin ? (
-              <AdminNotificationMenu
-                notifications={adminNotifications}
-                unreadCount={unreadAdminNotifications}
-                open={notificationMenuOpen}
-                busy={busy}
-                onToggle={() => setNotificationMenuOpen((open) => !open)}
-                onMarkRead={markAdminNotificationsRead}
-              />
-            ) : null}
+            <AdminNotificationMenu
+              notifications={portalNotifications}
+              unreadCount={unreadPortalNotifications}
+              open={notificationMenuOpen}
+              busy={busy}
+              onToggle={() => setNotificationMenuOpen((open) => !open)}
+              onMarkRead={markPortalNotificationsRead}
+            />
             <div className="portal-user">
               <strong>{currentUser.name}</strong>
               <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
@@ -1811,18 +1835,18 @@ function AdminNotificationMenu({
       <button
         className={`notification-trigger ${unreadCount ? "has-unread" : ""}`}
         type="button"
-        aria-label="Credit notifications"
+        aria-label="Notification center"
         aria-expanded={open}
         onClick={onToggle}
       >
-        <span>Credits</span>
+        <span>Notifications</span>
         {unreadCount ? <span className="nav-badge">{unreadCount}</span> : null}
       </button>
       {open ? (
         <div className="notification-popover" role="menu">
           <div className="notification-popover-header">
             <div>
-              <strong>Credit notifications</strong>
+              <strong>Notification center</strong>
               <span>{unreadCount ? `${unreadCount} unread` : "All caught up"}</span>
             </div>
             <button className="ghost-button compact-button" type="button" disabled={busy || !unreadCount} onClick={() => void onMarkRead()}>
@@ -1846,7 +1870,7 @@ function AdminNotificationMenu({
                 <small>{dateTime(notification.createdAt)}</small>
               </button>
             ))}
-            {!latestNotifications.length ? <div className="empty-state compact">No credit notifications yet.</div> : null}
+            {!latestNotifications.length ? <div className="empty-state compact">No notifications yet.</div> : null}
           </div>
         </div>
       ) : null}
@@ -4377,7 +4401,7 @@ function WorkView({
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
   if (canViewManagedRecords(data.currentUser.role)) {
-    return <AdminWorkLogs data={data} />;
+    return <AdminWorkLogs data={data} busy={busy} onAction={onSave} />;
   }
 
   if (data.currentUser.role === "developer") {
@@ -4539,12 +4563,30 @@ function BidderWorkLog({
   );
 }
 
-function AdminWorkLogs({ data }: { data: PortalData }) {
+function AdminWorkLogs({
+  data,
+  busy,
+  onAction,
+}: {
+  data: PortalData;
+  busy: boolean;
+  onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
   const [selectedUserId, setSelectedUserId] = useState("all");
+  const [reviewingWorkLog, setReviewingWorkLog] = useState<WorkLog | null>(null);
   const logUsers = data.users.filter(isWorkerUser);
   const userFilteredLogs = data.workLogs.filter((log) => selectedUserId === "all" || log.userId === selectedUserId);
   const logs = filterWorkLogsByDate(userFilteredLogs, dateRange);
+  const canReviewWorkLogs = isClientRole(data.currentUser.role);
+
+  async function approveWorkLog(log: WorkLog) {
+    await onAction("reviewWorkLog", {
+      workLogId: log.id,
+      reviewStatus: "approved",
+      reviewNote: "",
+    });
+  }
 
   return (
     <section className="panel">
@@ -4566,7 +4608,28 @@ function AdminWorkLogs({ data }: { data: PortalData }) {
         </label>
         <DateRangeFilter range={dateRange} onChange={setDateRange} embedded />
       </div>
-      <WorkLogTable logs={logs} users={data.users} emptyMessage="No work logs match this date filter." />
+      <WorkLogTable
+        logs={logs}
+        users={data.users}
+        payments={data.payments}
+        emptyMessage="No work logs match this date filter."
+        onApproveLog={canReviewWorkLogs ? approveWorkLog : undefined}
+        onRequestEditLog={canReviewWorkLogs ? setReviewingWorkLog : undefined}
+      />
+      {reviewingWorkLog ? (
+        <WorkLogReviewModal
+          log={reviewingWorkLog}
+          user={userById(data.users, reviewingWorkLog.userId)}
+          busy={busy}
+          onClose={() => setReviewingWorkLog(null)}
+          onSave={async (payload) => {
+            const nextData = await onAction("reviewWorkLog", payload);
+            if (nextData) {
+              setReviewingWorkLog(null);
+            }
+          }}
+        />
+      ) : null}
     </section>
   );
 }
@@ -4717,6 +4780,55 @@ function WorkLogEditModal({
   );
 }
 
+function WorkLogReviewModal({
+  log,
+  user,
+  busy,
+  onClose,
+  onSave,
+}: {
+  log: WorkLog;
+  user?: PortalUser;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const [reviewNote, setReviewNote] = useState(log.reviewNote || "");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSave({
+      workLogId: log.id,
+      reviewStatus: "changes_requested",
+      reviewNote,
+    });
+  }
+
+  return (
+    <ModalFrame title="Request Work Log Edit" subtitle={`${user?.name || "Bidder"} - ${shortDate(log.workDate)}`} onClose={onClose}>
+      <form className="form-grid" onSubmit={submit}>
+        <label className="field full">
+          <span>Suggestion</span>
+          <textarea
+            value={reviewNote}
+            onChange={(event) => setReviewNote(event.target.value)}
+            placeholder="Explain what should be corrected before approval."
+            required
+          />
+        </label>
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy || !reviewNote.trim()}>
+            Send edit request
+          </button>
+          <button className="ghost-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}
+
 function WorkLogTable({
   logs,
   users,
@@ -4725,6 +4837,8 @@ function WorkLogTable({
   emptyMessage = "No work logs yet.",
   onEditLog,
   onDeleteLog,
+  onApproveLog,
+  onRequestEditLog,
 }: {
   logs: WorkLog[];
   users: PortalUser[];
@@ -4733,6 +4847,8 @@ function WorkLogTable({
   emptyMessage?: string;
   onEditLog?: (log: WorkLog) => void;
   onDeleteLog?: (log: WorkLog) => void;
+  onApproveLog?: (log: WorkLog) => void;
+  onRequestEditLog?: (log: WorkLog) => void;
 }) {
   if (!logs.length) {
     return <div className="empty-state">{emptyMessage}</div>;
@@ -4748,15 +4864,27 @@ function WorkLogTable({
             <th>Sheet</th>
             <th>Applied</th>
             <th>Interviews</th>
+            <th>Review</th>
             {showPaymentStatus ? <th>Status</th> : null}
             <th>Notes</th>
-            {onEditLog || onDeleteLog ? <th>Actions</th> : null}
+            {onEditLog || onDeleteLog || onApproveLog || onRequestEditLog ? <th>Actions</th> : null}
           </tr>
         </thead>
         <tbody>
           {logs.map((log) => {
             const user = userById(users, log.userId);
             const paid = isWorkLogPaid(log, payments);
+            const reviewStatus = workLogReviewStatus(log, paid);
+            const actionItems: ActionMenuItem[] = [
+              ...(onApproveLog
+                ? [{ label: "Approve", disabled: paid || reviewStatus === "approved", onClick: () => onApproveLog(log) }]
+                : []),
+              ...(onRequestEditLog
+                ? [{ label: "Request edit", disabled: paid, onClick: () => onRequestEditLog(log) }]
+                : []),
+              ...(onEditLog ? [{ label: "Edit", onClick: () => onEditLog(log) }] : []),
+              ...(onDeleteLog ? [{ label: "Delete", danger: true, onClick: () => onDeleteLog(log) }] : []),
+            ];
             return (
               <tr key={log.id}>
                 <td>{shortDate(log.workDate)}</td>
@@ -4764,18 +4892,20 @@ function WorkLogTable({
                 <td><a href={log.sheetLink} target="_blank" rel="noreferrer">Open sheet</a></td>
                 <td>{log.appliedJobs}</td>
                 <td>{log.interviewsScheduled}</td>
+                <td>
+                  <span className={`badge ${workLogReviewClass(log, paid)}`}>{workLogReviewLabel(log, paid)}</span>
+                  {log.reviewedAt ? <span className="table-subtext">{dateTime(log.reviewedAt)}</span> : null}
+                </td>
                 {showPaymentStatus ? (
                   <td><span className={`badge ${paid ? "bidder" : "pending"}`}>{paid ? "Paid" : "Unpaid"}</span></td>
                 ) : null}
-                <td>{log.notes || "-"}</td>
-                {onEditLog || onDeleteLog ? (
+                <td>
+                  {log.notes || "-"}
+                  {log.reviewNote ? <span className="table-subtext">Suggestion: {log.reviewNote}</span> : null}
+                </td>
+                {actionItems.length ? (
                   <td>
-                    <ActionMenu
-                      items={[
-                        ...(onEditLog ? [{ label: "Edit", onClick: () => onEditLog(log) }] : []),
-                        ...(onDeleteLog ? [{ label: "Delete", danger: true, onClick: () => onDeleteLog(log) }] : []),
-                      ]}
-                    />
+                    <ActionMenu items={actionItems} />
                   </td>
                 ) : null}
               </tr>
@@ -5208,7 +5338,7 @@ function AdminPayments({
     .filter((user) => user.nextPaymentDate && !scheduledKeys.has(`${user.id}:${user.nextPaymentDate}`))
     .map((user) => {
       const unpaidLogs = data.workLogs
-        .filter((log) => log.userId === user.id && !isWorkLogPaid(log, data.payments))
+        .filter((log) => log.userId === user.id && isWorkLogApproved(log) && !isWorkLogPaid(log, data.payments))
         .sort((left, right) => left.workDate.localeCompare(right.workDate));
       const periodStart = unpaidLogs[0]?.workDate || user.nextPaymentDate;
       const periodEnd = unpaidLogs[unpaidLogs.length - 1]?.workDate || user.nextPaymentDate;
@@ -5226,11 +5356,11 @@ function AdminPayments({
       };
     });
   const upcomingPayments = [...scheduledPaymentItems, ...paydayItems]
-    .filter((item) => item.daysUntil >= 0)
+    .filter((item) => item.daysUntil >= 0 && item.amount > 0)
     .sort((left, right) => left.daysUntil - right.daysUntil || left.scheduledDate.localeCompare(right.scheduledDate))
     .slice(0, 10);
   const paydayReminders = [...scheduledPaymentItems, ...paydayItems]
-    .filter((item) => item.daysUntil <= 1)
+    .filter((item) => item.daysUntil <= 1 && item.amount > 0)
     .sort((left, right) => left.daysUntil - right.daysUntil || left.scheduledDate.localeCompare(right.scheduledDate));
 
   async function deletePayment(payment: PaymentRecord) {

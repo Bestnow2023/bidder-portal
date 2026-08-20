@@ -1,6 +1,7 @@
 export type Role = "super_admin" | "client" | "admin" | "bidder" | "developer";
 export type UserStatus = "pending" | "approved" | "paused";
 export type PaymentStatus = "scheduled" | "processing" | "paid" | "failed";
+export type WorkLogReviewStatus = "pending" | "approved" | "changes_requested";
 export type PaymentFrequency = "" | "weekly" | "biweekly" | "monthly";
 export type PaymentWeekday = "" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday";
 export type ContractStatus = "requested" | "active" | "rejected" | "ended";
@@ -160,6 +161,11 @@ export type WorkLog = {
   appliedJobs: number;
   interviewsScheduled: number;
   notes: string;
+  reviewStatus?: WorkLogReviewStatus;
+  reviewNote?: string;
+  reviewedByUserId?: string;
+  reviewRequestedByUserId?: string;
+  reviewedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -216,14 +222,17 @@ export type DepositRecord = {
 
 export type PortalNotification = {
   id: string;
-  recipientRole: "super_admin";
-  type: "client_credit_paid";
+  recipientRole?: "super_admin" | "";
+  recipientUserId?: string;
+  type: "client_credit_paid" | "work_log_submitted" | "work_log_updated" | "work_log_approved" | "work_log_changes_requested" | string;
   title: string;
   body: string;
-  clientId: string;
-  relatedDepositId: string;
-  amount: number;
-  creditAmount: number;
+  clientId?: string;
+  relatedDepositId?: string;
+  relatedWorkLogId?: string;
+  actorUserId?: string;
+  amount?: number;
+  creditAmount?: number;
   readAt: string;
   createdAt: string;
   updatedAt: string;
