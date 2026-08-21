@@ -320,6 +320,8 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /ActionMenu/);
   assert.match(portalApp, /AccountMenu/);
   assert.match(portalApp, /account-menu/);
+  assert.match(portalApp, /navViews/);
+  assert.match(portalApp, /view !== "profile"/);
   assert.match(portalApp, /viewRoutes/);
   assert.match(portalApp, /routeViews/);
   assert.match(portalApp, /navigateToView/);

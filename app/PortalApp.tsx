@@ -1680,6 +1680,7 @@ export default function PortalApp() {
   const isSuperAdmin = isSuperAdminRole(currentUser.role);
   const canViewManaged = canViewManagedRecords(currentUser.role);
   const availableViews = viewsForUser(currentUser);
+  const navViews = availableViews.filter((view) => view !== "profile");
   const safeView = safeViewForUser(currentUser, activeView);
   const mustCompleteProfile = currentUser.status === "approved" && !isProfileComplete(currentUser);
   const portalNotifications = data.notifications || [];
@@ -1743,7 +1744,7 @@ export default function PortalApp() {
           </div>
 
           <nav className="nav-list" aria-label="Portal navigation">
-            {availableViews.map((view) => (
+            {navViews.map((view) => (
               <a
                 key={view}
                 className={`nav-button transition ${
