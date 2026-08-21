@@ -18,6 +18,7 @@ export type CreditBalances = {
 
 export type PortalUser = {
   id: string;
+  publicId?: string;
   email: string;
   name: string;
   role: Role;

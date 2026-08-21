@@ -50,6 +50,10 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Security/);
   assert.match(portalApp, /Profile settings/);
   assert.match(portalApp, /User ID:/);
+  assert.match(portalApp, /displayUserId/);
+  assert.match(portalApp, /publicId/);
+  assert.match(portalApp, /targetUserPublicId/);
+  assert.match(portalApp, /No exact User ID match yet/);
   assert.match(portalApp, /Search people/);
   assert.match(portalApp, /Client Search/);
   assert.match(portalApp, /Search clients/);
@@ -168,7 +172,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /addSupportMessage/);
   assert.match(portalApp, /supportMessages/);
   assert.match(portalApp, /supportContacts/);
-  assert.doesNotMatch(portalApp, /Attach Bid Profiles|Remove from bidder/);
+  assert.doesNotMatch(portalApp, /Attach Bid Profiles|Remove from bidder|Select member/);
   assert.doesNotMatch(portalApp, /Enable notifications|Notifications on|Admin time /);
   assert.doesNotMatch(portalApp, /Roles ready|Work logging|No Stripe|set payment rates/);
   assert.doesNotMatch(portalApp, /Visible Profiles|ProfileCardGrid/);
@@ -193,6 +197,7 @@ test("declares the requested frontend records", async () => {
     "Security",
     "Profile settings",
     "User ID:",
+    "targetUserPublicId",
     "Save email",
     "Save password",
     "Client Search",

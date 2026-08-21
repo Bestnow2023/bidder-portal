@@ -700,6 +700,25 @@ function workerUsers(users: PortalUser[]) {
   return users.filter((user) => isWorkerUser(user) && user.status === "approved");
 }
 
+function displayUserId(user?: PortalUser | null) {
+  return user?.publicId || user?.id || "";
+}
+
+function compactUserId(value: string) {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function userIdMatches(user: PortalUser, query: string) {
+  const compactQuery = compactUserId(query);
+  if (!compactQuery) {
+    return false;
+  }
+
+  return [displayUserId(user), user.id]
+    .filter(Boolean)
+    .some((value) => compactUserId(value) === compactQuery);
+}
+
 function contractStatusLabel(status: string) {
   if (status === "active") return "Active";
   if (status === "rejected") return "Rejected";
@@ -724,6 +743,7 @@ function userMatchesSearch(user: PortalUser, query: string) {
   }
 
   return [
+    displayUserId(user),
     user.id,
     user.name,
     user.email,
@@ -2300,7 +2320,7 @@ function ProfileView({
             <p>Complete the profile that matched clients and bidders can view.</p>
           </div>
           <div className="badge-row">
-            <span className="badge">User ID: {user.id}</span>
+            <span className="badge">User ID: {displayUserId(user)}</span>
             <span className={`badge ${isProfileComplete(user) ? "approved" : "pending"}`}>
               {isProfileComplete(user) ? "Complete" : "Incomplete"}
             </span>
@@ -3910,7 +3930,7 @@ function ContractsView({
     ? workerUsers(data.users)
     : clientUsers(data.users);
   const [draft, setDraft] = useState({
-    targetUserId: targets[0]?.id || "",
+    targetUserPublicId: "",
     title: "",
     criteria: "",
     ratePerApplication: "",
@@ -3927,12 +3947,15 @@ function ContractsView({
   const contracts = isSuperAdminRole(currentUser.role)
     ? data.contracts || []
     : (data.contracts || []).filter((contract) => contract.clientId === currentUser.id || contract.workerId === currentUser.id);
+  const targetLabel = isClientRole(currentUser.role) ? "Bidder" : "Client";
+  const matchedTarget = targets.find((target) => userIdMatches(target, draft.targetUserPublicId));
 
   async function submitContract(event: FormEvent) {
     event.preventDefault();
-    const nextTargetId = draft.targetUserId || targets[0]?.id || "";
+    const nextTargetPublicId = draft.targetUserPublicId.trim();
     const nextData = await onAction("createContract", {
-      targetUserId: nextTargetId,
+      targetUserPublicId: nextTargetPublicId,
+      targetUserId: matchedTarget?.id || "",
       title: draft.title,
       criteria: draft.criteria,
       ratePerApplication: Number(draft.ratePerApplication),
@@ -3945,7 +3968,7 @@ function ContractsView({
     if (nextData) {
       setDraft({
         ...draft,
-        targetUserId: nextTargetId,
+        targetUserPublicId: "",
         title: "",
         criteria: "",
         ratePerApplication: "",
@@ -4154,18 +4177,32 @@ function ContractsView({
       </section>
       <DisputesView data={data} busy={busy} onAction={onAction} embedded />
       {showCreateModal ? (
-        <ModalFrame title="Start Contract" subtitle="Send a contract request to a selected member." onClose={() => setShowCreateModal(false)}>
+        <ModalFrame title="Start Contract" subtitle={`Send a contract request by entering the ${targetLabel.toLowerCase()}'s User ID.`} onClose={() => setShowCreateModal(false)}>
           <form className="form-grid" onSubmit={submitContract}>
             <label className="field">
-              <span>{isClientRole(currentUser.role) ? "Bidder" : "Client"}</span>
-              <select value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value })} required>
-                <option value="">Select member</option>
+              <span>{targetLabel} User ID</span>
+              <input
+                list="contract-target-user-ids"
+                value={draft.targetUserPublicId}
+                onChange={(event) => setDraft({ ...draft, targetUserPublicId: event.target.value })}
+                placeholder="BP-7K2M9Q"
+                autoComplete="off"
+                required
+              />
+              <datalist id="contract-target-user-ids">
                 {targets.map((target) => (
-                  <option key={target.id} value={target.id}>
+                  <option key={target.id} value={displayUserId(target)}>
                     {target.name} - {roleLabel(target.role)}
                   </option>
                 ))}
-              </select>
+              </datalist>
+              <span className="table-subtext">
+                {matchedTarget
+                  ? `Matched ${matchedTarget.name} - ${roleLabel(matchedTarget.role)}`
+                  : draft.targetUserPublicId.trim()
+                    ? "No exact User ID match yet."
+                    : `Enter the short User ID shown on the ${targetLabel.toLowerCase()} profile.`}
+              </span>
             </label>
             <label className="field">
               <span>Contract title</span>
@@ -4208,7 +4245,7 @@ function ContractsView({
               <textarea value={draft.criteria} onChange={(event) => setDraft({ ...draft, criteria: event.target.value })} placeholder="Define the work, required logs, reporting cadence, target jobs, and acceptance criteria." required />
             </label>
             <div className="actions full">
-              <button className="primary-button" type="submit" disabled={busy || !targets.length}>
+              <button className="primary-button" type="submit" disabled={busy || !targets.length || !draft.targetUserPublicId.trim()}>
                 Send contract request
               </button>
             </div>
@@ -4655,7 +4692,7 @@ function PeopleView({
                   <strong>{user.name}</strong>
                   <span className="table-subtext">{user.email}</span>
                 </td>
-                <td><span className="table-subtext">{user.id}</span></td>
+                <td><span className="table-subtext">{displayUserId(user)}</span></td>
                 <td><span className={`badge ${user.role}`}>{roleLabel(user.role)}</span></td>
                 <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
                 <td>{assignedClientName(data.users, user)}</td>
@@ -6080,7 +6117,7 @@ function CreditBalanceTable({
                   <strong>{user.name}</strong>
                   <span className="table-subtext">{user.email}</span>
                 </td>
-                <td><span className="table-subtext">{user.id}</span></td>
+                <td><span className="table-subtext">{displayUserId(user)}</span></td>
                 <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
                 <td>{money(balances.moneyCreditBalance)}</td>
                 <td>{money(balances.postCreditBalance)}</td>
@@ -6131,7 +6168,7 @@ function CreditAdjustmentModal({
     <ModalFrame title="Credit Adjustment" subtitle="Add or deduct credit for the selected account." onClose={onClose}>
       <form className="form-grid" onSubmit={submit}>
         <div className="status-strip compact full">
-          {user.name} - {roleLabel(user.role)} - User ID: {user.id}
+          {user.name} - {roleLabel(user.role)} - User ID: {displayUserId(user)}
         </div>
         <div className="metric-grid full" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
           <div className="metric">
