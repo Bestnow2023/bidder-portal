@@ -26,7 +26,7 @@ import type {
 } from "./portal-types";
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
-type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "people" | "bidderSettings" | "work" | "billing" | "payments" | "chat";
+type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "people" | "bidderSettings" | "work" | "credits" | "billing" | "payments" | "chat";
 
 const payoutCurrencies = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB"];
 const payoutNetworkOptions = [
@@ -139,6 +139,7 @@ const viewRoutes: Record<PortalView, string> = {
   people: "/people",
   bidderSettings: "/bidder-settings",
   work: "/work",
+  credits: "/credits",
   billing: "/billing",
   payments: "/payments",
   chat: "/chat",
@@ -156,6 +157,7 @@ const routeViews: Record<string, PortalView> = {
   "/people": "people",
   "/bidder-settings": "bidderSettings",
   "/work": "work",
+  "/credits": "credits",
   "/billing": "billing",
   "/payments": "payments",
   "/chat": "chat",
@@ -396,7 +398,11 @@ function statusLabel(status: UserStatus) {
   return titleCase(status);
 }
 
-function viewTitle(view: string) {
+function viewTitle(view: string, user?: PortalUser) {
+  if (user && isSuperAdminRole(user.role) && view === "billing") {
+    return "Billing Management";
+  }
+
   const titles: Record<string, string> = {
     dashboard: "Dashboard",
     overview: "Dashboard",
@@ -408,6 +414,7 @@ function viewTitle(view: string) {
     people: "People",
     bidderSettings: "Bidder Settings",
     work: "Work Logs",
+    credits: "Credit Management",
     billing: "Billing",
     payments: "Payments",
     chat: "Inbox",
@@ -415,7 +422,7 @@ function viewTitle(view: string) {
   return titles[view] || "Portal";
 }
 
-function viewSubtitle(view: string, isAdmin: boolean) {
+function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
   if (!isAdmin) {
     if (view === "clients") return "Search client profiles and review payment history signals.";
     if (view === "bidders") return "Search bidder profiles and contracting status.";
@@ -423,6 +430,17 @@ function viewSubtitle(view: string, isAdmin: boolean) {
     if (view === "contracts") return "Review requests, active contracts, disputes, criteria, and connected client credit.";
     if (view === "profile") return "Complete your profile, direct-message preference, email, and password.";
     return "Log your bidder activity and keep payment details current.";
+  }
+
+  if (isSuperAdmin) {
+    const superAdminSubtitles: Record<string, string> = {
+      credits: "Add, deduct, and audit money credit and post credit by client and bidder.",
+      billing: "Review pending payout releases and completed payout history.",
+    };
+
+    if (superAdminSubtitles[view]) {
+      return superAdminSubtitles[view];
+    }
   }
 
   const subtitles: Record<string, string> = {
@@ -435,6 +453,7 @@ function viewSubtitle(view: string, isAdmin: boolean) {
     people: "Manage user accounts, approval status, roles, passwords, and email verification.",
     bidderSettings: "Set bidder rates, interview bonuses, payment dates, and schedules.",
     work: "Review bidder work logs and Google Sheet links.",
+    credits: "Add, deduct, and audit user credits.",
     billing: "Deposit credits and release bidder payouts through Cryptomus.",
     payments: "Record payouts, review payment methods, and track client escrow.",
     chat: "Client-bidder direct messaging with super admin monitoring.",
@@ -445,7 +464,7 @@ function viewSubtitle(view: string, isAdmin: boolean) {
 
 function viewsForUser(user: PortalUser): PortalView[] {
   if (isSuperAdminRole(user.role)) {
-    return ["people", "contracts", "posts", "billing", "chat"];
+    return ["people", "contracts", "posts", "credits", "billing", "chat"];
   }
 
   if (isClientRole(user.role)) {
@@ -1814,7 +1833,7 @@ export default function PortalApp() {
                 href={viewRoutes[view]}
                 onClick={(event) => navigateToView(event, view)}
               >
-                <span>{viewTitle(view)}</span>
+                <span>{viewTitle(view, currentUser)}</span>
                 {view === "chat" && chatUnreadCount > 0 ? <span className="nav-badge">{chatUnreadCount}</span> : null}
                 {view === "people" && pendingApprovalCount > 0 ? <span className="nav-badge">{pendingApprovalCount}</span> : null}
               </a>
@@ -1844,8 +1863,8 @@ export default function PortalApp() {
       <section className="content">
         <header className="topbar">
           <div>
-            <h1>{viewTitle(safeView)}</h1>
-            <p>{viewSubtitle(safeView, canViewManaged)}</p>
+            <h1>{viewTitle(safeView, currentUser)}</h1>
+            <p>{viewSubtitle(safeView, canViewManaged, isSuperAdmin)}</p>
           </div>
           <div className="badge-row">
             <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
@@ -1874,6 +1893,7 @@ export default function PortalApp() {
             {safeView === "bidderSettings" && isSuperAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
             {safeView === "work" ? <WorkView data={data} busy={busy} onSave={postAction} /> : null}
+            {safeView === "credits" && isSuperAdmin ? <SuperAdminCreditManagementView data={data} busy={busy} onAction={postAction} /> : null}
             {safeView === "billing" || safeView === "payments" ? <PaymentsView data={data} busy={busy} onAction={postAction} /> : null}
             {safeView === "chat" ? (
               <ChatView
@@ -5661,7 +5681,7 @@ function PaymentsView({
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
   if (isSuperAdminRole(data.currentUser.role)) {
-    return <SuperAdminBillingView data={data} busy={busy} onAction={onAction} />;
+    return <SuperAdminBillingManagementView data={data} busy={busy} onAction={onAction} />;
   }
 
   if (isClientRole(data.currentUser.role)) {
@@ -5847,7 +5867,7 @@ function UserPayments({
   );
 }
 
-function SuperAdminBillingView({
+function SuperAdminCreditManagementView({
   data,
   busy,
   onAction,
@@ -5856,8 +5876,9 @@ function SuperAdminBillingView({
   busy: boolean;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
-  const creditUsers = data.users.filter((user) => !isSuperAdminRole(user.role));
-  const processingPayments = data.payments.filter((payment) => payment.status === "processing");
+  const creditClientUsers = data.users.filter((user) => isClientRole(user.role));
+  const creditBidderUsers = data.users.filter((user) => user.role === "bidder");
+  const creditUsers = [...creditClientUsers, ...creditBidderUsers];
   const [draft, setDraft] = useState({
     targetUserId: creditUsers[0]?.id || "",
     creditType: "money",
@@ -5882,32 +5903,29 @@ function SuperAdminBillingView({
     }
   }
 
-  async function completePayment(payment: PaymentRecord) {
-    const user = userById(data.users, payment.userId);
-    const label = `${user?.name || "this user"} - ${money(payment.amount)} for ${shortDate(payment.periodStart)} to ${shortDate(payment.periodEnd)}`;
-    if (!window.confirm(`Mark payout completed for ${label}?`)) {
-      return;
-    }
-
-    await onAction("completePayment", { paymentId: payment.id });
-  }
-
   return (
     <div className="dashboard-stack">
       <section className="panel">
         <div className="panel-header">
           <div>
             <h2>Credit Adjustment</h2>
-            <p>Add or deduct money credit and post credit for clients, bidders, and developers.</p>
+            <p>Add or deduct money credit and post credit for clients and bidders.</p>
           </div>
         </div>
         <form className="form-grid" onSubmit={submit}>
           <label className="field full">
             <span>User</span>
             <select value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value })} required>
-              {creditUsers.map((user) => (
-                <option key={user.id} value={user.id}>{user.name} - {roleLabel(user.role)}</option>
-              ))}
+              <optgroup label="Clients">
+                {creditClientUsers.map((user) => (
+                  <option key={user.id} value={user.id}>{user.name} - {roleLabel(user.role)}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Bidders">
+                {creditBidderUsers.map((user) => (
+                  <option key={user.id} value={user.id}>{user.name} - {roleLabel(user.role)}</option>
+                ))}
+              </optgroup>
             </select>
           </label>
           <label className="field">
@@ -5947,54 +5965,122 @@ function SuperAdminBillingView({
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Credit Balances</h2>
-            <p>Current balances for all non-super-admin users.</p>
+            <h2>Client Credit Balances</h2>
+            <p>Money credit and post credit available to client accounts.</p>
           </div>
         </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>User</th>
-                <th>Role</th>
-                <th>Money credit</th>
-                <th>Post credit</th>
-              </tr>
-            </thead>
-            <tbody>
-              {creditUsers.map((user) => {
-                const balances = userCreditBalances(user, data);
-                return (
-                  <tr key={user.id}>
-                    <td>
-                      <strong>{user.name}</strong>
-                      <span className="table-subtext">{user.email}</span>
-                    </td>
-                    <td><span className={`badge ${user.role}`}>{roleLabel(user.role)}</span></td>
-                    <td>{money(balances.moneyCreditBalance)}</td>
-                    <td>{money(balances.postCreditBalance)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {!creditUsers.length ? <div className="empty-state">No users available for credit management.</div> : null}
+        <CreditBalanceTable users={creditClientUsers} data={data} emptyMessage="No clients available for credit management." />
       </section>
 
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Processing Payouts</h2>
-            <p>Client releases stay processing until super admin marks them completed.</p>
+            <h2>Bidder Credit Balances</h2>
+            <p>Money credit and post credit available to bidder accounts.</p>
           </div>
-          <span className="badge pending">{processingPayments.length} processing</span>
+        </div>
+        <CreditBalanceTable users={creditBidderUsers} data={data} emptyMessage="No bidders available for credit management." />
+      </section>
+    </div>
+  );
+}
+
+function CreditBalanceTable({
+  users,
+  data,
+  emptyMessage,
+}: {
+  users: PortalUser[];
+  data: PortalData;
+  emptyMessage: string;
+}) {
+  if (!users.length) {
+    return <div className="empty-state">{emptyMessage}</div>;
+  }
+
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Status</th>
+            <th>Money credit</th>
+            <th>Post credit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.map((user) => {
+            const balances = userCreditBalances(user, data);
+            return (
+              <tr key={user.id}>
+                <td>
+                  <strong>{user.name}</strong>
+                  <span className="table-subtext">{user.email}</span>
+                </td>
+                <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
+                <td>{money(balances.moneyCreditBalance)}</td>
+                <td>{money(balances.postCreditBalance)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SuperAdminBillingManagementView({
+  data,
+  onAction,
+}: {
+  data: PortalData;
+  busy: boolean;
+  onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
+  const pendingPayments = data.payments.filter((payment) => payment.status === "processing");
+  const completedPayments = data.payments.filter((payment) => payment.status === "paid");
+
+  async function completePayment(payment: PaymentRecord) {
+    const user = userById(data.users, payment.userId);
+    const label = `${user?.name || "this user"} - ${money(payment.amount)} for ${shortDate(payment.periodStart)} to ${shortDate(payment.periodEnd)}`;
+    if (!window.confirm(`Mark payout completed for ${label}?`)) {
+      return;
+    }
+
+    await onAction("completePayment", { paymentId: payment.id });
+  }
+
+  return (
+    <div className="dashboard-stack">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Pending Payment List</h2>
+            <p>Client releases stay pending until super admin marks them completed.</p>
+          </div>
+          <span className="badge pending">{pendingPayments.length} pending</span>
         </div>
         <PaymentTable
-          payments={processingPayments}
+          payments={pendingPayments}
           users={data.users}
           onComplete={completePayment}
-          emptyMessage="No processing payouts need completion."
+          emptyMessage="No pending payouts need completion."
+        />
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Completed Payment History</h2>
+            <p>Completed bidder payouts and receipt references.</p>
+          </div>
+          <span className="badge paid">{completedPayments.length} completed</span>
+        </div>
+        <PaymentTable
+          payments={completedPayments}
+          users={data.users}
+          emptyMessage="No completed payouts yet."
         />
       </section>
     </div>

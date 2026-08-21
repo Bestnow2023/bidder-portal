@@ -3,7 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 test("keeps the bidder portal as the primary screen", async () => {
-  const [page, operationsPage, settingsPage, chatPage, biddersPage, postsPage, contractsPage, billingPage, layout, portalApp, globals, packageJson] = await Promise.all([
+  const [page, operationsPage, settingsPage, chatPage, biddersPage, postsPage, contractsPage, creditsPage, billingPage, layout, portalApp, globals, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/operations/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/settings/page.tsx", import.meta.url), "utf8"),
@@ -11,6 +11,7 @@ test("keeps the bidder portal as the primary screen", async () => {
     readFile(new URL("../app/bidders/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/posts/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/contracts/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/credits/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/billing/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
@@ -25,6 +26,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(biddersPage, /<PortalApp \/>/);
   assert.match(postsPage, /<PortalApp \/>/);
   assert.match(contractsPage, /<PortalApp \/>/);
+  assert.match(creditsPage, /<PortalApp \/>/);
   assert.match(billingPage, /<PortalApp \/>/);
   assert.match(layout, /Bidder Work Portal/);
   assert.match(layout, /favicon\.png/);
@@ -113,6 +115,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Frequency/);
   assert.match(portalApp, /Weekday/);
   assert.match(portalApp, /Save paid payment/);
+  assert.match(portalApp, /Credit Management/);
+  assert.match(portalApp, /Billing Management/);
   assert.match(portalApp, /Billing/);
   assert.match(portalApp, /Release Payment/);
   assert.match(portalApp, /Release payment/);
@@ -125,7 +129,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Credit balance/);
   assert.match(portalApp, /Open invoice/);
   assert.match(portalApp, /Notification center/);
-  assert.match(portalApp, /Processing Payouts/);
+  assert.match(portalApp, /Pending Payment List/);
+  assert.match(portalApp, /Completed Payment History/);
   assert.match(portalApp, /Mark completed/);
   assert.match(portalApp, /Charge client credit/);
   assert.match(portalApp, /Charge credit/);
@@ -205,6 +210,12 @@ test("declares the requested frontend records", async () => {
     "Send edit request",
     "Payment Method",
     "Payment History",
+    "Credit Management",
+    "Billing Management",
+    "Credit Adjustment",
+    "Client Credit Balances",
+    "Bidder Credit Balances",
+    "Save credit adjustment",
     "Billing",
     "Release Payment",
     "Release payment",
@@ -218,7 +229,8 @@ test("declares the requested frontend records", async () => {
     "Credit Wallet",
     "Create Cryptomus invoice",
     "Notification center",
-    "Processing Payouts",
+    "Pending Payment List",
+    "Completed Payment History",
     "Mark completed",
     "Charge client credit",
     "Credit amount",
@@ -324,6 +336,9 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /canEditContract/);
   assert.match(portalApp, /canSetContractPayday/);
   assert.match(portalApp, /userCreditBalances/);
+  assert.match(portalApp, /SuperAdminCreditManagementView/);
+  assert.match(portalApp, /SuperAdminBillingManagementView/);
+  assert.match(portalApp, /CreditBalanceTable/);
   assert.match(portalApp, /timeZoneOptions/);
   assert.match(portalApp, /client@portal\.local/);
   assert.match(portalApp, /EscrowTable/);
@@ -369,7 +384,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /viewRoutes/);
   assert.match(portalApp, /routeViews/);
   assert.match(portalApp, /navigateToView/);
-  assert.match(portalApp, /\["people", "contracts", "posts", "billing", "chat"\]/);
+  assert.match(portalApp, /\["people", "contracts", "posts", "credits", "billing", "chat"\]/);
   assert.match(portalApp, /UserCreateModal/);
   assert.match(portalApp, /PostEditModal/);
   assert.match(portalApp, /\/bidder-settings/);
@@ -381,6 +396,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /\/posts/);
   assert.match(portalApp, /\/contracts/);
   assert.match(portalApp, /\/disputes/);
+  assert.match(portalApp, /\/credits/);
   assert.match(portalApp, /\/billing/);
   assert.match(portalApp, /aria-haspopup="menu"/);
   assert.match(portalApp, /fixed z-50/);
@@ -418,6 +434,7 @@ test("declares the requested frontend records", async () => {
     "profile/page.tsx",
     "clients/page.tsx",
     "bidders/page.tsx",
+    "credits/page.tsx",
     "billing/page.tsx",
     "people/page.tsx",
     "bidder-settings/page.tsx",
