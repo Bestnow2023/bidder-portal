@@ -268,16 +268,21 @@ export type ChatMessage = {
   userId: string;
   recipientId?: string;
   conversationId?: string;
+  channel?: "direct" | "support" | string;
+  messageType?: "text" | "contract_created" | "contract_accepted" | string;
   authorName: string;
   authorRole: Role;
   body: string;
   attachments?: ChatAttachment[];
   relatedPostId?: string;
+  relatedContractId?: string;
   authorTimeZone?: string;
   createdAt: string;
   updatedAt?: string;
   editedAt?: string;
   editedByUserId?: string;
+  readAt?: string;
+  readByUserId?: string;
   deletedAt?: string;
   deletedByUserId?: string;
 };
@@ -298,4 +303,6 @@ export type PortalData = {
   notifications: PortalNotification[];
   chatContacts?: PortalUser[];
   chatMessages: ChatMessage[];
+  supportContacts?: PortalUser[];
+  supportMessages?: ChatMessage[];
 };

@@ -260,6 +260,26 @@ textarea:focus {
   padding: 6px 10px;
 }
 
+.icon-button {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.icon-button:hover,
+.icon-button:focus-visible {
+  border-color: rgba(15, 118, 110, 0.32);
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.12);
+}
+
 .danger-button {
   background: #fff1ef;
   color: var(--danger);
@@ -958,6 +978,39 @@ td > strong {
   font-size: 12px;
 }
 
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.help-card {
+  min-height: 0;
+}
+
+.support-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.28fr) minmax(0, 0.72fr);
+  gap: 14px;
+}
+
+.support-layout.single {
+  grid-template-columns: 1fr;
+}
+
+.support-list {
+  max-height: 520px;
+}
+
+.conversation-button.active {
+  background: rgba(15, 118, 110, 0.1);
+  border-color: rgba(15, 118, 110, 0.28);
+}
+
+.support-messages {
+  min-height: 420px;
+}
+
 .credit-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1165,6 +1218,18 @@ td > strong {
   font-weight: 900;
 }
 
+.profile-avatar-button {
+  border: 0;
+  cursor: pointer;
+  transition: box-shadow 160ms ease, transform 160ms ease;
+}
+
+.profile-avatar-button:hover,
+.profile-avatar-button:focus-visible {
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.16);
+  transform: translateY(-1px);
+}
+
 .telegram-chat-title h2 {
   margin: 0;
   font-size: 20px;
@@ -1182,6 +1247,10 @@ td > strong {
   gap: 14px;
   min-height: 420px;
   padding: 14px 0;
+}
+
+.inbox-layout.profile-open {
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(280px, 360px);
 }
 
 .conversation-list {
@@ -1281,6 +1350,39 @@ td > strong {
     var(--surface-soft);
 }
 
+.chat-side-panel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  max-height: 660px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 12px;
+}
+
+.chat-side-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: start;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.chat-side-header h3,
+.chat-side-header p {
+  margin: 0;
+}
+
+.chat-side-header p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .chat-context-card {
   display: grid;
   gap: 10px;
@@ -1304,6 +1406,71 @@ td > strong {
 
 .post-context-card {
   background: rgba(232, 246, 243, 0.9);
+}
+
+.chat-contract-history {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.chat-contract-history h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.mini-contract-row {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(242, 247, 245, 0.72);
+  padding: 9px;
+}
+
+.mini-contract-row strong,
+.mini-contract-row span {
+  overflow-wrap: anywhere;
+}
+
+.mini-contract-row span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.chat-contract-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 11px;
+}
+
+.chat-contract-card h3,
+.chat-contract-card p {
+  margin: 0;
+}
+
+.chat-contract-card p {
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.compact-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+
+.compact-metrics span {
+  min-height: 58px;
+}
+
+.compact-metrics strong {
+  font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 .message-row {
@@ -1660,7 +1827,9 @@ td > strong {
   .settings-grid,
   .profile-detail-grid,
   .credit-strip,
-  .bid-profile-grid {
+  .bid-profile-grid,
+  .help-grid,
+  .support-layout {
     grid-template-columns: 1fr;
   }
 
@@ -1680,6 +1849,14 @@ td > strong {
 
   .inbox-layout {
     grid-template-columns: 1fr;
+  }
+
+  .inbox-layout.profile-open {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-side-panel {
+    max-height: none;
   }
 
   .conversation-list {

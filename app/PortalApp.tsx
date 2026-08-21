@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import type {
   ChatAttachment,
@@ -26,7 +26,7 @@ import type {
 } from "./portal-types";
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
-type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "people" | "bidderSettings" | "work" | "credits" | "billing" | "payments" | "chat";
+type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "people" | "bidderSettings" | "work" | "credits" | "billing" | "payments" | "chat" | "help";
 
 const payoutCurrencies = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB"];
 const payoutNetworkOptions = [
@@ -143,6 +143,7 @@ const viewRoutes: Record<PortalView, string> = {
   billing: "/billing",
   payments: "/payments",
   chat: "/chat",
+  help: "/help",
 };
 const routeViews: Record<string, PortalView> = {
   "/operations": "overview",
@@ -161,6 +162,7 @@ const routeViews: Record<string, PortalView> = {
   "/billing": "billing",
   "/payments": "payments",
   "/chat": "chat",
+  "/help": "help",
 };
 
 function DigniwareLogo({
@@ -252,6 +254,22 @@ function dateTimeInZone(value: string, timeZone: string) {
   } catch {
     return dateTime(value);
   }
+}
+
+function timeZoneDisplay(timeZone?: string, value = new Date().toISOString()) {
+  if (!timeZone) {
+    return "Not set";
+  }
+
+  try {
+    return `${timeZone} - ${dateTimeInZone(value, timeZone)}`;
+  } catch {
+    return timeZone;
+  }
+}
+
+function memberTimeLabel(user?: PortalUser | null) {
+  return user ? `${userDisplayName(user)} time` : "Member time";
 }
 
 function browserTimeZone() {
@@ -402,6 +420,9 @@ function viewTitle(view: string, user?: PortalUser) {
   if (user && isSuperAdminRole(user.role) && view === "billing") {
     return "Billing Management";
   }
+  if (user && isSuperAdminRole(user.role) && view === "help") {
+    return "Help Center";
+  }
 
   const titles: Record<string, string> = {
     dashboard: "Dashboard",
@@ -418,6 +439,7 @@ function viewTitle(view: string, user?: PortalUser) {
     billing: "Billing",
     payments: "Payments",
     chat: "Inbox",
+    help: "Help",
   };
   return titles[view] || "Portal";
 }
@@ -436,6 +458,7 @@ function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
     const superAdminSubtitles: Record<string, string> = {
       credits: "Add, deduct, and audit money credit and post credit by client and bidder.",
       billing: "Review pending payout releases and completed payout history.",
+      help: "Review platform guidance and handle support messages from users.",
     };
 
     if (superAdminSubtitles[view]) {
@@ -457,6 +480,7 @@ function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
     billing: "Deposit credits and release bidder payouts through Cryptomus.",
     payments: "Record payouts, review payment methods, and track client escrow.",
     chat: "Client-bidder direct messaging with super admin monitoring.",
+    help: "Learn how the portal works and contact support.",
   };
 
   return subtitles[view] || "Manage the bidder portal.";
@@ -464,18 +488,18 @@ function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
 
 function viewsForUser(user: PortalUser): PortalView[] {
   if (isSuperAdminRole(user.role)) {
-    return ["people", "contracts", "posts", "credits", "billing", "chat"];
+    return ["people", "contracts", "posts", "credits", "billing", "chat", "help"];
   }
 
   if (isClientRole(user.role)) {
-    return ["overview", "profile", "bidders", "posts", "contracts", "work", "billing", "chat"];
+    return ["overview", "profile", "bidders", "posts", "contracts", "work", "billing", "chat", "help"];
   }
 
   if (user.role === "bidder") {
-    return ["dashboard", "profile", "clients", "posts", "contracts", "work", "payments", "chat"];
+    return ["dashboard", "profile", "clients", "posts", "contracts", "work", "payments", "chat", "help"];
   }
 
-  return ["profile", "contracts", "payments", "chat"];
+  return ["profile", "contracts", "payments", "chat", "help"];
 }
 
 function safeViewForUser(user: PortalUser, view: PortalView) {
@@ -613,6 +637,10 @@ function chatConversationIdForMessage(message: ChatMessage) {
   return message.recipientId ? inboxConversationId(message.userId, message.recipientId) : "";
 }
 
+function supportConversationIdForUser(userId: string) {
+  return `support__${userId}`;
+}
+
 function initialsForName(name: string) {
   const initials = name
     .split(/\s+/)
@@ -696,6 +724,7 @@ function userMatchesSearch(user: PortalUser, query: string) {
   }
 
   return [
+    user.id,
     user.name,
     user.email,
     roleLabel(user.role),
@@ -1161,10 +1190,8 @@ export default function PortalApp() {
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [portalNavVisible, setPortalNavVisible] = useState(true);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(() =>
-    typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted"
-  );
   const latestChatMessageIdRef = useRef("");
+  const notificationRequestAttemptedRef = useRef(false);
   const lastScrollYRef = useRef(0);
   const effectiveActiveView = data ? safeViewForUser(data.currentUser, activeView) : activeView;
 
@@ -1445,6 +1472,19 @@ export default function PortalApp() {
   }, [chatUnreadCount]);
 
   useEffect(() => {
+    if (!data || typeof window === "undefined" || !("Notification" in window)) {
+      return;
+    }
+
+    if (Notification.permission !== "default" || notificationRequestAttemptedRef.current) {
+      return;
+    }
+
+    notificationRequestAttemptedRef.current = true;
+    void Notification.requestPermission().catch(() => undefined);
+  }, [data?.currentUser.id, data]);
+
+  useEffect(() => {
     if (!data || typeof window === "undefined") {
       return;
     }
@@ -1456,15 +1496,6 @@ export default function PortalApp() {
       window.history.replaceState({}, "", nextPath);
     }
   }, [activeView, data]);
-
-  async function enableChatNotifications() {
-    if (typeof window === "undefined" || !("Notification" in window)) {
-      return;
-    }
-
-    const permission = await Notification.requestPermission();
-    setNotificationsEnabled(permission === "granted");
-  }
 
   async function postAction(action: string, payload: Record<string, unknown> = {}) {
     if (!data && action !== "signIn" && action !== "signUp" && action !== "resetPassword") {
@@ -1757,7 +1788,7 @@ export default function PortalApp() {
   const isSuperAdmin = isSuperAdminRole(currentUser.role);
   const canViewManaged = canViewManagedRecords(currentUser.role);
   const availableViews = viewsForUser(currentUser);
-  const navViews = availableViews.filter((view) => view !== "profile");
+  const navViews = availableViews.filter((view) => view !== "profile" && view !== "help");
   const safeView = safeViewForUser(currentUser, activeView);
   const mustCompleteProfile = currentUser.status === "approved" && !isProfileComplete(currentUser);
   const portalNotifications = data.notifications || [];
@@ -1854,6 +1885,7 @@ export default function PortalApp() {
               showAccountSettings={!isSuperAdmin}
               onProfileSettings={() => goToView("profile")}
               onSecurity={() => goToView("profile")}
+              onHelp={() => goToView("help")}
               onSignOut={signOut}
             />
           </div>
@@ -1886,7 +1918,7 @@ export default function PortalApp() {
             {safeView === "overview" && canViewManaged ? <AdminOverview data={data} /> : null}
             {safeView === "profile" ? <ProfileView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "clients" ? <ClientDirectoryView data={data} onMessageClient={openInboxForUser} /> : null}
-            {safeView === "bidders" ? <BiddersDirectoryView data={data} busy={busy} onAction={postAction} onMessageBidder={openInboxForUser} /> : null}
+            {safeView === "bidders" ? <BiddersDirectoryView data={data} onMessageBidder={openInboxForUser} /> : null}
             {safeView === "posts" ? <PostsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
             {safeView === "contracts" ? <ContractsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
             {safeView === "people" && isSuperAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
@@ -1895,12 +1927,11 @@ export default function PortalApp() {
             {safeView === "work" ? <WorkView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "credits" && isSuperAdmin ? <SuperAdminCreditManagementView data={data} busy={busy} onAction={postAction} /> : null}
             {safeView === "billing" || safeView === "payments" ? <PaymentsView data={data} busy={busy} onAction={postAction} /> : null}
+            {safeView === "help" ? <HelpView data={data} busy={busy} onSend={postAction} /> : null}
             {safeView === "chat" ? (
               <ChatView
                 data={data}
                 busy={busy}
-                notificationsEnabled={notificationsEnabled}
-                onEnableNotifications={enableChatNotifications}
                 onSend={postAction}
                 requestedRecipientId={chatRecipientId}
                 requestedPostId={chatPostId}
@@ -1983,12 +2014,14 @@ function AccountMenu({
   showAccountSettings,
   onProfileSettings,
   onSecurity,
+  onHelp,
   onSignOut,
 }: {
   user: PortalUser;
   showAccountSettings: boolean;
   onProfileSettings: () => void;
   onSecurity: () => void;
+  onHelp: () => void;
   onSignOut: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -2060,6 +2093,9 @@ function AccountMenu({
               </button>
             </>
           ) : null}
+          <button type="button" role="menuitem" onClick={() => choose(onHelp)}>
+            Help
+          </button>
           <button type="button" role="menuitem" className="danger" onClick={() => choose(onSignOut)}>
             Sign out
           </button>
@@ -2263,9 +2299,12 @@ function ProfileView({
             <h2>Profile Settings</h2>
             <p>Complete the profile that matched clients and bidders can view.</p>
           </div>
-          <span className={`badge ${isProfileComplete(user) ? "approved" : "pending"}`}>
-            {isProfileComplete(user) ? "Complete" : "Incomplete"}
-          </span>
+          <div className="badge-row">
+            <span className="badge">User ID: {user.id}</span>
+            <span className={`badge ${isProfileComplete(user) ? "approved" : "pending"}`}>
+              {isProfileComplete(user) ? "Complete" : "Incomplete"}
+            </span>
+          </div>
         </div>
 
         <form className="form-grid" onSubmit={submit}>
@@ -2305,7 +2344,7 @@ function ProfileView({
               required
             >
               {profileTimeZoneOptions.map((timeZone) => (
-                <option key={timeZone} value={timeZone}>{timeZone}</option>
+                <option key={timeZone} value={timeZone}>{timeZoneDisplay(timeZone)}</option>
               ))}
             </select>
           </label>
@@ -3055,13 +3094,9 @@ function ClientDirectoryView({
 
 function BiddersDirectoryView({
   data,
-  busy,
-  onAction,
   onMessageBidder,
 }: {
   data: PortalData;
-  busy: boolean;
-  onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
   onMessageBidder: (bidderId: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -3070,20 +3105,25 @@ function BiddersDirectoryView({
     .filter((user) => user.role === "bidder" && user.status === "approved")
     .filter((user) => userMatchesSearch(user, query))
     .sort((left, right) => {
-      const leftAvailable = !left.assignedAdminId || left.assignedAdminId === data.currentUser.id;
-      const rightAvailable = !right.assignedAdminId || right.assignedAdminId === data.currentUser.id;
-      if (leftAvailable !== rightAvailable) return leftAvailable ? -1 : 1;
+      const leftActiveCount = contractsForBidder(left).filter((contract) => contract.status === "active").length;
+      const rightActiveCount = contractsForBidder(right).filter((contract) => contract.status === "active").length;
+      if (leftActiveCount !== rightActiveCount) return leftActiveCount - rightActiveCount;
       return left.name.localeCompare(right.name);
     });
 
+  function contractsForBidder(user: PortalUser) {
+    return (data.contracts || []).filter((contract) => contract.workerId === user.id);
+  }
+
   function contractStatus(user: PortalUser) {
-    if (!user.assignedAdminId) {
+    const activeContracts = contractsForBidder(user).filter((contract) => contract.status === "active");
+    if (!activeContracts.length) {
       return { label: "Available", className: "approved" };
     }
-    if (user.assignedAdminId === data.currentUser.id) {
-      return { label: "Contracting with you", className: "bidder" };
+    if (activeContracts.some((contract) => contract.clientId === data.currentUser.id)) {
+      return { label: `Working with you (${activeContracts.length})`, className: "bidder" };
     }
-    return { label: "Contracted with another client", className: "pending" };
+    return { label: `Currently working (${activeContracts.length})`, className: "pending" };
   }
 
   const selectedBidderWorkLogs = selectedBidder
@@ -3092,23 +3132,15 @@ function BiddersDirectoryView({
   const selectedBidderPayments = selectedBidder
     ? data.payments.filter((payment) => payment.userId === selectedBidder.id).slice(0, 8)
     : [];
-  const clientBidProfiles = (data.bidProfiles || []).filter((profile) => profile.clientId === data.currentUser.id);
-  const selectedBidderAttachedProfiles = selectedBidder
-    ? clientBidProfiles.filter((profile) => (profile.assignedBidderIds || []).includes(selectedBidder.id))
+  const selectedBidderContracts = selectedBidder
+    ? contractsForBidder(selectedBidder)
     : [];
+  const selectedBidderCurrentContracts = selectedBidderContracts.filter((contract) => ["requested", "active"].includes(contract.status));
+  const selectedBidderPastContracts = selectedBidderContracts.filter((contract) => ["rejected", "ended"].includes(contract.status));
 
   function messageSelectedBidder(bidder: PortalUser) {
     setSelectedBidder(null);
     onMessageBidder(bidder.id);
-  }
-
-  async function toggleBidProfileForBidder(profile: BidProfileRecord, bidder: PortalUser) {
-    const assigned = (profile.assignedBidderIds || []).includes(bidder.id);
-    await onAction("assignBidProfile", {
-      bidProfileId: profile.id,
-      bidderId: bidder.id,
-      assigned: !assigned,
-    });
   }
 
   return (
@@ -3220,59 +3252,29 @@ function BiddersDirectoryView({
                 <h3>Reviews</h3>
                 <p>No written reviews yet.</p>
               </article>
-              <article className="profile-card bid-profile-card">
-                <h3>Attached Bid Profiles</h3>
-                {selectedBidderAttachedProfiles.length ? (
-                  <div className="badge-row">
-                    {selectedBidderAttachedProfiles.map((profile) => (
-                      <span className="badge bidder" key={profile.id}>{profile.profileName}</span>
-                    ))}
-                  </div>
-                ) : (
-                  <p>No bid profiles attached.</p>
-                )}
-              </article>
-            </div>
-
-            {clientBidProfiles.length ? (
-              <section className="panel nested-panel" style={{ marginBottom: 18 }}>
-                <div className="panel-header">
-                  <div>
-                    <h2>Attach Bid Profiles</h2>
-                    <p>Choose which client bid profiles this bidder can use.</p>
-                  </div>
+              <article className="profile-card">
+                <h3>Contract History</h3>
+                <div className="mini-metrics">
+                  <span><strong>{selectedBidderCurrentContracts.length}</strong> current</span>
+                  <span><strong>{selectedBidderPastContracts.length}</strong> past</span>
                 </div>
-                <div className="bid-profile-grid">
-                  {clientBidProfiles.map((profile) => {
-                    const assigned = (profile.assignedBidderIds || []).includes(selectedBidder.id);
+                <div className="payment-method-list compact-list">
+                  {selectedBidderCurrentContracts.slice(0, 4).map((contract) => {
+                    const client = userById(data.users, contract.clientId);
                     return (
-                      <article className="profile-card bid-profile-card" key={profile.id}>
-                        <div className="person-title">
-                          <div>
-                            <h3>{profile.profileName}</h3>
-                            <span className="table-subtext">{profile.fullLegalName} - {profile.contactEmail}</span>
-                          </div>
-                          <span className={`badge ${assigned ? "approved" : "pending"}`}>{assigned ? "Attached" : "Not attached"}</span>
+                      <div className="payment-row compact" key={contract.id}>
+                        <div>
+                          <strong>{contract.title}</strong>
+                          <span className="table-subtext">Contract ID: {contract.id}</span>
+                          <span className="muted">{client?.name || "Client"} - {contractStatusLabel(contract.status)} - next payday {shortDate(contract.nextPaymentDate)}</span>
                         </div>
-                        <div className="badge-row">
-                          {profile.jobTitles.slice(0, 3).map((title) => (
-                            <span className="badge" key={title}>{title}</span>
-                          ))}
-                        </div>
-                        <button
-                          className={assigned ? "ghost-button compact-button" : "primary-button compact-button"}
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void toggleBidProfileForBidder(profile, selectedBidder)}
-                        >
-                          {assigned ? "Remove from bidder" : "Attach to bidder"}
-                        </button>
-                      </article>
+                      </div>
                     );
                   })}
+                  {!selectedBidderCurrentContracts.length ? <div className="empty-state compact">No current contracts.</div> : null}
                 </div>
-              </section>
-            ) : null}
+              </article>
+            </div>
 
             <div className="two-column">
               <section className="panel nested-panel">
@@ -3317,6 +3319,47 @@ function BiddersDirectoryView({
                 </div>
               </section>
             </div>
+            <section className="panel nested-panel">
+              <div className="panel-header">
+                <div>
+                  <h2>Past Contract History</h2>
+                  <p>Completed or rejected contracts connected to this bidder.</p>
+                </div>
+              </div>
+              {selectedBidderPastContracts.length ? (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Contract ID</th>
+                        <th>Contract</th>
+                        <th>Client</th>
+                        <th>Status</th>
+                        <th>Started</th>
+                        <th>Updated</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedBidderPastContracts.map((contract) => {
+                        const client = userById(data.users, contract.clientId);
+                        return (
+                          <tr key={contract.id}>
+                            <td><span className="table-subtext">{contract.id}</span></td>
+                            <td>{contract.title}</td>
+                            <td>{client?.name || "Client"}</td>
+                            <td><span className={`badge ${contractStatusClass(contract.status)}`}>{contractStatusLabel(contract.status)}</span></td>
+                            <td>{shortDate(contract.startDate)}</td>
+                            <td>{dateTime(contract.updatedAt)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty-state compact">No past contracts yet.</div>
+              )}
+            </section>
         </ModalFrame>
       ) : null}
     </section>
@@ -3864,7 +3907,7 @@ function ContractsView({
   const currentUser = data.currentUser;
   const canCreateContract = !isSuperAdminRole(currentUser.role) && (isClientRole(currentUser.role) || isWorkerUser(currentUser));
   const targets = isClientRole(currentUser.role)
-    ? workerUsers(data.users).filter((user) => !user.assignedAdminId || user.assignedAdminId === currentUser.id)
+    ? workerUsers(data.users)
     : clientUsers(data.users);
   const [draft, setDraft] = useState({
     targetUserId: targets[0]?.id || "",
@@ -3881,7 +3924,9 @@ function ContractsView({
   const [editingContract, setEditingContract] = useState<ContractRecord | null>(null);
   const [paydayContract, setPaydayContract] = useState<ContractRecord | null>(null);
   const [paydayDate, setPaydayDate] = useState("");
-  const contracts = data.contracts || [];
+  const contracts = isSuperAdminRole(currentUser.role)
+    ? data.contracts || []
+    : (data.contracts || []).filter((contract) => contract.clientId === currentUser.id || contract.workerId === currentUser.id);
 
   async function submitContract(event: FormEvent) {
     event.preventDefault();
@@ -3947,6 +3992,30 @@ function ContractsView({
     await onAction("updateContractStatus", { contractId: contract.id, status });
   }
 
+  function contractActionItems(contract: ContractRecord): ActionMenuItem[] {
+    const counterparty = contractCounterparty(contract);
+    return [
+      ...(!isSuperAdminRole(currentUser.role) && counterparty?.allowDirectMessages !== false
+        ? [{ label: "Message", onClick: () => counterparty && onMessageUser(counterparty.id) }]
+        : []),
+      ...(canAcceptContract(contract)
+        ? [{ label: "Accept", disabled: busy, onClick: () => void updateContract(contract, "active") }]
+        : []),
+      ...(canEditContract(contract)
+        ? [{ label: "Edit", disabled: busy, onClick: () => setEditingContract(contract) }]
+        : []),
+      ...(canSetContractPayday(contract)
+        ? [{ label: "Set payday", disabled: busy, onClick: () => openPaydayModal(contract) }]
+        : []),
+      ...(canRejectContract(contract)
+        ? [{ label: "Reject", disabled: busy, onClick: () => void updateContract(contract, "rejected") }]
+        : []),
+      ...(canEndContract(contract)
+        ? [{ label: "End contract", disabled: busy, onClick: () => void updateContract(contract, "ended") }]
+        : []),
+    ];
+  }
+
   function openPaydayModal(contract: ContractRecord) {
     setPaydayContract(contract);
     setPaydayDate(contract.nextPaymentDate || contractNextPaymentDateDefault(contract.paymentFrequency, contract.paymentWeekday, contract.startDate));
@@ -3992,77 +4061,95 @@ function ContractsView({
           </div>
           <span className="badge">{contracts.length} contracts</span>
         </div>
-        <div className="contract-grid">
-          {contracts.map((contract) => {
-            const client = userById(data.users, contract.clientId);
-            const worker = userById(data.users, contract.workerId);
-            const counterparty = contractCounterparty(contract);
-            const requester = userById(data.users, contract.requestedByUserId);
-            const connectedClient = currentUser.id === worker?.id ? client : null;
-            const connectedClientBalances = connectedClient?.creditBalances;
-            return (
-              <article className="profile-card contract-card" key={contract.id}>
-                <div className="person-title">
-                  <div>
-                    <h3>{contract.title}</h3>
-                    <span className="table-subtext">{client?.name || "Client"} / {worker?.name || "Bidder"}</span>
+        {isSuperAdminRole(currentUser.role) ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Contract ID</th>
+                  <th>Contract</th>
+                  <th>Client</th>
+                  <th>Bidder</th>
+                  <th>Status</th>
+                  <th>Rate</th>
+                  <th>Schedule</th>
+                  <th>Next payday</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {contracts.map((contract) => {
+                  const client = userById(data.users, contract.clientId);
+                  const worker = userById(data.users, contract.workerId);
+                  const actions = contractActionItems(contract);
+                  return (
+                    <tr key={contract.id}>
+                      <td><span className="table-subtext">{contract.id}</span></td>
+                      <td>
+                        <strong>{contract.title}</strong>
+                        <span className="table-subtext">{contract.criteria || "No criteria"}</span>
+                      </td>
+                      <td>{client?.name || "Client"}</td>
+                      <td>{worker?.name || "Bidder"}</td>
+                      <td><span className={`badge ${contractStatusClass(contract.status)}`}>{contractStatusLabel(contract.status)}</span></td>
+                      <td>
+                        {money(contract.ratePerApplication || 0)}
+                        <span className="table-subtext">Bonus {money(contract.bonusPerInterview || 0)}</span>
+                      </td>
+                      <td>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday) || "Not set"}</td>
+                      <td>{shortDate(contract.nextPaymentDate)}</td>
+                      <td>{actions.length ? <ActionMenu items={actions} /> : "-"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="contract-grid">
+            {contracts.map((contract) => {
+              const client = userById(data.users, contract.clientId);
+              const worker = userById(data.users, contract.workerId);
+              const requester = userById(data.users, contract.requestedByUserId);
+              const connectedClient = currentUser.id === worker?.id ? client : null;
+              const connectedClientBalances = connectedClient?.creditBalances;
+              const actions = contractActionItems(contract);
+              return (
+                <article className="profile-card contract-card" key={contract.id}>
+                  <div className="person-title">
+                    <div>
+                      <h3>{contract.title}</h3>
+                      <span className="table-subtext">Contract ID: {contract.id}</span>
+                      <span className="table-subtext">{client?.name || "Client"} / {worker?.name || "Bidder"}</span>
+                    </div>
+                    <span className={`badge ${contractStatusClass(contract.status)}`}>{contractStatusLabel(contract.status)}</span>
                   </div>
-                  <span className={`badge ${contractStatusClass(contract.status)}`}>{contractStatusLabel(contract.status)}</span>
-                </div>
-                <p>{contract.criteria}</p>
-                <div className="mini-metrics">
-                  <span><strong>{money(contract.ratePerApplication || 0)}</strong> rate</span>
-                  <span><strong>{money(contract.bonusPerInterview || 0)}</strong> bonus</span>
-                  <span><strong>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday)}</strong> schedule</span>
-                  <span><strong>{shortDate(contract.nextPaymentDate)}</strong> next payday</span>
-                  <span><strong>{shortDate(contract.startDate)}</strong> start</span>
-                </div>
-                <p className="muted">
-                  Requested by {requester?.name || "Unknown"} on {dateTime(contract.createdAt)}
-                  {contract.acceptedAt ? ` - accepted ${dateTime(contract.acceptedAt)}` : ""}
-                </p>
-                {connectedClientBalances ? (
-                  <div className="connected-credit">
-                    <strong>Connected client credit</strong>
-                    <CreditBalanceStrip balances={connectedClientBalances} />
+                  <p>{contract.criteria}</p>
+                  <div className="mini-metrics">
+                    <span><strong>{money(contract.ratePerApplication || 0)}</strong> rate</span>
+                    <span><strong>{money(contract.bonusPerInterview || 0)}</strong> bonus</span>
+                    <span><strong>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday)}</strong> schedule</span>
+                    <span><strong>{shortDate(contract.nextPaymentDate)}</strong> next payday</span>
+                    <span><strong>{shortDate(contract.startDate)}</strong> start</span>
                   </div>
-                ) : null}
-                <div className="actions">
-                  {counterparty?.allowDirectMessages === false ? null : (
-                    <button className="ghost-button compact-button" type="button" onClick={() => counterparty && onMessageUser(counterparty.id)}>
-                      Message
-                    </button>
-                  )}
-                  {canAcceptContract(contract) ? (
-                    <button className="primary-button compact-button" type="button" disabled={busy} onClick={() => updateContract(contract, "active")}>
-                      Accept
-                    </button>
+                  <p className="muted">
+                    Requested by {requester?.name || "Unknown"} on {dateTime(contract.createdAt)}
+                    {contract.acceptedAt ? ` - accepted ${dateTime(contract.acceptedAt)}` : ""}
+                  </p>
+                  {connectedClientBalances ? (
+                    <div className="connected-credit">
+                      <strong>Connected client credit</strong>
+                      <CreditBalanceStrip balances={connectedClientBalances} />
+                    </div>
                   ) : null}
-                  {canEditContract(contract) ? (
-                    <button className="ghost-button compact-button" type="button" disabled={busy} onClick={() => setEditingContract(contract)}>
-                      Edit contract
-                    </button>
-                  ) : null}
-                  {canSetContractPayday(contract) ? (
-                    <button className="ghost-button compact-button" type="button" disabled={busy} onClick={() => openPaydayModal(contract)}>
-                      Set payday
-                    </button>
-                  ) : null}
-                  {canRejectContract(contract) ? (
-                    <button className="ghost-button compact-button" type="button" disabled={busy} onClick={() => updateContract(contract, "rejected")}>
-                      Reject
-                    </button>
-                  ) : null}
-                  {canEndContract(contract) ? (
-                    <button className="ghost-button compact-button" type="button" disabled={busy} onClick={() => updateContract(contract, "ended")}>
-                      End contract
-                    </button>
-                  ) : null}
-                </div>
-              </article>
-            );
-          })}
-        </div>
+                  <div className="actions">
+                    {actions.length ? <ActionMenu items={actions} /> : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
         {!contracts.length ? <div className="empty-state">No contracts yet.</div> : null}
       </section>
       <DisputesView data={data} busy={busy} onAction={onAction} embedded />
@@ -4501,9 +4588,10 @@ function PeopleView({
 }) {
   const [editingUser, setEditingUser] = useState<PortalUser | null>(null);
   const [creatingUser, setCreatingUser] = useState(false);
+  const [query, setQuery] = useState("");
   const canManageRoles = data.currentUser.role === "super_admin";
   const adminUsers = data.users.filter((user) => isClientRole(user.role) && user.status === "approved");
-  const visibleUsers = canManageRoles ? data.users : data.users.filter(isWorkerUser);
+  const visibleUsers = (canManageRoles ? data.users : data.users.filter(isWorkerUser)).filter((user) => userMatchesSearch(user, query));
 
   async function updateUser(user: PortalUser, changes: Partial<Pick<PortalUser, "name" | "role" | "status" | "assignedAdminId">>) {
     await onSave("updateUser", {
@@ -4538,11 +4626,19 @@ function PeopleView({
         </button>
       </div>
 
+      <div className="filter-bar">
+        <label className="field">
+          <span>Search people</span>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, email, user ID" />
+        </label>
+      </div>
+
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
               <th>User</th>
+              <th>User ID</th>
               <th>Role</th>
               <th>Status</th>
               <th>Assigned client</th>
@@ -4559,6 +4655,7 @@ function PeopleView({
                   <strong>{user.name}</strong>
                   <span className="table-subtext">{user.email}</span>
                 </td>
+                <td><span className="table-subtext">{user.id}</span></td>
                 <td><span className={`badge ${user.role}`}>{roleLabel(user.role)}</span></td>
                 <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
                 <td>{assignedClientName(data.users, user)}</td>
@@ -4603,6 +4700,7 @@ function PeopleView({
           </tbody>
         </table>
       </div>
+      {!visibleUsers.length ? <div className="empty-state compact">No people match this search.</div> : null}
 
       {editingUser ? (
         <UserEditModal
@@ -5878,88 +5976,24 @@ function SuperAdminCreditManagementView({
 }) {
   const creditClientUsers = data.users.filter((user) => isClientRole(user.role));
   const creditBidderUsers = data.users.filter((user) => user.role === "bidder");
-  const creditUsers = [...creditClientUsers, ...creditBidderUsers];
-  const [draft, setDraft] = useState({
-    targetUserId: creditUsers[0]?.id || "",
-    creditType: "money",
-    direction: "add",
-    amount: "",
-    referenceLink: "",
-    memo: "",
-  });
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    const nextData = await onAction("adjustCredit", {
-      targetUserId: draft.targetUserId,
-      creditType: draft.creditType,
-      direction: draft.direction,
-      amount: Number(draft.amount),
-      referenceLink: draft.referenceLink,
-      memo: draft.memo,
-    });
-    if (nextData) {
-      setDraft({ ...draft, amount: "", referenceLink: "", memo: "" });
-    }
-  }
+  const [query, setQuery] = useState("");
+  const [selectedCreditUser, setSelectedCreditUser] = useState<PortalUser | null>(null);
+  const filteredClientUsers = creditClientUsers.filter((user) => userMatchesSearch(user, query));
+  const filteredBidderUsers = creditBidderUsers.filter((user) => userMatchesSearch(user, query));
 
   return (
     <div className="dashboard-stack">
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Credit Adjustment</h2>
-            <p>Add or deduct money credit and post credit for clients and bidders.</p>
+            <h2>Credit Management</h2>
+            <p>Select a client or bidder to add or deduct money credit and post credit.</p>
           </div>
         </div>
-        <form className="form-grid" onSubmit={submit}>
-          <label className="field full">
-            <span>User</span>
-            <select value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value })} required>
-              <optgroup label="Clients">
-                {creditClientUsers.map((user) => (
-                  <option key={user.id} value={user.id}>{user.name} - {roleLabel(user.role)}</option>
-                ))}
-              </optgroup>
-              <optgroup label="Bidders">
-                {creditBidderUsers.map((user) => (
-                  <option key={user.id} value={user.id}>{user.name} - {roleLabel(user.role)}</option>
-                ))}
-              </optgroup>
-            </select>
-          </label>
-          <label className="field">
-            <span>Credit type</span>
-            <select value={draft.creditType} onChange={(event) => setDraft({ ...draft, creditType: event.target.value })}>
-              <option value="money">Money credit</option>
-              <option value="post">Post credit</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Action</span>
-            <select value={draft.direction} onChange={(event) => setDraft({ ...draft, direction: event.target.value })}>
-              <option value="add">Add</option>
-              <option value="deduct">Deduct</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Amount</span>
-            <input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} required />
-          </label>
-          <label className="field">
-            <span>Reference link</span>
-            <input value={draft.referenceLink} onChange={(event) => setDraft({ ...draft, referenceLink: event.target.value })} placeholder="Optional receipt or note link" />
-          </label>
-          <label className="field full">
-            <span>Memo</span>
-            <textarea value={draft.memo} onChange={(event) => setDraft({ ...draft, memo: event.target.value })} />
-          </label>
-          <div className="actions full">
-            <button className="primary-button" type="submit" disabled={busy || !creditUsers.length}>
-              Save credit adjustment
-            </button>
-          </div>
-        </form>
+        <label className="field">
+          <span>Search by name, email, or user ID</span>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, email, user ID" />
+        </label>
       </section>
 
       <section className="panel">
@@ -5969,7 +6003,12 @@ function SuperAdminCreditManagementView({
             <p>Money credit and post credit available to client accounts.</p>
           </div>
         </div>
-        <CreditBalanceTable users={creditClientUsers} data={data} emptyMessage="No clients available for credit management." />
+        <CreditBalanceTable
+          users={filteredClientUsers}
+          data={data}
+          emptyMessage="No clients match this search."
+          onSelect={setSelectedCreditUser}
+        />
       </section>
 
       <section className="panel">
@@ -5979,8 +6018,28 @@ function SuperAdminCreditManagementView({
             <p>Money credit and post credit available to bidder accounts.</p>
           </div>
         </div>
-        <CreditBalanceTable users={creditBidderUsers} data={data} emptyMessage="No bidders available for credit management." />
+        <CreditBalanceTable
+          users={filteredBidderUsers}
+          data={data}
+          emptyMessage="No bidders match this search."
+          onSelect={setSelectedCreditUser}
+        />
       </section>
+
+      {selectedCreditUser ? (
+        <CreditAdjustmentModal
+          user={selectedCreditUser}
+          data={data}
+          busy={busy}
+          onClose={() => setSelectedCreditUser(null)}
+          onSave={async (payload) => {
+            const nextData = await onAction("adjustCredit", payload);
+            if (nextData) {
+              setSelectedCreditUser(null);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -5989,10 +6048,12 @@ function CreditBalanceTable({
   users,
   data,
   emptyMessage,
+  onSelect,
 }: {
   users: PortalUser[];
   data: PortalData;
   emptyMessage: string;
+  onSelect?: (user: PortalUser) => void;
 }) {
   if (!users.length) {
     return <div className="empty-state">{emptyMessage}</div>;
@@ -6004,6 +6065,7 @@ function CreditBalanceTable({
         <thead>
           <tr>
             <th>User</th>
+            <th>User ID</th>
             <th>Status</th>
             <th>Money credit</th>
             <th>Post credit</th>
@@ -6013,11 +6075,12 @@ function CreditBalanceTable({
           {users.map((user) => {
             const balances = userCreditBalances(user, data);
             return (
-              <tr key={user.id}>
+              <tr className={onSelect ? "clickable-row" : ""} key={user.id} onClick={() => onSelect?.(user)}>
                 <td>
                   <strong>{user.name}</strong>
                   <span className="table-subtext">{user.email}</span>
                 </td>
+                <td><span className="table-subtext">{user.id}</span></td>
                 <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
                 <td>{money(balances.moneyCreditBalance)}</td>
                 <td>{money(balances.postCreditBalance)}</td>
@@ -6030,8 +6093,98 @@ function CreditBalanceTable({
   );
 }
 
+function CreditAdjustmentModal({
+  user,
+  data,
+  busy,
+  onClose,
+  onSave,
+}: {
+  user: PortalUser;
+  data: PortalData;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const balances = userCreditBalances(user, data);
+  const [draft, setDraft] = useState({
+    creditType: "money",
+    direction: "add",
+    amount: "",
+    referenceLink: "",
+    memo: "",
+  });
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSave({
+      targetUserId: user.id,
+      creditType: draft.creditType,
+      direction: draft.direction,
+      amount: Number(draft.amount),
+      referenceLink: draft.referenceLink,
+      memo: draft.memo,
+    });
+  }
+
+  return (
+    <ModalFrame title="Credit Adjustment" subtitle="Add or deduct credit for the selected account." onClose={onClose}>
+      <form className="form-grid" onSubmit={submit}>
+        <div className="status-strip compact full">
+          {user.name} - {roleLabel(user.role)} - User ID: {user.id}
+        </div>
+        <div className="metric-grid full" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+          <div className="metric">
+            <span>Money credit</span>
+            <strong>{money(balances.moneyCreditBalance)}</strong>
+          </div>
+          <div className="metric">
+            <span>Post credit</span>
+            <strong>{money(balances.postCreditBalance)}</strong>
+          </div>
+        </div>
+        <label className="field">
+          <span>Credit type</span>
+          <select value={draft.creditType} onChange={(event) => setDraft({ ...draft, creditType: event.target.value })}>
+            <option value="money">Money credit</option>
+            <option value="post">Post credit</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Action</span>
+          <select value={draft.direction} onChange={(event) => setDraft({ ...draft, direction: event.target.value })}>
+            <option value="add">Add</option>
+            <option value="deduct">Deduct</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Amount</span>
+          <input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} required />
+        </label>
+        <label className="field">
+          <span>Reference link</span>
+          <input value={draft.referenceLink} onChange={(event) => setDraft({ ...draft, referenceLink: event.target.value })} placeholder="Optional receipt or note link" />
+        </label>
+        <label className="field full">
+          <span>Memo</span>
+          <textarea value={draft.memo} onChange={(event) => setDraft({ ...draft, memo: event.target.value })} />
+        </label>
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy || !draft.amount}>
+            Save credit adjustment
+          </button>
+          <button className="ghost-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}
+
 function SuperAdminBillingManagementView({
   data,
+  busy,
   onAction,
 }: {
   data: PortalData;
@@ -6040,16 +6193,7 @@ function SuperAdminBillingManagementView({
 }) {
   const pendingPayments = data.payments.filter((payment) => payment.status === "processing");
   const completedPayments = data.payments.filter((payment) => payment.status === "paid");
-
-  async function completePayment(payment: PaymentRecord) {
-    const user = userById(data.users, payment.userId);
-    const label = `${user?.name || "this user"} - ${money(payment.amount)} for ${shortDate(payment.periodStart)} to ${shortDate(payment.periodEnd)}`;
-    if (!window.confirm(`Mark payout completed for ${label}?`)) {
-      return;
-    }
-
-    await onAction("completePayment", { paymentId: payment.id });
-  }
+  const [completingPayment, setCompletingPayment] = useState<PaymentRecord | null>(null);
 
   return (
     <div className="dashboard-stack">
@@ -6064,7 +6208,7 @@ function SuperAdminBillingManagementView({
         <PaymentTable
           payments={pendingPayments}
           users={data.users}
-          onComplete={completePayment}
+          onComplete={setCompletingPayment}
           emptyMessage="No pending payouts need completion."
         />
       </section>
@@ -6083,6 +6227,21 @@ function SuperAdminBillingManagementView({
           emptyMessage="No completed payouts yet."
         />
       </section>
+
+      {completingPayment ? (
+        <PaymentCompleteModal
+          payment={completingPayment}
+          user={userById(data.users, completingPayment.userId)}
+          busy={busy}
+          onClose={() => setCompletingPayment(null)}
+          onSave={async (payload) => {
+            const nextData = await onAction("completePayment", payload);
+            if (nextData) {
+              setCompletingPayment(null);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -6821,6 +6980,57 @@ function PaymentEditModal({
   );
 }
 
+function PaymentCompleteModal({
+  payment,
+  user,
+  busy,
+  onClose,
+  onSave,
+}: {
+  payment: PaymentRecord;
+  user?: PortalUser;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const [paymentLink, setPaymentLink] = useState(payment.paymentLink || payment.payoutTxid || payment.payoutUuid || "");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSave({
+      paymentId: payment.id,
+      paymentLink,
+    });
+  }
+
+  return (
+    <ModalFrame title="Mark Payment Completed" subtitle="Add the receipt or transaction link before completing this payout." onClose={onClose}>
+      <form className="form-grid" onSubmit={submit}>
+        <div className="status-strip compact full">
+          {user?.name || "Unknown user"} - {money(payment.amount)} - {shortDate(payment.periodStart)} to {shortDate(payment.periodEnd)}
+        </div>
+        <label className="field full">
+          <span>Payment link *</span>
+          <input
+            value={paymentLink}
+            onChange={(event) => setPaymentLink(event.target.value)}
+            placeholder="Receipt, transaction, or transfer link"
+            required
+          />
+        </label>
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy || !paymentLink.trim()}>
+            Mark completed
+          </button>
+          <button className="ghost-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}
+
 function PaymentTable({
   payments,
   users,
@@ -7015,12 +7225,220 @@ function ChatAttachments({ attachments }: { attachments: ChatAttachmentDraft[] }
   );
 }
 
-function ChatProfileContext({ user }: { user: PortalUser }) {
+function HelpView({
+  data,
+  busy,
+  onSend,
+}: {
+  data: PortalData;
+  busy: boolean;
+  onSend: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
+  const isSuperAdmin = isSuperAdminRole(data.currentUser.role);
+
+  return (
+    <div className="dashboard-stack">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>{isSuperAdmin ? "Help Center" : "How This Works"}</h2>
+            <p>{isSuperAdmin ? "Review the operating guide and respond to support messages." : "Use this guide to set up your account and work through the portal."}</p>
+          </div>
+        </div>
+
+        <div className="help-grid">
+          <article className="profile-card help-card">
+            <h3>Client Setup</h3>
+            <p>Complete your profile with name, company, country, timezone, and preferences. Add money credit from Billing before releasing bidder payments.</p>
+            <p>Create or review bidder posts, open a contract, set rates, set the next payday, and release payment after approving work logs.</p>
+          </article>
+          <article className="profile-card help-card">
+            <h3>Bidder Setup</h3>
+            <p>Complete your profile with country, timezone, skills, and languages. Add a crypto payout method from Payments so clients can release payouts.</p>
+            <p>Log daily work with the Google Sheet link, applied jobs, interviews scheduled, and notes. Work logs must be approved before payment.</p>
+          </article>
+          <article className="profile-card help-card">
+            <h3>Contracts</h3>
+            <p>Contracts connect one client and one bidder with criteria, rates, bonus, schedule, and next payday. A bidder can hold more than one contract.</p>
+            <p>Each contract has a contract ID. Use it when discussing work, payment, disputes, or support questions.</p>
+          </article>
+          <article className="profile-card help-card">
+            <h3>Support</h3>
+            <p>Support messages are separate from the Inbox. Inbox is only for client-bidder communication.</p>
+            <p>Use the Support Center below when you need help from the super admin.</p>
+          </article>
+        </div>
+      </section>
+
+      <SupportCenter data={data} busy={busy} onSend={onSend} />
+    </div>
+  );
+}
+
+function SupportCenter({
+  data,
+  busy,
+  onSend,
+}: {
+  data: PortalData;
+  busy: boolean;
+  onSend: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
+  const currentUser = data.currentUser;
+  const isSuperAdmin = isSuperAdminRole(currentUser.role);
+  const supportContacts = data.supportContacts || [];
+  const supportMessages = data.supportMessages || [];
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [body, setBody] = useState("");
+  const selectedSupportUser = isSuperAdmin
+    ? supportContacts.find((contact) => contact.id === selectedUserId) || supportContacts[0]
+    : supportContacts[0];
+  const activeConversationId = selectedSupportUser
+    ? supportConversationIdForUser(isSuperAdmin ? selectedSupportUser.id : currentUser.id)
+    : "";
+  const activeMessages = activeConversationId
+    ? supportMessages.filter((message) => chatConversationIdForMessage(message) === activeConversationId)
+    : [];
+  const supportConversations = supportContacts.map((contact) => {
+    const conversationId = supportConversationIdForUser(contact.id);
+    const messages = supportMessages.filter((message) => chatConversationIdForMessage(message) === conversationId);
+    const latestMessage = messages[messages.length - 1];
+    return {
+      contact,
+      conversationId,
+      messageCount: messages.length,
+      preview: latestMessage?.deletedAt ? "Message deleted" : latestMessage?.body || "No messages yet",
+    };
+  });
+
+  async function sendSupportMessage(event: FormEvent) {
+    event.preventDefault();
+    if (!body.trim() || !selectedSupportUser) {
+      return;
+    }
+
+    const nextData = await onSend("addSupportMessage", {
+      recipientId: isSuperAdmin ? selectedSupportUser.id : "",
+      body,
+      authorTimeZone: browserTimeZone(),
+    });
+    if (nextData) {
+      setBody("");
+    }
+  }
+
+  return (
+    <section className="panel support-center-panel">
+      <div className="panel-header">
+        <div>
+          <h2>Support Center</h2>
+          <p>{isSuperAdmin ? "Support messages from users are managed here, separate from Inbox." : "Message the super admin for account, contract, billing, or work-log help."}</p>
+        </div>
+        <span className="badge">{activeMessages.length} messages</span>
+      </div>
+
+      <div className={`support-layout ${isSuperAdmin ? "" : "single"}`}>
+        {isSuperAdmin ? (
+          <div className="conversation-list support-list" aria-label="Support conversations">
+            {supportConversations.map((conversation) => (
+              <button
+                className={`conversation-button ${selectedSupportUser?.id === conversation.contact.id ? "active" : ""}`}
+                key={conversation.conversationId}
+                type="button"
+                onClick={() => setSelectedUserId(conversation.contact.id)}
+              >
+                <span className="conversation-avatar">{initialsForName(conversation.contact.name)}</span>
+                <span>
+                  <strong>{userDisplayName(conversation.contact)}</strong>
+                  <small>{conversation.preview}</small>
+                </span>
+                <span className="conversation-badge">{conversation.messageCount}</span>
+              </button>
+            ))}
+            {!supportConversations.length ? <div className="empty-state compact">No support messages yet.</div> : null}
+          </div>
+        ) : null}
+
+        <div className="messages support-messages">
+          {selectedSupportUser ? (
+            <div className="chat-context-card">
+              <div className="person-title">
+                <div>
+                  <h3>{isSuperAdmin ? userDisplayName(selectedSupportUser) : "Super Admin Support"}</h3>
+                  <p>{isSuperAdmin ? selectedSupportUser.email : "This thread is separate from your client-bidder inbox."}</p>
+                </div>
+                <span className={`badge ${isSuperAdmin ? selectedSupportUser.role : "super_admin"}`}>{isSuperAdmin ? roleLabel(selectedSupportUser.role) : "Support"}</span>
+              </div>
+            </div>
+          ) : null}
+
+          {activeMessages.map((message) => {
+            const isMine = message.userId === currentUser.id;
+            const author = userById([currentUser, ...data.users, ...supportContacts], message.userId);
+            const counterpartForTime = isMine ? selectedSupportUser : author;
+            const counterpartTimeZone = counterpartForTime?.profileTimeZone || message.authorTimeZone || adminTimeZone;
+            return (
+              <div className={`message-row ${isMine ? "mine" : ""}`} key={message.id}>
+                <div className={`message ${isMine ? "mine" : ""} ${message.deletedAt ? "deleted" : ""}`}>
+                  {!isMine ? (
+                    <div className="message-author">
+                      <strong>{userDisplayName(author) || message.authorName}</strong>
+                      <span>{roleLabel(author?.role || message.authorRole)}</span>
+                    </div>
+                  ) : null}
+                  {message.deletedAt ? <p className="muted">Message deleted</p> : <p>{message.body}</p>}
+                  <ChatAttachments attachments={message.attachments || []} />
+                  <div className="message-footer">
+                    <span>Your time {dateTimeInZone(message.createdAt, browserTimeZone())}</span>
+                    <span>{memberTimeLabel(counterpartForTime)} {dateTimeInZone(message.createdAt, counterpartTimeZone)}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {selectedSupportUser && !activeMessages.length ? <div className="empty-state">No support messages yet.</div> : null}
+
+          <form className="chat-composer support-composer" onSubmit={sendSupportMessage}>
+            <div className="composer-shell">
+              <textarea
+                aria-label="Support message"
+                placeholder={selectedSupportUser ? "Message support" : "Select a support conversation"}
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                disabled={busy || !selectedSupportUser}
+                required
+              />
+              <button className="primary-button" type="submit" disabled={busy || !selectedSupportUser || !body.trim()}>
+                Send
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ChatProfileContext({
+  user,
+  currentUser,
+  users,
+  contracts,
+}: {
+  user: PortalUser;
+  currentUser: PortalUser;
+  users: PortalUser[];
+  contracts: ContractRecord[];
+}) {
   const profileTags = [
     ...(user.clientPreferences || []),
     ...(user.profileSkills || []),
     ...(user.profileLanguages || []),
   ].slice(0, 6);
+  const userContracts = contracts.filter((contract) => contract.clientId === user.id || contract.workerId === user.id);
+  const currentContracts = userContracts.filter((contract) => ["requested", "active"].includes(contract.status));
+  const pastContracts = userContracts.filter((contract) => ["rejected", "ended"].includes(contract.status));
+  const allUsers = [currentUser, ...users];
 
   return (
     <div className="chat-context-card">
@@ -7033,8 +7451,9 @@ function ChatProfileContext({ user }: { user: PortalUser }) {
       </div>
       <div className="mini-metrics">
         <span><strong>{user.country || user.profileLocation || "Not set"}</strong> location</span>
-        <span><strong>{user.profileTimeZone || "Not set"}</strong> timezone</span>
+        <span><strong>{timeZoneDisplay(user.profileTimeZone)}</strong> timezone</span>
         <span><strong>{user.allowDirectMessages === false ? "Off" : "On"}</strong> direct messages</span>
+        <span><strong>{currentContracts.length}</strong> current contracts</span>
       </div>
       {user.profileBio ? <p>{user.profileBio}</p> : null}
       {profileTags.length ? (
@@ -7044,6 +7463,32 @@ function ChatProfileContext({ user }: { user: PortalUser }) {
           ))}
         </div>
       ) : null}
+      <div className="chat-contract-history">
+        <h4>Current contracts</h4>
+        {currentContracts.slice(0, 3).map((contract) => {
+          const otherMember = userById(allUsers, contract.clientId === user.id ? contract.workerId : contract.clientId);
+          return (
+            <div className="mini-contract-row" key={contract.id}>
+              <strong>{contract.title}</strong>
+              <span>Contract ID: {contract.id}</span>
+              <span>{otherMember?.name || "Member"} - {contractStatusLabel(contract.status)} - {shortDate(contract.nextPaymentDate)}</span>
+            </div>
+          );
+        })}
+        {!currentContracts.length ? <p>No current contracts.</p> : null}
+        <h4>Past contracts</h4>
+        {pastContracts.slice(0, 3).map((contract) => {
+          const otherMember = userById(allUsers, contract.clientId === user.id ? contract.workerId : contract.clientId);
+          return (
+            <div className="mini-contract-row" key={contract.id}>
+              <strong>{contract.title}</strong>
+              <span>Contract ID: {contract.id}</span>
+              <span>{otherMember?.name || "Member"} - {contractStatusLabel(contract.status)}</span>
+            </div>
+          );
+        })}
+        {!pastContracts.length ? <p>No past contracts yet.</p> : null}
+      </div>
     </div>
   );
 }
@@ -7068,19 +7513,72 @@ function ChatPostContext({ post, author }: { post: PortalPost; author?: PortalUs
   );
 }
 
+function ChatContractCard({
+  contract,
+  client,
+  bidder,
+  currentUser,
+  busy,
+  onAction,
+}: {
+  contract: ContractRecord;
+  client?: PortalUser;
+  bidder?: PortalUser;
+  currentUser: PortalUser;
+  busy: boolean;
+  onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
+  const canRespond =
+    contract.status === "requested" &&
+    !isSuperAdminRole(currentUser.role) &&
+    contract.requestedByUserId !== currentUser.id &&
+    (contract.clientId === currentUser.id || contract.workerId === currentUser.id);
+
+  async function updateStatus(status: ContractRecord["status"]) {
+    await onAction("updateContractStatus", { contractId: contract.id, status });
+  }
+
+  return (
+    <div className="chat-contract-card">
+      <div className="person-title">
+        <div>
+          <h3>{contract.title}</h3>
+          <p>Contract ID: {contract.id}</p>
+        </div>
+        <span className={`badge ${contractStatusClass(contract.status)}`}>{contractStatusLabel(contract.status)}</span>
+      </div>
+      <p>{contract.criteria}</p>
+      <div className="mini-metrics compact-metrics">
+        <span><strong>{client?.name || "Client"}</strong> client</span>
+        <span><strong>{bidder?.name || "Bidder"}</strong> bidder</span>
+        <span><strong>{money(contract.ratePerApplication)}</strong> per apply</span>
+        <span><strong>{money(contract.bonusPerInterview)}</strong> interview bonus</span>
+        <span><strong>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday)}</strong> schedule</span>
+        <span><strong>{shortDate(contract.nextPaymentDate)}</strong> next payday</span>
+      </div>
+      {canRespond ? (
+        <div className="actions">
+          <button className="primary-button compact-button" type="button" disabled={busy} onClick={() => void updateStatus("active")}>
+            Accept contract
+          </button>
+          <button className="ghost-button compact-button" type="button" disabled={busy} onClick={() => void updateStatus("rejected")}>
+            Reject
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ChatView({
   data,
   busy,
-  notificationsEnabled,
-  onEnableNotifications,
   onSend,
   requestedRecipientId,
   requestedPostId,
 }: {
   data: PortalData;
   busy: boolean;
-  notificationsEnabled: boolean;
-  onEnableNotifications: () => Promise<void>;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
   requestedRecipientId: string;
   requestedPostId: string;
@@ -7091,13 +7589,14 @@ function ChatView({
   const [editingMessageId, setEditingMessageId] = useState("");
   const [editBody, setEditBody] = useState("");
   const [selectedConversationId, setSelectedConversationId] = useState("");
+  const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const [readReceipts, setReadReceipts] = useState<Record<string, string>>(() => loadChatReadReceipts(data.currentUser.id));
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const markReadSignatureRef = useRef("");
   const currentUser = data.currentUser;
   const canSend = currentUser.status === "approved";
   const userTimeZone = browserTimeZone();
-  const notificationSupported = typeof window !== "undefined" && "Notification" in window;
   const membersById = new Map<string, PortalUser>();
   [currentUser, ...data.users, ...(data.chatContacts || [])].forEach((user) => {
     membersById.set(user.id, user);
@@ -7184,13 +7683,9 @@ function ChatView({
   const activeConversation =
     conversations.find((conversation) => conversation.id === selectedConversationId) || conversations[0];
   const activeConversationId = activeConversation?.conversationId || "";
-  const activeMessages = useMemo(
-    () =>
-      activeConversationId
-        ? data.chatMessages.filter((message) => chatConversationIdForMessage(message) === activeConversationId)
-        : [],
-    [activeConversationId, data.chatMessages]
-  );
+  const activeMessages = activeConversationId
+    ? data.chatMessages.filter((message) => chatConversationIdForMessage(message) === activeConversationId)
+    : [];
   const activeRecipient = activeConversation?.recipientId ? membersById.get(activeConversation.recipientId) : null;
   const activeParticipantIds = activeConversation?.monitored
     ? Array.from(new Set(activeMessages.flatMap((message) => [message.userId, message.recipientId || ""]).filter(Boolean)))
@@ -7218,6 +7713,16 @@ function ChatView({
     activeConversation.recipientAllowsContact &&
     Boolean(activeConversation.recipientId) &&
     Boolean(body.trim() || attachments.length);
+  const latestIncomingMessage = [...activeMessages]
+    .reverse()
+    .find((message) => message.userId !== currentUser.id && !message.deletedAt);
+  const latestIncomingCreatedAt = latestIncomingMessage?.createdAt || "";
+  const unreadIncomingSignature = activeMessages
+    .filter(
+      (message) => message.userId !== currentUser.id && !message.deletedAt && !message.readAt
+    )
+    .map((message) => message.id)
+    .join("|");
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
@@ -7229,26 +7734,41 @@ function ChatView({
       return;
     }
 
-    const latestIncomingMessage = [...activeMessages]
-      .reverse()
-      .find((message) => message.userId !== currentUser.id && !message.deletedAt);
-    if (!latestIncomingMessage || readReceipts[conversationId] === latestIncomingMessage.createdAt) {
+    if (!latestIncomingCreatedAt || readReceipts[conversationId] === latestIncomingCreatedAt) {
       return;
     }
 
     const timeout = window.setTimeout(() => {
       setReadReceipts((current) => {
-        const nextReceipts = { ...current, [conversationId]: latestIncomingMessage.createdAt };
+        const nextReceipts = { ...current, [conversationId]: latestIncomingCreatedAt };
         saveChatReadReceipts(currentUser.id, nextReceipts);
         return nextReceipts;
       });
     }, 0);
 
     return () => window.clearTimeout(timeout);
-  }, [activeConversationId, activeMessages, currentUser.id, readReceipts]);
+  }, [activeConversationId, activeMessages.length, currentUser.id, latestIncomingCreatedAt, readReceipts]);
+
+  useEffect(() => {
+    if (!activeConversationId || activeConversation?.monitored) {
+      return;
+    }
+
+    if (!unreadIncomingSignature || markReadSignatureRef.current === unreadIncomingSignature) {
+      return;
+    }
+
+    markReadSignatureRef.current = unreadIncomingSignature;
+    const timeout = window.setTimeout(() => {
+      void onSend("markChatConversationRead", { conversationId: activeConversationId });
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeConversation?.monitored, activeConversationId, onSend, unreadIncomingSignature]);
 
   function selectConversation(conversationId: string) {
     setSelectedConversationId(conversationId);
+    setProfilePanelOpen(false);
     setEditingMessageId("");
     setEditBody("");
     setChatError("");
@@ -7382,7 +7902,19 @@ function ChatView({
     <section className="panel chat-panel">
       <div className="chat-toolbar">
         <div className="telegram-chat-title">
-          <div className="telegram-avatar">{activeConversation?.avatar || "IN"}</div>
+          {activeRecipient ? (
+            <button
+              className="telegram-avatar profile-avatar-button"
+              type="button"
+              aria-label={`Show ${userDisplayName(activeRecipient)} profile`}
+              aria-expanded={profilePanelOpen}
+              onClick={() => setProfilePanelOpen((open) => !open)}
+            >
+              {activeConversation?.avatar || "IN"}
+            </button>
+          ) : (
+            <div className="telegram-avatar">{activeConversation?.avatar || "IN"}</div>
+          )}
           <div>
             <h2>{activeConversation?.title || "Inbox"}</h2>
             <p>
@@ -7405,20 +7937,10 @@ function ChatView({
               ]}
             />
           ) : null}
-          {notificationSupported ? (
-            <button
-              className="ghost-button"
-              type="button"
-              disabled={notificationsEnabled}
-              onClick={onEnableNotifications}
-            >
-              {notificationsEnabled ? "Notifications on" : "Enable notifications"}
-            </button>
-          ) : null}
         </div>
       </div>
 
-      <div className="inbox-layout">
+      <div className={`inbox-layout ${profilePanelOpen && activeRecipient ? "profile-open" : ""}`}>
         <div className="conversation-list" aria-label="Inbox conversations">
           {conversations.map((conversation) => (
             <div
@@ -7457,7 +7979,6 @@ function ChatView({
         </div>
 
         <div className="messages">
-          {activeRecipient ? <ChatProfileContext user={activeRecipient} /> : null}
           {activeConversation?.monitored && activeParticipants.length ? (
             <div className="chat-context-card">
               <div className="person-title">
@@ -7476,18 +7997,26 @@ function ChatView({
               </div>
             </div>
           ) : null}
-          {activeRelatedPost ? (
-            <ChatPostContext post={activeRelatedPost} author={membersById.get(activeRelatedPost.authorId)} />
-          ) : null}
           {activeMessages.map((message) => {
             const deleted = Boolean(message.deletedAt);
             const isMine = message.userId === currentUser.id;
-            const canEdit = !deleted && (isMine || isSuperAdminRole(currentUser.role));
+            const relatedContract = message.relatedContractId
+              ? data.contracts.find((contract) => contract.id === message.relatedContractId)
+              : null;
+            const canEdit = !deleted && !message.relatedContractId && (isMine || isSuperAdminRole(currentUser.role));
             const canDelete = !deleted && isSuperAdminRole(currentUser.role);
             const isEditing = editingMessageId === message.id;
             const messageAttachments = message.attachments || [];
             const menuItems: ActionMenuItem[] = [];
             const authorUser = membersById.get(message.userId);
+            const counterpartForTime =
+              activeRecipient ||
+              (message.userId === currentUser.id ? membersById.get(message.recipientId || "") : authorUser) ||
+              null;
+            const counterpartTimeZone =
+              counterpartForTime?.profileTimeZone ||
+              (message.userId !== currentUser.id ? message.authorTimeZone : "") ||
+              userTimeZone;
 
             if (canEdit) {
               menuItems.push({ label: "Edit", onClick: () => startEditing(message) });
@@ -7528,13 +8057,24 @@ function ChatView({
                   ) : (
                     <>
                       {message.body ? <p>{message.body}</p> : null}
+                      {relatedContract ? (
+                        <ChatContractCard
+                          contract={relatedContract}
+                          client={membersById.get(relatedContract.clientId)}
+                          bidder={membersById.get(relatedContract.workerId)}
+                          currentUser={currentUser}
+                          busy={busy}
+                          onAction={onSend}
+                        />
+                      ) : null}
                       <ChatAttachments attachments={messageAttachments} />
                     </>
                   )}
 
                   <div className="message-footer">
-                    <span>Local {dateTimeInZone(message.createdAt, message.authorTimeZone || userTimeZone)}</span>
-                    <span>Admin time {dateTimeInZone(message.createdAt, adminTimeZone)}</span>
+                    <span>Your time {dateTimeInZone(message.createdAt, userTimeZone)}</span>
+                    <span>{memberTimeLabel(counterpartForTime)} {dateTimeInZone(message.createdAt, counterpartTimeZone)}</span>
+                    {isMine ? <span>{message.readAt ? "Read" : "Sent"}</span> : null}
                     {message.editedAt ? <span>Edited</span> : null}
                     {menuItems.length ? <ActionMenu items={menuItems} /> : null}
                   </div>
@@ -7607,6 +8147,29 @@ function ChatView({
             </div>
           )}
         </div>
+
+        {profilePanelOpen && activeRecipient ? (
+          <aside className="chat-side-panel" aria-label={`${userDisplayName(activeRecipient)} profile`}>
+            <div className="chat-side-header">
+              <div>
+                <h3>Profile info</h3>
+                <p>{userDisplayName(activeRecipient)}</p>
+              </div>
+              <button className="icon-button" type="button" aria-label="Close profile" onClick={() => setProfilePanelOpen(false)}>
+                x
+              </button>
+            </div>
+            <ChatProfileContext
+              user={activeRecipient}
+              currentUser={currentUser}
+              users={data.users}
+              contracts={data.contracts}
+            />
+            {activeRelatedPost ? (
+              <ChatPostContext post={activeRelatedPost} author={membersById.get(activeRelatedPost.authorId)} />
+            ) : null}
+          </aside>
+        ) : null}
       </div>
     </section>
   );
