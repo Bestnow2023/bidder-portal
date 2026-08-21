@@ -3,7 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 test("keeps the bidder portal as the primary screen", async () => {
-  const [page, operationsPage, settingsPage, chatPage, biddersPage, postsPage, contractsPage, creditsPage, billingPage, helpPage, layout, portalApp, globals, packageJson] = await Promise.all([
+  const [page, operationsPage, settingsPage, chatPage, biddersPage, postsPage, contractsPage, disputesPage, creditsPage, billingPage, helpPage, layout, portalApp, globals, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/operations/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/settings/page.tsx", import.meta.url), "utf8"),
@@ -11,6 +11,7 @@ test("keeps the bidder portal as the primary screen", async () => {
     readFile(new URL("../app/bidders/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/posts/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/contracts/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/disputes/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/credits/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/billing/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/help/page.tsx", import.meta.url), "utf8"),
@@ -27,6 +28,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(biddersPage, /<PortalApp \/>/);
   assert.match(postsPage, /<PortalApp \/>/);
   assert.match(contractsPage, /<PortalApp \/>/);
+  assert.match(disputesPage, /<PortalApp \/>/);
   assert.match(creditsPage, /<PortalApp \/>/);
   assert.match(billingPage, /<PortalApp \/>/);
   assert.match(helpPage, /<PortalApp \/>/);
@@ -35,8 +37,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(layout, /cryptomus: "d8702318"/);
   assert.match(portalApp, /digniware-logo-dark\.png/);
   assert.match(portalApp, /digniware-logo-light\.png/);
-  assert.match(globals, /\.contract-grid,\n\.bid-profile-grid\s*\{[\s\S]*grid-template-columns: repeat\(auto-fill, minmax\(280px, 420px\)\);/);
-  assert.match(globals, /\.contract-card,\n\.bid-profile-card\s*\{/);
+  assert.match(globals, /\.bid-profile-grid\s*\{[\s\S]*grid-template-columns: repeat\(auto-fill, minmax\(280px, 420px\)\);/);
+  assert.match(globals, /\.bid-profile-card\s*\{/);
   assert.match(portalApp, /Email and password sign-in/);
   assert.match(portalApp, /Password/);
   assert.match(portalApp, /Sign up/);
@@ -68,13 +70,17 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Start Contract/);
   assert.match(portalApp, /Contract Management/);
   assert.match(portalApp, /Contract ID/);
+  assert.match(portalApp, /ContractDetailModal/);
+  assert.match(portalApp, /Contract Details/);
   assert.match(portalApp, /Past Contract History/);
   assert.match(portalApp, /Edit Contract/);
   assert.match(portalApp, /Save contract/);
   assert.match(portalApp, /Next payday/);
   assert.match(portalApp, /Set Next Payday/);
   assert.match(portalApp, /Save next payday/);
-  assert.match(portalApp, /Contract Disputes/);
+  assert.match(portalApp, /DisputesView/);
+  assert.match(portalApp, /DisputeDetailModal/);
+  assert.match(portalApp, /Dispute Details/);
   assert.match(portalApp, /Connected client credit/);
   assert.match(portalApp, /Currently working/);
   assert.match(portalApp, /Client Work History/);
@@ -148,6 +154,10 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Credit balance/);
   assert.match(portalApp, /Open invoice/);
   assert.match(portalApp, /Notification center/);
+  assert.match(portalApp, /notification-menu-wrap/);
+  assert.match(portalApp, /onClose/);
+  assert.match(portalApp, /personalWorkLogs/);
+  assert.match(portalApp, /Your own payment records/);
   assert.match(portalApp, /Pending Payment List/);
   assert.match(portalApp, /Completed Payment History/);
   assert.match(portalApp, /Mark completed/);
@@ -172,7 +182,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /addSupportMessage/);
   assert.match(portalApp, /supportMessages/);
   assert.match(portalApp, /supportContacts/);
-  assert.doesNotMatch(portalApp, /Attach Bid Profiles|Remove from bidder|Select member/);
+  assert.doesNotMatch(portalApp, /Attach Bid Profiles|Remove from bidder|Select member|Contract Disputes|data\.workLogs\.slice\(0, 5\)/);
+  assert.doesNotMatch(globals, /\.contract-grid|\.contract-card\s*\{/);
   assert.doesNotMatch(portalApp, /Enable notifications|Notifications on|Admin time /);
   assert.doesNotMatch(portalApp, /Roles ready|Work logging|No Stripe|set payment rates/);
   assert.doesNotMatch(portalApp, /Visible Profiles|ProfileCardGrid/);
@@ -210,9 +221,11 @@ test("declares the requested frontend records", async () => {
     "Available Posts",
     "My Posts",
     "Contracts",
+    "Disputes",
     "Start Contract",
     "Contract Management",
     "Contract ID",
+    "Contract Details",
     "Past Contract History",
     "Edit Contract",
     "Save contract",
@@ -220,7 +233,7 @@ test("declares the requested frontend records", async () => {
     "Set Next Payday",
     "Save next payday",
     "Specific criteria",
-    "Contract Disputes",
+    "Dispute Details",
     "Money credit",
     "Post credit",
     "Dispute Resolution Center",
@@ -434,7 +447,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /viewRoutes/);
   assert.match(portalApp, /routeViews/);
   assert.match(portalApp, /navigateToView/);
-  assert.match(portalApp, /\["people", "contracts", "posts", "credits", "billing", "chat", "help"\]/);
+  assert.match(portalApp, /\["people", "contracts", "disputes", "posts", "credits", "billing", "chat", "help"\]/);
   assert.match(portalApp, /UserCreateModal/);
   assert.match(portalApp, /PostEditModal/);
   assert.match(portalApp, /\/bidder-settings/);

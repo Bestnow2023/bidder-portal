@@ -26,7 +26,7 @@ import type {
 } from "./portal-types";
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
-type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "people" | "bidderSettings" | "work" | "credits" | "billing" | "payments" | "chat" | "help";
+type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "disputes" | "people" | "bidderSettings" | "work" | "credits" | "billing" | "payments" | "chat" | "help";
 
 const payoutCurrencies = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB"];
 const payoutNetworkOptions = [
@@ -136,6 +136,7 @@ const viewRoutes: Record<PortalView, string> = {
   bidders: "/bidders",
   posts: "/posts",
   contracts: "/contracts",
+  disputes: "/disputes",
   people: "/people",
   bidderSettings: "/bidder-settings",
   work: "/work",
@@ -154,7 +155,7 @@ const routeViews: Record<string, PortalView> = {
   "/bidders": "bidders",
   "/posts": "posts",
   "/contracts": "contracts",
-  "/disputes": "contracts",
+  "/disputes": "disputes",
   "/people": "people",
   "/bidder-settings": "bidderSettings",
   "/work": "work",
@@ -432,6 +433,7 @@ function viewTitle(view: string, user?: PortalUser) {
     bidders: "Bidders",
     posts: "Posts",
     contracts: "Contracts",
+    disputes: "Disputes",
     people: "People",
     bidderSettings: "Bidder Settings",
     work: "Work Logs",
@@ -449,7 +451,8 @@ function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
     if (view === "clients") return "Search client profiles and review payment history signals.";
     if (view === "bidders") return "Search bidder profiles and contracting status.";
     if (view === "posts") return "Review bidder posts, publish bidder availability, and start contracts.";
-    if (view === "contracts") return "Review requests, active contracts, disputes, criteria, and connected client credit.";
+    if (view === "contracts") return "Review requests, active contracts, criteria, and connected client credit.";
+    if (view === "disputes") return "Open and track contract, work, and payment disputes.";
     if (view === "profile") return "Complete your profile, direct-message preference, email, and password.";
     return "Log your bidder activity and keep payment details current.";
   }
@@ -472,7 +475,8 @@ function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
     clients: "Review client profiles and hiring signals.",
     bidders: "Search bidders and see who is available or already contracted.",
     posts: "Review marketplace listings and turn bidder posts into contract requests.",
-    contracts: "Manage client-bidder contract requests, active criteria, assignments, and disputes.",
+    contracts: "Manage client-bidder contract requests, active criteria, and assignments.",
+    disputes: "Monitor and resolve client-bidder disputes separately from contracts.",
     people: "Manage user accounts, approval status, roles, passwords, and email verification.",
     bidderSettings: "Set bidder rates, interview bonuses, payment dates, and schedules.",
     work: "Review bidder work logs and Google Sheet links.",
@@ -488,18 +492,18 @@ function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
 
 function viewsForUser(user: PortalUser): PortalView[] {
   if (isSuperAdminRole(user.role)) {
-    return ["people", "contracts", "posts", "credits", "billing", "chat", "help"];
+    return ["people", "contracts", "disputes", "posts", "credits", "billing", "chat", "help"];
   }
 
   if (isClientRole(user.role)) {
-    return ["overview", "profile", "bidders", "posts", "contracts", "work", "billing", "chat", "help"];
+    return ["overview", "profile", "bidders", "posts", "contracts", "disputes", "work", "billing", "chat", "help"];
   }
 
   if (user.role === "bidder") {
-    return ["dashboard", "profile", "clients", "posts", "contracts", "work", "payments", "chat", "help"];
+    return ["dashboard", "profile", "clients", "posts", "contracts", "disputes", "work", "payments", "chat", "help"];
   }
 
-  return ["profile", "contracts", "payments", "chat", "help"];
+  return ["profile", "contracts", "disputes", "payments", "chat", "help"];
 }
 
 function safeViewForUser(user: PortalUser, view: PortalView) {
@@ -1828,6 +1832,7 @@ export default function PortalApp() {
     if (view === "chat") {
       setChatUnreadCount(0);
     }
+    setNotificationMenuOpen(false);
     setPortalNavVisible(true);
   }
 
@@ -1898,6 +1903,7 @@ export default function PortalApp() {
               open={notificationMenuOpen}
               busy={busy}
               onToggle={() => setNotificationMenuOpen((open) => !open)}
+              onClose={() => setNotificationMenuOpen(false)}
               onMarkRead={markPortalNotificationsRead}
             />
             <AccountMenu
@@ -1941,6 +1947,7 @@ export default function PortalApp() {
             {safeView === "bidders" ? <BiddersDirectoryView data={data} onMessageBidder={openInboxForUser} /> : null}
             {safeView === "posts" ? <PostsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
             {safeView === "contracts" ? <ContractsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
+            {safeView === "disputes" ? <DisputesView data={data} busy={busy} onAction={postAction} /> : null}
             {safeView === "people" && isSuperAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "bidderSettings" && isSuperAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
@@ -1970,6 +1977,7 @@ function AdminNotificationMenu({
   open,
   busy,
   onToggle,
+  onClose,
   onMarkRead,
 }: {
   notifications: PortalNotification[];
@@ -1977,12 +1985,46 @@ function AdminNotificationMenu({
   open: boolean;
   busy: boolean;
   onToggle: () => void;
+  onClose: () => void;
   onMarkRead: (notificationIds?: string[]) => Promise<void>;
 }) {
   const latestNotifications = notifications.slice(0, 8);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (wrapRef.current?.contains(target)) {
+        return;
+      }
+
+      onClose();
+    }
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose, open]);
 
   return (
-    <div className="notification-menu-wrap">
+    <div className="notification-menu-wrap" ref={wrapRef}>
       <button
         className={`notification-trigger ${unreadCount ? "has-unread" : ""}`}
         type="button"
@@ -2126,14 +2168,16 @@ function AccountMenu({
 }
 
 function AdminOverview({ data }: { data: PortalData }) {
-  const pendingUsers = data.users.filter((user) => user.status === "pending").length;
-  const nonAdmins = data.users.filter(isWorkerUser);
-  const totalApplied = data.workLogs.reduce((total, log) => total + log.appliedJobs, 0);
-  const totalInterviews = data.workLogs.reduce((total, log) => total + log.interviewsScheduled, 0);
-  const scheduled = data.payments
+  const currentUser = data.currentUser;
+  const personalWorkLogs = workLogsForUser(currentUser, data.workLogs);
+  const personalPayments = paymentsForUser(currentUser, data.payments);
+  const pendingUsers = isSuperAdminRole(currentUser.role) ? data.users.filter((user) => user.status === "pending").length : 0;
+  const totalApplied = personalWorkLogs.reduce((total, log) => total + log.appliedJobs, 0);
+  const totalInterviews = personalWorkLogs.reduce((total, log) => total + log.interviewsScheduled, 0);
+  const scheduled = personalPayments
     .filter((payment) => payment.status === "scheduled")
     .reduce((total, payment) => total + payment.amount, 0);
-  const paid = data.payments
+  const paid = personalPayments
     .filter((payment) => payment.status === "paid")
     .reduce((total, payment) => total + payment.amount, 0);
 
@@ -2163,28 +2207,26 @@ function AdminOverview({ data }: { data: PortalData }) {
           <div className="panel-header">
             <div>
               <h2>Payment Snapshot</h2>
-              <p>Manual payment records and payout links.</p>
+              <p>Your own payment records and payout links.</p>
             </div>
             <span className="badge paid">{money(paid)} paid</span>
           </div>
           <div className="payment-method-list">
-            {nonAdmins.map((user) => {
-              const earned = estimateForUser(user, data.workLogs);
-              const paidTotal = paidForUser(user.id, data.payments);
-              const remaining = Math.max(0, earned - paidTotal);
+            {personalPayments.slice(0, 5).map((payment) => {
               return (
-                <div className="payment-row" key={user.id}>
+                <div className="payment-row" key={payment.id}>
                   <div>
-                    <strong>{user.name}</strong>
-                    <span className="muted">{roleLabel(user.role)} - {user.paymentSchedule || "No schedule"}</span>
+                    <strong>{shortDate(payment.scheduledDate)}</strong>
+                    <span className="muted">{shortDate(payment.periodStart)} - {shortDate(payment.periodEnd)}</span>
                   </div>
                   <div>
-                    <strong>{money(remaining)}</strong>
-                    <span className="mini-label">estimated open</span>
+                    <strong>{money(payment.amount)}</strong>
+                    <span className="mini-label">{paymentStatusLabel(payment.status).toLowerCase()}</span>
                   </div>
                 </div>
               );
             })}
+            {!personalPayments.length ? <div className="empty-state compact">No payment records for your account yet.</div> : null}
           </div>
         </section>
 
@@ -2192,11 +2234,11 @@ function AdminOverview({ data }: { data: PortalData }) {
           <div className="panel-header">
             <div>
               <h2>Recent Work</h2>
-              <p>Latest bidder Google Sheet logs.</p>
+              <p>Your latest Google Sheet logs.</p>
             </div>
           </div>
           <div className="payment-method-list">
-            {data.workLogs.slice(0, 5).map((log) => {
+            {personalWorkLogs.slice(0, 5).map((log) => {
               const user = userById(data.users, log.userId);
               return (
                 <div className="log-row" key={log.id}>
@@ -2208,7 +2250,7 @@ function AdminOverview({ data }: { data: PortalData }) {
                 </div>
               );
             })}
-            {!data.workLogs.length ? <div className="empty-state">No work logs yet.</div> : null}
+            {!personalWorkLogs.length ? <div className="empty-state">No work logs for your account yet.</div> : null}
           </div>
         </section>
       </div>
@@ -3941,6 +3983,7 @@ function ContractsView({
     startDate: today(),
   });
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedContract, setSelectedContract] = useState<ContractRecord | null>(null);
   const [editingContract, setEditingContract] = useState<ContractRecord | null>(null);
   const [paydayContract, setPaydayContract] = useState<ContractRecord | null>(null);
   const [paydayDate, setPaydayDate] = useState("");
@@ -4012,20 +4055,31 @@ function ContractsView({
   }
 
   async function updateContract(contract: ContractRecord, status: "active" | "rejected" | "ended") {
-    await onAction("updateContractStatus", { contractId: contract.id, status });
+    const nextData = await onAction("updateContractStatus", { contractId: contract.id, status });
+    if (nextData) {
+      setSelectedContract(null);
+    }
   }
 
   function contractActionItems(contract: ContractRecord): ActionMenuItem[] {
     const counterparty = contractCounterparty(contract);
     return [
       ...(!isSuperAdminRole(currentUser.role) && counterparty?.allowDirectMessages !== false
-        ? [{ label: "Message", onClick: () => counterparty && onMessageUser(counterparty.id) }]
+        ? [{ label: "Message", onClick: () => {
+          if (counterparty) {
+            setSelectedContract(null);
+            onMessageUser(counterparty.id);
+          }
+        } }]
         : []),
       ...(canAcceptContract(contract)
         ? [{ label: "Accept", disabled: busy, onClick: () => void updateContract(contract, "active") }]
         : []),
       ...(canEditContract(contract)
-        ? [{ label: "Edit", disabled: busy, onClick: () => setEditingContract(contract) }]
+        ? [{ label: "Edit", disabled: busy, onClick: () => {
+          setSelectedContract(null);
+          setEditingContract(contract);
+        } }]
         : []),
       ...(canSetContractPayday(contract)
         ? [{ label: "Set payday", disabled: busy, onClick: () => openPaydayModal(contract) }]
@@ -4040,6 +4094,7 @@ function ContractsView({
   }
 
   function openPaydayModal(contract: ContractRecord) {
+    setSelectedContract(null);
     setPaydayContract(contract);
     setPaydayDate(contract.nextPaymentDate || contractNextPaymentDateDefault(contract.paymentFrequency, contract.paymentWeekday, contract.startDate));
   }
@@ -4084,98 +4139,69 @@ function ContractsView({
           </div>
           <span className="badge">{contracts.length} contracts</span>
         </div>
-        {isSuperAdminRole(currentUser.role) ? (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Contract ID</th>
-                  <th>Contract</th>
-                  <th>Client</th>
-                  <th>Bidder</th>
-                  <th>Status</th>
-                  <th>Rate</th>
-                  <th>Schedule</th>
-                  <th>Next payday</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {contracts.map((contract) => {
-                  const client = userById(data.users, contract.clientId);
-                  const worker = userById(data.users, contract.workerId);
-                  const actions = contractActionItems(contract);
-                  return (
-                    <tr key={contract.id}>
-                      <td><span className="table-subtext">{contract.id}</span></td>
-                      <td>
-                        <strong>{contract.title}</strong>
-                        <span className="table-subtext">{contract.criteria || "No criteria"}</span>
-                      </td>
-                      <td>{client?.name || "Client"}</td>
-                      <td>{worker?.name || "Bidder"}</td>
-                      <td><span className={`badge ${contractStatusClass(contract.status)}`}>{contractStatusLabel(contract.status)}</span></td>
-                      <td>
-                        {money(contract.ratePerApplication || 0)}
-                        <span className="table-subtext">Bonus {money(contract.bonusPerInterview || 0)}</span>
-                      </td>
-                      <td>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday) || "Not set"}</td>
-                      <td>{shortDate(contract.nextPaymentDate)}</td>
-                      <td>{actions.length ? <ActionMenu items={actions} /> : "-"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="contract-grid">
-            {contracts.map((contract) => {
-              const client = userById(data.users, contract.clientId);
-              const worker = userById(data.users, contract.workerId);
-              const requester = userById(data.users, contract.requestedByUserId);
-              const connectedClient = currentUser.id === worker?.id ? client : null;
-              const connectedClientBalances = connectedClient?.creditBalances;
-              const actions = contractActionItems(contract);
-              return (
-                <article className="profile-card contract-card" key={contract.id}>
-                  <div className="person-title">
-                    <div>
-                      <h3>{contract.title}</h3>
-                      <span className="table-subtext">Contract ID: {contract.id}</span>
-                      <span className="table-subtext">{client?.name || "Client"} / {worker?.name || "Bidder"}</span>
-                    </div>
-                    <span className={`badge ${contractStatusClass(contract.status)}`}>{contractStatusLabel(contract.status)}</span>
-                  </div>
-                  <p>{contract.criteria}</p>
-                  <div className="mini-metrics">
-                    <span><strong>{money(contract.ratePerApplication || 0)}</strong> rate</span>
-                    <span><strong>{money(contract.bonusPerInterview || 0)}</strong> bonus</span>
-                    <span><strong>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday)}</strong> schedule</span>
-                    <span><strong>{shortDate(contract.nextPaymentDate)}</strong> next payday</span>
-                    <span><strong>{shortDate(contract.startDate)}</strong> start</span>
-                  </div>
-                  <p className="muted">
-                    Requested by {requester?.name || "Unknown"} on {dateTime(contract.createdAt)}
-                    {contract.acceptedAt ? ` - accepted ${dateTime(contract.acceptedAt)}` : ""}
-                  </p>
-                  {connectedClientBalances ? (
-                    <div className="connected-credit">
-                      <strong>Connected client credit</strong>
-                      <CreditBalanceStrip balances={connectedClientBalances} />
-                    </div>
-                  ) : null}
-                  <div className="actions">
-                    {actions.length ? <ActionMenu items={actions} /> : null}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Contract ID</th>
+                <th>Contract</th>
+                <th>Client</th>
+                <th>Bidder</th>
+                <th>Status</th>
+                <th>Rate</th>
+                <th>Schedule</th>
+                <th>Next payday</th>
+              </tr>
+            </thead>
+            <tbody>
+              {contracts.map((contract) => {
+                const client = userById(data.users, contract.clientId);
+                const worker = userById(data.users, contract.workerId);
+                return (
+                  <tr
+                    className="clickable-row"
+                    key={contract.id}
+                    tabIndex={0}
+                    onClick={() => setSelectedContract(contract)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        setSelectedContract(contract);
+                      }
+                    }}
+                  >
+                    <td><span className="table-subtext">{contract.id}</span></td>
+                    <td>
+                      <strong>{contract.title}</strong>
+                      <span className="table-subtext">{contract.criteria || "No criteria"}</span>
+                    </td>
+                    <td>{client?.name || "Client"}</td>
+                    <td>{worker?.name || "Bidder"}</td>
+                    <td><span className={`badge ${contractStatusClass(contract.status)}`}>{contractStatusLabel(contract.status)}</span></td>
+                    <td>
+                      {money(contract.ratePerApplication || 0)}
+                      <span className="table-subtext">Bonus {money(contract.bonusPerInterview || 0)}</span>
+                    </td>
+                    <td>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday) || "Not set"}</td>
+                    <td>{shortDate(contract.nextPaymentDate)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
         {!contracts.length ? <div className="empty-state">No contracts yet.</div> : null}
       </section>
-      <DisputesView data={data} busy={busy} onAction={onAction} embedded />
+      {selectedContract ? (
+        <ContractDetailModal
+          contract={selectedContract}
+          client={userById(data.users, selectedContract.clientId)}
+          worker={userById(data.users, selectedContract.workerId)}
+          requester={userById(data.users, selectedContract.requestedByUserId)}
+          currentUser={currentUser}
+          actions={contractActionItems(selectedContract)}
+          onClose={() => setSelectedContract(null)}
+        />
+      ) : null}
       {showCreateModal ? (
         <ModalFrame title="Start Contract" subtitle={`Send a contract request by entering the ${targetLabel.toLowerCase()}'s User ID.`} onClose={() => setShowCreateModal(false)}>
           <form className="form-grid" onSubmit={submitContract}>
@@ -4284,6 +4310,88 @@ function ContractsView({
         </ModalFrame>
       ) : null}
     </div>
+  );
+}
+
+function ContractDetailModal({
+  contract,
+  client,
+  worker,
+  requester,
+  currentUser,
+  actions,
+  onClose,
+}: {
+  contract: ContractRecord;
+  client?: PortalUser | null;
+  worker?: PortalUser | null;
+  requester?: PortalUser | null;
+  currentUser: PortalUser;
+  actions: ActionMenuItem[];
+  onClose: () => void;
+}) {
+  const connectedClientBalances = currentUser.id === worker?.id ? client?.creditBalances : null;
+
+  return (
+    <ModalFrame title="Contract Details" subtitle={contract.title} onClose={onClose}>
+      <div className="detail-stack">
+        <div className="status-strip compact">
+          Contract ID: {contract.id}
+        </div>
+        <div className="profile-grid">
+          <div className="metric">
+            <span>Client</span>
+            <strong>{client?.name || "Client"}</strong>
+          </div>
+          <div className="metric">
+            <span>Bidder</span>
+            <strong>{worker?.name || "Bidder"}</strong>
+          </div>
+          <div className="metric">
+            <span>Status</span>
+            <strong>{contractStatusLabel(contract.status)}</strong>
+          </div>
+          <div className="metric">
+            <span>Requested by</span>
+            <strong>{requester?.name || "Unknown"}</strong>
+          </div>
+        </div>
+        <div className="mini-metrics">
+          <span><strong>{money(contract.ratePerApplication || 0)}</strong> rate</span>
+          <span><strong>{money(contract.bonusPerInterview || 0)}</strong> bonus</span>
+          <span><strong>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday) || "Not set"}</strong> schedule</span>
+          <span><strong>{shortDate(contract.nextPaymentDate)}</strong> next payday</span>
+          <span><strong>{shortDate(contract.startDate)}</strong> start</span>
+        </div>
+        <section className="detail-section">
+          <h3>Criteria</h3>
+          <p>{contract.criteria || "No criteria added."}</p>
+        </section>
+        <p className="muted">
+          Created {dateTime(contract.createdAt)}
+          {contract.acceptedAt ? ` - accepted ${dateTime(contract.acceptedAt)}` : ""}
+        </p>
+        {connectedClientBalances ? (
+          <div className="connected-credit">
+            <strong>Connected client credit</strong>
+            <CreditBalanceStrip balances={connectedClientBalances} />
+          </div>
+        ) : null}
+        <div className="actions">
+          {actions.length ? actions.map((item) => (
+            <button
+              className={item.danger ? "ghost-button danger" : "ghost-button"}
+              key={item.label}
+              type="button"
+              disabled={item.disabled}
+              onClick={item.onClick}
+            >
+              {item.label}
+            </button>
+          )) : <span className="muted">No actions available.</span>}
+        </div>
+      </div>
+    </ModalFrame>
   );
 }
 
@@ -4399,12 +4507,10 @@ function DisputesView({
   data,
   busy,
   onAction,
-  embedded = false,
 }: {
   data: PortalData;
   busy: boolean;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
-  embedded?: boolean;
 }) {
   const currentUser = data.currentUser;
   const canCreateDispute = isClientRole(currentUser.role);
@@ -4413,6 +4519,7 @@ function DisputesView({
   const clientPayments = data.payments.filter((payment) => payment.clientId === currentUser.id);
   const clientContracts = data.contracts.filter((contract) => contract.clientId === currentUser.id);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedDispute, setSelectedDispute] = useState<DisputeRecord | null>(null);
   const [editingDispute, setEditingDispute] = useState<DisputeRecord | null>(null);
   const [draft, setDraft] = useState({
     targetUserId: clientWorkers[0]?.id || "",
@@ -4436,6 +4543,7 @@ function DisputesView({
   }
 
   function startResolve(dispute: DisputeRecord) {
+    setSelectedDispute(null);
     setEditingDispute(dispute);
     setResolutionDraft({ status: dispute.status === "open" ? "reviewing" : dispute.status, resolution: dispute.resolution || "" });
   }
@@ -4457,8 +4565,7 @@ function DisputesView({
   }
 
   return (
-    <div className={embedded ? "dashboard-stack embedded-disputes" : "dashboard-stack"}>
-      {!embedded ? (
+    <div className="dashboard-stack">
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -4472,25 +4579,15 @@ function DisputesView({
           ) : null}
         </div>
       </section>
-      ) : null}
 
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>{embedded ? "Contract Disputes" : "Disputes"}</h2>
-            <p>
-              {embedded
-                ? "Open and track conflicts tied to contracts, bidder work, or released payments."
-                : "Resolution requests are tracked here with status and notes."}
-            </p>
+            <h2>Disputes</h2>
+            <p>Resolution requests are tracked here with status and notes.</p>
           </div>
           <div className="actions">
             <span className="badge">{(data.disputes || []).length} total</span>
-            {embedded && canCreateDispute ? (
-              <button className="primary-button compact-button" type="button" onClick={() => setShowCreateModal(true)}>
-                Open dispute
-              </button>
-            ) : null}
           </div>
         </div>
         <div className="table-wrap">
@@ -4500,31 +4597,40 @@ function DisputesView({
                 <th>Subject</th>
                 <th>Client</th>
                 <th>Bidder</th>
+                <th>Contract</th>
+                <th>Payment</th>
                 <th>Status</th>
                 <th>Updated</th>
-                {canResolveDisputes ? <th>Actions</th> : null}
               </tr>
             </thead>
             <tbody>
               {(data.disputes || []).map((dispute) => {
                 const client = userById(data.users, dispute.clientId);
                 const target = userById(data.users, dispute.targetUserId);
+                const contract = data.contracts.find((item) => item.id === dispute.contractId);
+                const payment = data.payments.find((item) => item.id === dispute.paymentId);
                 return (
-                  <tr key={dispute.id}>
+                  <tr
+                    className="clickable-row"
+                    key={dispute.id}
+                    tabIndex={0}
+                    onClick={() => setSelectedDispute(dispute)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        setSelectedDispute(dispute);
+                      }
+                    }}
+                  >
                     <td>
                       <strong>{dispute.subject}</strong>
                       <span className="table-subtext">{dispute.body}</span>
-                      {dispute.resolution ? <span className="table-subtext">Resolution: {dispute.resolution}</span> : null}
                     </td>
                     <td>{client?.name || "Unknown client"}</td>
                     <td>{target?.name || "-"}</td>
+                    <td>{contract?.title || "-"}</td>
+                    <td>{payment ? `${money(payment.amount)} - ${shortDate(payment.scheduledDate)}` : "-"}</td>
                     <td><span className={`badge ${disputeStatusClass(dispute.status)}`}>{titleCase(dispute.status)}</span></td>
                     <td>{dateTime(dispute.updatedAt)}</td>
-                    {canResolveDisputes ? (
-                      <td>
-                        <ActionMenu items={[{ label: "Resolve", onClick: () => startResolve(dispute) }]} />
-                      </td>
-                    ) : null}
                   </tr>
                 );
               })}
@@ -4533,6 +4639,19 @@ function DisputesView({
         </div>
         {!data.disputes?.length ? <div className="empty-state">No disputes yet.</div> : null}
       </section>
+
+      {selectedDispute ? (
+        <DisputeDetailModal
+          dispute={selectedDispute}
+          client={userById(data.users, selectedDispute.clientId)}
+          target={userById(data.users, selectedDispute.targetUserId)}
+          contract={data.contracts.find((item) => item.id === selectedDispute.contractId)}
+          payment={data.payments.find((item) => item.id === selectedDispute.paymentId)}
+          canResolve={canResolveDisputes}
+          onResolve={() => startResolve(selectedDispute)}
+          onClose={() => setSelectedDispute(null)}
+        />
+      ) : null}
 
       {showCreateModal ? (
         <ModalFrame title="Open Dispute" subtitle="Describe the issue for super admin review." onClose={() => setShowCreateModal(false)}>
@@ -4611,6 +4730,71 @@ function DisputesView({
         </ModalFrame>
       ) : null}
     </div>
+  );
+}
+
+function DisputeDetailModal({
+  dispute,
+  client,
+  target,
+  contract,
+  payment,
+  canResolve,
+  onResolve,
+  onClose,
+}: {
+  dispute: DisputeRecord;
+  client?: PortalUser | null;
+  target?: PortalUser | null;
+  contract?: ContractRecord | null;
+  payment?: PaymentRecord | null;
+  canResolve: boolean;
+  onResolve: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <ModalFrame title="Dispute Details" subtitle={dispute.subject} onClose={onClose}>
+      <div className="detail-stack">
+        <div className="profile-grid">
+          <div className="metric">
+            <span>Client</span>
+            <strong>{client?.name || "Unknown client"}</strong>
+          </div>
+          <div className="metric">
+            <span>Bidder</span>
+            <strong>{target?.name || "-"}</strong>
+          </div>
+          <div className="metric">
+            <span>Status</span>
+            <strong>{titleCase(dispute.status)}</strong>
+          </div>
+          <div className="metric">
+            <span>Updated</span>
+            <strong>{dateTime(dispute.updatedAt)}</strong>
+          </div>
+        </div>
+        <div className="mini-metrics">
+          <span><strong>{contract?.title || "-"}</strong> contract</span>
+          <span><strong>{payment ? money(payment.amount) : "-"}</strong> payment</span>
+          <span><strong>{payment ? shortDate(payment.scheduledDate) : "-"}</strong> payment date</span>
+        </div>
+        <section className="detail-section">
+          <h3>Issue</h3>
+          <p>{dispute.body}</p>
+        </section>
+        <section className="detail-section">
+          <h3>Resolution</h3>
+          <p>{dispute.resolution || "No resolution note yet."}</p>
+        </section>
+        <div className="actions">
+          {canResolve ? (
+            <button className="primary-button compact-button" type="button" onClick={onResolve}>
+              Resolve dispute
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </ModalFrame>
   );
 }
 

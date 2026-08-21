@@ -917,7 +917,6 @@ td > strong {
   gap: 12px;
 }
 
-.contract-grid,
 .bid-profile-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 420px));
@@ -954,28 +953,48 @@ td > strong {
 }
 
 .post-card,
-.contract-card,
 .bid-profile-card {
   min-height: 0;
 }
 
-.contract-card,
 .bid-profile-card {
   gap: 8px;
   padding: 12px;
 }
 
-.contract-card p,
 .bid-profile-card p {
   font-size: 14px;
   line-height: 1.4;
 }
 
-.contract-card .badge,
 .bid-profile-card .badge {
   min-height: 28px;
   padding: 6px 10px;
   font-size: 12px;
+}
+
+.detail-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.detail-section {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(242, 248, 246, 0.72);
+}
+
+.detail-section h3,
+.detail-section p {
+  margin: 0;
+}
+
+.detail-section p {
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .help-grid {
