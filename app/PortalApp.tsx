@@ -1819,7 +1819,7 @@ export default function PortalApp() {
             {safeView === "overview" && canViewManaged ? <AdminOverview data={data} /> : null}
             {safeView === "profile" ? <ProfileView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "clients" ? <ClientDirectoryView data={data} onMessageClient={openInboxForUser} /> : null}
-            {safeView === "bidders" ? <BiddersDirectoryView data={data} onMessageBidder={openInboxForUser} /> : null}
+            {safeView === "bidders" ? <BiddersDirectoryView data={data} busy={busy} onAction={postAction} onMessageBidder={openInboxForUser} /> : null}
             {safeView === "posts" ? <PostsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
             {safeView === "contracts" ? <ContractsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
             {safeView === "people" && isSuperAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
@@ -2131,18 +2131,6 @@ function ProfileView({
   const profileTimeZoneOptions = timeZoneOptions.includes(draft.profileTimeZone)
     ? timeZoneOptions
     : [draft.profileTimeZone, ...timeZoneOptions].filter(Boolean);
-  const relatedProfiles = data.users.filter((profileUser) => {
-    if (profileUser.id === user.id || !isProfileComplete(profileUser)) {
-      return false;
-    }
-    if (user.role === "bidder") {
-      return isClientRole(profileUser.role);
-    }
-    if (canViewManagedRecords(user.role)) {
-      return profileUser.role === "bidder";
-    }
-    return isClientRole(profileUser.role);
-  });
 
   function toggleClientPreference(preference: string) {
     setDraft((current) => {
@@ -2427,16 +2415,6 @@ function ProfileView({
       </section>
 
       {isClientProfile ? <ClientBidProfilesManager data={data} busy={busy} onSave={onSave} /> : null}
-
-      <section className="panel">
-        <div className="section-heading">
-          <div>
-            <h2>Visible Profiles</h2>
-            <p>{user.role === "bidder" ? "Client profiles available to bidders." : "Bidder profiles assigned to this client view."}</p>
-          </div>
-        </div>
-        <ProfileCardGrid users={relatedProfiles} />
-      </section>
     </div>
   );
 }
@@ -2473,6 +2451,7 @@ function bidProfileDraft(profile: BidProfileRecord | null, user: PortalUser) {
     targetSalary: profile?.targetSalary || "",
     visaStatus: profile?.visaStatus || "",
     jobTitles: (profile?.jobTitles || []).join(", "),
+    assignedBidderIds: profile?.assignedBidderIds || [],
     extraFieldsText: extraFieldsInput(profile?.extraFields || []),
     notes: profile?.notes || "",
   };
@@ -2489,17 +2468,29 @@ function ClientBidProfilesManager({
 }) {
   const user = data.currentUser;
   const profiles = (data.bidProfiles || []).filter((profile) => profile.clientId === user.id);
+  const attachableBidders = data.users
+    .filter((candidate) => candidate.role === "bidder" && candidate.status === "approved" && candidate.assignedAdminId === user.id)
+    .sort((left, right) => left.name.localeCompare(right.name));
   const [editingProfile, setEditingProfile] = useState<BidProfileRecord | null>(null);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [draft, setDraft] = useState(() => bidProfileDraft(null, user));
+
+  function addProfile() {
+    setEditingProfile(null);
+    setDraft(bidProfileDraft(null, user));
+    setProfileModalOpen(true);
+  }
 
   function editProfile(profile: BidProfileRecord) {
     setEditingProfile(profile);
     setDraft(bidProfileDraft(profile, user));
+    setProfileModalOpen(true);
   }
 
   function resetDraft() {
     setEditingProfile(null);
     setDraft(bidProfileDraft(null, user));
+    setProfileModalOpen(false);
   }
 
   async function submit(event: FormEvent) {
@@ -2514,12 +2505,30 @@ function ClientBidProfilesManager({
       targetSalary: draft.targetSalary,
       visaStatus: draft.visaStatus,
       jobTitles: parseListInput(draft.jobTitles),
+      assignedBidderIds: draft.assignedBidderIds,
       extraFields: parseExtraFieldsInput(draft.extraFieldsText),
       notes: draft.notes,
     });
     if (nextData) {
       resetDraft();
     }
+  }
+
+  function toggleAssignedBidder(bidderId: string) {
+    setDraft((currentDraft) => {
+      const assigned = new Set(currentDraft.assignedBidderIds);
+      if (assigned.has(bidderId)) {
+        assigned.delete(bidderId);
+      } else {
+        assigned.add(bidderId);
+      }
+      return { ...currentDraft, assignedBidderIds: Array.from(assigned) };
+    });
+  }
+
+  function attachedBidderNames(profile: BidProfileRecord) {
+    const assigned = new Set(profile.assignedBidderIds || []);
+    return attachableBidders.filter((bidder) => assigned.has(bidder.id)).map((bidder) => bidder.name);
   }
 
   async function deleteProfile(profile: BidProfileRecord) {
@@ -2539,9 +2548,16 @@ function ClientBidProfilesManager({
           <h2>Bid Profiles</h2>
           <p>Create reusable client bid profiles for bidders to use when applying.</p>
         </div>
-        <span className="badge bidder">{profiles.length} profiles</span>
+        <div className="actions">
+          <span className="badge bidder">{profiles.length} profiles</span>
+          <button className="primary-button compact-button" type="button" disabled={busy} onClick={addProfile}>
+            Add bid profile
+          </button>
+        </div>
       </div>
 
+      {profileModalOpen ? (
+        <ModalFrame title={editingProfile ? "Edit Bid Profile" : "Add Bid Profile"} subtitle="Attach this profile to assigned bidders." onClose={resetDraft}>
       <form className="form-grid" onSubmit={submit}>
         <label className="field">
           <span>Profile name *</span>
@@ -2571,6 +2587,25 @@ function ClientBidProfilesManager({
           <span>Job titles *</span>
           <input value={draft.jobTitles} onChange={(event) => setDraft({ ...draft, jobTitles: event.target.value })} placeholder={jobTitleOptions.slice(0, 4).join(", ")} required />
         </label>
+        <div className="field full">
+          <span>Attach to bidders</span>
+          {attachableBidders.length ? (
+            <div className="checkbox-grid compact-checkbox-grid">
+              {attachableBidders.map((bidder) => (
+                <label className="check-field" key={bidder.id}>
+                  <input
+                    type="checkbox"
+                    checked={draft.assignedBidderIds.includes(bidder.id)}
+                    onChange={() => toggleAssignedBidder(bidder.id)}
+                  />
+                  <span>{bidder.name}</span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <span className="muted">No assigned bidders are available yet.</span>
+          )}
+        </div>
         <label className="field full">
           <span>Additional fields</span>
           <textarea value={draft.extraFieldsText} onChange={(event) => setDraft({ ...draft, extraFieldsText: event.target.value })} placeholder="Portfolio: https://example.com" />
@@ -2590,14 +2625,19 @@ function ClientBidProfilesManager({
           ) : null}
         </div>
       </form>
+        </ModalFrame>
+      ) : null}
 
       <div className="bid-profile-grid">
-        {profiles.map((profile) => (
-          <article className="profile-card" key={profile.id}>
+        {profiles.map((profile) => {
+          const assignedNames = attachedBidderNames(profile);
+          return (
+          <article className="profile-card bid-profile-card" key={profile.id}>
             <div className="person-title">
               <div>
                 <h3>{profile.profileName}</h3>
                 <span className="table-subtext">{profile.fullLegalName} - {profile.contactEmail}</span>
+                <span className="table-subtext">{assignedNames.length ? `Attached to ${assignedNames.join(", ")}` : "Not attached to bidders"}</span>
               </div>
               <ActionMenu
                 items={[
@@ -2607,45 +2647,18 @@ function ClientBidProfilesManager({
               />
             </div>
             <div className="badge-row">
-              {profile.jobTitles.map((title) => (
+              {profile.jobTitles.slice(0, 4).map((title) => (
                 <span className="badge" key={title}>{title}</span>
               ))}
+              {profile.jobTitles.length > 4 ? <span className="badge">+{profile.jobTitles.length - 4}</span> : null}
             </div>
             <p>{profile.notes || "No notes added."}</p>
           </article>
-        ))}
+          );
+        })}
         {!profiles.length ? <div className="empty-state">No bid profiles yet.</div> : null}
       </div>
     </section>
-  );
-}
-
-function ProfileCardGrid({ users }: { users: PortalUser[] }) {
-  if (!users.length) {
-    return <div className="empty-state">No completed profiles are visible yet.</div>;
-  }
-
-  return (
-    <div className="profile-grid">
-      {users.map((user) => (
-        <article className="profile-card" key={user.id}>
-          <div className="person-title">
-            <div>
-              <h3>{user.name}</h3>
-              <span className="table-subtext">{roleLabel(user.role)} - {user.profileLocation || "Location not set"}</span>
-            </div>
-            <span className={`badge ${user.role}`}>{roleLabel(user.role)}</span>
-          </div>
-          <strong>{user.profileTitle || "Profile title not set"}</strong>
-          <p>{user.profileBio || "No profile bio yet."}</p>
-          <div className="badge-row">
-            {(user.profileSkills || []).map((skill) => (
-              <span className="badge" key={skill}>{skill}</span>
-            ))}
-          </div>
-        </article>
-      ))}
-    </div>
   );
 }
 
@@ -2974,9 +2987,13 @@ function ClientDirectoryView({
 
 function BiddersDirectoryView({
   data,
+  busy,
+  onAction,
   onMessageBidder,
 }: {
   data: PortalData;
+  busy: boolean;
+  onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
   onMessageBidder: (bidderId: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -3007,10 +3024,23 @@ function BiddersDirectoryView({
   const selectedBidderPayments = selectedBidder
     ? data.payments.filter((payment) => payment.userId === selectedBidder.id).slice(0, 8)
     : [];
+  const clientBidProfiles = (data.bidProfiles || []).filter((profile) => profile.clientId === data.currentUser.id);
+  const selectedBidderAttachedProfiles = selectedBidder
+    ? clientBidProfiles.filter((profile) => (profile.assignedBidderIds || []).includes(selectedBidder.id))
+    : [];
 
   function messageSelectedBidder(bidder: PortalUser) {
     setSelectedBidder(null);
     onMessageBidder(bidder.id);
+  }
+
+  async function toggleBidProfileForBidder(profile: BidProfileRecord, bidder: PortalUser) {
+    const assigned = (profile.assignedBidderIds || []).includes(bidder.id);
+    await onAction("assignBidProfile", {
+      bidProfileId: profile.id,
+      bidderId: bidder.id,
+      assigned: !assigned,
+    });
   }
 
   return (
@@ -3122,7 +3152,59 @@ function BiddersDirectoryView({
                 <h3>Reviews</h3>
                 <p>No written reviews yet.</p>
               </article>
+              <article className="profile-card bid-profile-card">
+                <h3>Attached Bid Profiles</h3>
+                {selectedBidderAttachedProfiles.length ? (
+                  <div className="badge-row">
+                    {selectedBidderAttachedProfiles.map((profile) => (
+                      <span className="badge bidder" key={profile.id}>{profile.profileName}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <p>No bid profiles attached.</p>
+                )}
+              </article>
             </div>
+
+            {clientBidProfiles.length ? (
+              <section className="panel nested-panel" style={{ marginBottom: 18 }}>
+                <div className="panel-header">
+                  <div>
+                    <h2>Attach Bid Profiles</h2>
+                    <p>Choose which client bid profiles this bidder can use.</p>
+                  </div>
+                </div>
+                <div className="bid-profile-grid">
+                  {clientBidProfiles.map((profile) => {
+                    const assigned = (profile.assignedBidderIds || []).includes(selectedBidder.id);
+                    return (
+                      <article className="profile-card bid-profile-card" key={profile.id}>
+                        <div className="person-title">
+                          <div>
+                            <h3>{profile.profileName}</h3>
+                            <span className="table-subtext">{profile.fullLegalName} - {profile.contactEmail}</span>
+                          </div>
+                          <span className={`badge ${assigned ? "approved" : "pending"}`}>{assigned ? "Attached" : "Not attached"}</span>
+                        </div>
+                        <div className="badge-row">
+                          {profile.jobTitles.slice(0, 3).map((title) => (
+                            <span className="badge" key={title}>{title}</span>
+                          ))}
+                        </div>
+                        <button
+                          className={assigned ? "ghost-button compact-button" : "primary-button compact-button"}
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void toggleBidProfileForBidder(profile, selectedBidder)}
+                        >
+                          {assigned ? "Remove from bidder" : "Attach to bidder"}
+                        </button>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
 
             <div className="two-column">
               <section className="panel nested-panel">

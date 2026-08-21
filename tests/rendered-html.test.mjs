@@ -50,6 +50,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Post Credit/);
   assert.match(portalApp, /Create Post/);
   assert.match(portalApp, /Publish post/);
+  assert.match(portalApp, /Edit Bid Profile/);
+  assert.match(portalApp, /Attach Bid Profiles/);
+  assert.match(portalApp, /Attach to bidder/);
   assert.match(portalApp, /Start Contract/);
   assert.match(portalApp, /Contract Management/);
   assert.match(portalApp, /Edit Contract/);
@@ -136,6 +139,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Save post/);
   assert.match(portalApp, /Delete chat/);
   assert.doesNotMatch(portalApp, /Roles ready|Work logging|No Stripe|set payment rates/);
+  assert.doesNotMatch(portalApp, /Visible Profiles|ProfileCardGrid/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.doesNotMatch(`${page}\n${layout}\n${portalApp}`, /codex-preview|Your site is taking shape/i);
 });
@@ -163,6 +167,10 @@ test("declares the requested frontend records", async () => {
     "Posts",
     "Post Credit",
     "Create Post",
+    "Edit Bid Profile",
+    "Attach Bid Profiles",
+    "Attach to bidder",
+    "Remove from bidder",
     "Available Posts",
     "My Posts",
     "Contracts",
@@ -250,6 +258,7 @@ test("declares the requested frontend records", async () => {
     "updateOwnPassword",
     "createCreditDeposit",
     "addManualCredit",
+    "assignBidProfile",
     "createPost",
     "updatePost",
     "updatePostStatus",
@@ -299,6 +308,8 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /user\.role === "bidder" && user\.status === "approved"/);
   assert.match(portalApp, /PortalPost/);
   assert.match(portalApp, /ContractRecord/);
+  assert.match(portalApp, /assignedBidderIds/);
+  assert.match(portalApp, /profileModalOpen/);
   assert.match(portalApp, /contractNextPaymentDateDefault/);
   assert.match(portalApp, /ContractEditModal/);
   assert.match(portalApp, /canEditContract/);
@@ -381,6 +392,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /audio controls/);
   assert.match(portalApp, /img src/);
   assert.doesNotMatch(portalApp, /Group Chat|Bidder Group|group messages|Client time /);
+  assert.doesNotMatch(portalApp, /Visible Profiles|ProfileCardGrid/);
   assert.match(envExample, /NEXT_PUBLIC_API_BASE_URL/);
   assert.match(envExample, /NEXT_PUBLIC_PORTAL_MODE/);
   assert.match(envExample, /NEXT_PUBLIC_ADMIN_TIME_ZONE/);

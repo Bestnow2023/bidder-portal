@@ -120,6 +120,7 @@ export type BidProfileRecord = {
   targetSalary: string;
   visaStatus: string;
   jobTitles: string[];
+  assignedBidderIds?: string[];
   extraFields: { label: string; value: string }[];
   notes: string;
   createdAt: string;

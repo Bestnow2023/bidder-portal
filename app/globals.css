@@ -892,10 +892,15 @@ td > strong {
 }
 
 .post-grid,
-.contract-grid,
-.bid-profile-grid {
+.contract-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.bid-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 420px));
   gap: 12px;
 }
 
@@ -929,8 +934,25 @@ td > strong {
 }
 
 .post-card,
-.contract-card {
+.contract-card,
+.bid-profile-card {
   min-height: 0;
+}
+
+.bid-profile-card {
+  gap: 8px;
+  padding: 12px;
+}
+
+.bid-profile-card p {
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.bid-profile-card .badge {
+  min-height: 28px;
+  padding: 6px 10px;
+  font-size: 12px;
 }
 
 .credit-strip {
