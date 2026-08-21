@@ -78,6 +78,7 @@ export type ContractRecord = {
   bonusPerInterview: number;
   paymentFrequency: PaymentFrequency;
   paymentWeekday: PaymentWeekday;
+  nextPaymentDate: string;
   startDate: string;
   status: ContractStatus;
   sourcePostId?: string;

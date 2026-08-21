@@ -40,7 +40,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Dashboard/);
   assert.match(portalApp, /Settings/);
   assert.match(portalApp, /Profile Settings/);
-  assert.match(portalApp, /Account Settings/);
+  assert.match(portalApp, /Security/);
+  assert.match(portalApp, /Profile settings/);
   assert.match(portalApp, /Client Search/);
   assert.match(portalApp, /Search clients/);
   assert.match(portalApp, /Bidder Search/);
@@ -51,6 +52,11 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Publish post/);
   assert.match(portalApp, /Start Contract/);
   assert.match(portalApp, /Contract Management/);
+  assert.match(portalApp, /Edit Contract/);
+  assert.match(portalApp, /Save contract/);
+  assert.match(portalApp, /Next payday/);
+  assert.match(portalApp, /Set Next Payday/);
+  assert.match(portalApp, /Save next payday/);
   assert.match(portalApp, /Contract Disputes/);
   assert.match(portalApp, /Connected client credit/);
   assert.match(portalApp, /Contracted with another client/);
@@ -141,7 +147,8 @@ test("declares the requested frontend records", async () => {
     "Manage accounts, approval status, roles, passwords, and email verification.",
     "Settings",
     "Profile Settings",
-    "Account Settings",
+    "Security",
+    "Profile settings",
     "Save email",
     "Save password",
     "Client Search",
@@ -154,6 +161,11 @@ test("declares the requested frontend records", async () => {
     "Contracts",
     "Start Contract",
     "Contract Management",
+    "Edit Contract",
+    "Save contract",
+    "Next payday",
+    "Set Next Payday",
+    "Save next payday",
     "Specific criteria",
     "Contract Disputes",
     "Money credit",
@@ -226,7 +238,9 @@ test("declares the requested frontend records", async () => {
     "createPost",
     "updatePostStatus",
     "createContract",
+    "updateContract",
     "updateContractStatus",
+    "updateContractPayday",
     "markNotificationsRead",
     "releasePayment",
     "completePayment",
@@ -266,6 +280,10 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /clientUsers/);
   assert.match(portalApp, /PortalPost/);
   assert.match(portalApp, /ContractRecord/);
+  assert.match(portalApp, /contractNextPaymentDateDefault/);
+  assert.match(portalApp, /ContractEditModal/);
+  assert.match(portalApp, /canEditContract/);
+  assert.match(portalApp, /canSetContractPayday/);
   assert.match(portalApp, /userCreditBalances/);
   assert.match(portalApp, /timeZoneOptions/);
   assert.match(portalApp, /client@portal\.local/);
@@ -300,6 +318,8 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /sessionToken/);
   assert.match(portalApp, /workLogId/);
   assert.match(portalApp, /ActionMenu/);
+  assert.match(portalApp, /AccountMenu/);
+  assert.match(portalApp, /account-menu/);
   assert.match(portalApp, /viewRoutes/);
   assert.match(portalApp, /routeViews/);
   assert.match(portalApp, /navigateToView/);

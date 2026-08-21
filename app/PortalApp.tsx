@@ -318,6 +318,10 @@ function paymentScheduleLabel(frequencyInput?: string, weekdayInput?: string) {
   return `${frequencyLabel} on ${weekdayLabel}`;
 }
 
+function contractNextPaymentDateDefault(frequencyInput?: string, weekdayInput?: string, startDateInput = today()) {
+  return nextPaymentDateFromSchedule(frequencyInput, weekdayInput, startDateInput || today()) || startDateInput || today();
+}
+
 function roleLabel(role: Role) {
   if (role === "super_admin") return "Super Admin";
   if (role === "client" || role === "admin") return "Client";
@@ -1681,8 +1685,7 @@ export default function PortalApp() {
   const portalNotifications = data.notifications || [];
   const unreadPortalNotifications = portalNotifications.filter((notification) => !notification.readAt).length;
 
-  function navigateToView(event: ReactMouseEvent<HTMLAnchorElement>, view: PortalView) {
-    event.preventDefault();
+  function goToView(view: PortalView) {
     const nextPath = viewRoutes[view];
 
     if (typeof window !== "undefined" && window.location.pathname !== nextPath) {
@@ -1695,6 +1698,12 @@ export default function PortalApp() {
     if (view === "chat") {
       setChatUnreadCount(0);
     }
+    setPortalNavVisible(true);
+  }
+
+  function navigateToView(event: ReactMouseEvent<HTMLAnchorElement>, view: PortalView) {
+    event.preventDefault();
+    goToView(view);
   }
 
   function openInboxForUser(userId: string, relatedPostId = "") {
@@ -1760,13 +1769,12 @@ export default function PortalApp() {
               onToggle={() => setNotificationMenuOpen((open) => !open)}
               onMarkRead={markPortalNotificationsRead}
             />
-            <div className="portal-user">
-              <strong>{currentUser.name}</strong>
-              <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
-            </div>
-            <button className="ghost-button compact-button" type="button" onClick={signOut}>
-              Sign out
-            </button>
+            <AccountMenu
+              user={currentUser}
+              onProfileSettings={() => goToView("profile")}
+              onSecurity={() => goToView("profile")}
+              onSignOut={signOut}
+            />
           </div>
         </div>
       </header>
@@ -1882,6 +1890,91 @@ function AdminNotificationMenu({
             ))}
             {!latestNotifications.length ? <div className="empty-state compact">No notifications yet.</div> : null}
           </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AccountMenu({
+  user,
+  onProfileSettings,
+  onSecurity,
+  onSignOut,
+}: {
+  user: PortalUser;
+  onProfileSettings: () => void;
+  onSecurity: () => void;
+  onSignOut: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    function closeMenu() {
+      setOpen(false);
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (wrapRef.current?.contains(target)) {
+        return;
+      }
+
+      closeMenu();
+    }
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  function choose(action: () => void) {
+    setOpen(false);
+    action();
+  }
+
+  return (
+    <div className="account-menu-wrap" ref={wrapRef}>
+      <button
+        className="portal-user account-trigger"
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((nextOpen) => !nextOpen)}
+      >
+        <strong>{user.name}</strong>
+        <span className={`badge ${user.role}`}>{roleLabel(user.role)}</span>
+        <span className="account-caret" aria-hidden="true">▾</span>
+      </button>
+      {open ? (
+        <div className="account-menu" role="menu">
+          <button type="button" role="menuitem" onClick={() => choose(onProfileSettings)}>
+            Profile settings
+          </button>
+          <button type="button" role="menuitem" onClick={() => choose(onSecurity)}>
+            Security
+          </button>
+          <button type="button" role="menuitem" className="danger" onClick={() => choose(onSignOut)}>
+            Sign out
+          </button>
         </div>
       ) : null}
     </div>
@@ -2231,7 +2324,7 @@ function ProfileView({
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Account Settings</h2>
+            <h2>Security</h2>
             <p>Update the email used for sign-in and manage your password.</p>
           </div>
           <div className="badge-row">
@@ -3164,6 +3257,7 @@ function PostsView({
       bonusPerInterview: post.bonusPerInterview || author.bonusPerInterview || 0,
       paymentFrequency: post.paymentFrequency || "weekly",
       paymentWeekday: post.paymentWeekday || "friday",
+      nextPaymentDate: contractNextPaymentDateDefault(post.paymentFrequency || "weekly", post.paymentWeekday || "friday", today()),
       startDate: today(),
       sourcePostId: post.id,
     });
@@ -3453,9 +3547,13 @@ function ContractsView({
     bonusPerInterview: "",
     paymentFrequency: "weekly" as PaymentFrequency,
     paymentWeekday: "friday" as PaymentWeekday,
+    nextPaymentDate: contractNextPaymentDateDefault("weekly", "friday", today()),
     startDate: today(),
   });
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingContract, setEditingContract] = useState<ContractRecord | null>(null);
+  const [paydayContract, setPaydayContract] = useState<ContractRecord | null>(null);
+  const [paydayDate, setPaydayDate] = useState("");
   const contracts = data.contracts || [];
 
   async function submitContract(event: FormEvent) {
@@ -3469,6 +3567,7 @@ function ContractsView({
       bonusPerInterview: Number(draft.bonusPerInterview),
       paymentFrequency: draft.paymentFrequency,
       paymentWeekday: draft.paymentWeekday,
+      nextPaymentDate: draft.nextPaymentDate,
       startDate: draft.startDate,
     });
     if (nextData) {
@@ -3479,9 +3578,18 @@ function ContractsView({
         criteria: "",
         ratePerApplication: "",
         bonusPerInterview: "",
+        nextPaymentDate: contractNextPaymentDateDefault(draft.paymentFrequency, draft.paymentWeekday, draft.startDate),
       });
       setShowCreateModal(false);
     }
+  }
+
+  function updateContractScheduleDraft(updates: Partial<typeof draft>) {
+    const nextDraft = { ...draft, ...updates };
+    setDraft({
+      ...nextDraft,
+      nextPaymentDate: contractNextPaymentDateDefault(nextDraft.paymentFrequency, nextDraft.paymentWeekday, nextDraft.startDate),
+    });
   }
 
   function contractCounterparty(contract: ContractRecord) {
@@ -3500,8 +3608,37 @@ function ContractsView({
     return contract.status === "active";
   }
 
+  function canSetContractPayday(contract: ContractRecord) {
+    return (isSuperAdminRole(currentUser.role) || currentUser.id === contract.clientId) && ["requested", "active"].includes(contract.status);
+  }
+
+  function canEditContract(contract: ContractRecord) {
+    return canSetContractPayday(contract);
+  }
+
   async function updateContract(contract: ContractRecord, status: "active" | "rejected" | "ended") {
     await onAction("updateContractStatus", { contractId: contract.id, status });
+  }
+
+  function openPaydayModal(contract: ContractRecord) {
+    setPaydayContract(contract);
+    setPaydayDate(contract.nextPaymentDate || contractNextPaymentDateDefault(contract.paymentFrequency, contract.paymentWeekday, contract.startDate));
+  }
+
+  async function submitPayday(event: FormEvent) {
+    event.preventDefault();
+    if (!paydayContract) {
+      return;
+    }
+
+    const nextData = await onAction("updateContractPayday", {
+      contractId: paydayContract.id,
+      nextPaymentDate: paydayDate,
+    });
+    if (nextData) {
+      setPaydayContract(null);
+      setPaydayDate("");
+    }
   }
 
   return (
@@ -3550,6 +3687,7 @@ function ContractsView({
                   <span><strong>{money(contract.ratePerApplication || 0)}</strong> rate</span>
                   <span><strong>{money(contract.bonusPerInterview || 0)}</strong> bonus</span>
                   <span><strong>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday)}</strong> schedule</span>
+                  <span><strong>{shortDate(contract.nextPaymentDate)}</strong> next payday</span>
                   <span><strong>{shortDate(contract.startDate)}</strong> start</span>
                 </div>
                 <p className="muted">
@@ -3571,6 +3709,16 @@ function ContractsView({
                   {canAcceptContract(contract) ? (
                     <button className="primary-button compact-button" type="button" disabled={busy} onClick={() => updateContract(contract, "active")}>
                       Accept
+                    </button>
+                  ) : null}
+                  {canEditContract(contract) ? (
+                    <button className="ghost-button compact-button" type="button" disabled={busy} onClick={() => setEditingContract(contract)}>
+                      Edit contract
+                    </button>
+                  ) : null}
+                  {canSetContractPayday(contract) ? (
+                    <button className="ghost-button compact-button" type="button" disabled={busy} onClick={() => openPaydayModal(contract)}>
+                      Set payday
                     </button>
                   ) : null}
                   {canRejectContract(contract) ? (
@@ -3619,7 +3767,7 @@ function ContractsView({
             </label>
             <label className="field">
               <span>Frequency</span>
-              <select value={draft.paymentFrequency} onChange={(event) => setDraft({ ...draft, paymentFrequency: event.target.value as PaymentFrequency })}>
+              <select value={draft.paymentFrequency} onChange={(event) => updateContractScheduleDraft({ paymentFrequency: event.target.value as PaymentFrequency })}>
                 {paymentFrequencies.filter((frequency) => frequency.value).map((frequency) => (
                   <option key={frequency.value} value={frequency.value}>{frequency.label}</option>
                 ))}
@@ -3627,15 +3775,19 @@ function ContractsView({
             </label>
             <label className="field">
               <span>Weekday</span>
-              <select value={draft.paymentWeekday} onChange={(event) => setDraft({ ...draft, paymentWeekday: event.target.value as PaymentWeekday })}>
+              <select value={draft.paymentWeekday} onChange={(event) => updateContractScheduleDraft({ paymentWeekday: event.target.value as PaymentWeekday })}>
                 {paymentWeekdays.filter((weekday) => weekday.value).map((weekday) => (
                   <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
                 ))}
               </select>
             </label>
             <label className="field">
+              <span>Next payday</span>
+              <input type="date" value={draft.nextPaymentDate} onChange={(event) => setDraft({ ...draft, nextPaymentDate: event.target.value })} required />
+            </label>
+            <label className="field">
               <span>Start date</span>
-              <input type="date" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} />
+              <input type="date" value={draft.startDate} onChange={(event) => updateContractScheduleDraft({ startDate: event.target.value })} />
             </label>
             <label className="field full">
               <span>Specific criteria</span>
@@ -3649,7 +3801,139 @@ function ContractsView({
           </form>
         </ModalFrame>
       ) : null}
+      {editingContract ? (
+        <ContractEditModal
+          contract={editingContract}
+          busy={busy}
+          onClose={() => setEditingContract(null)}
+          onSave={async (payload) => {
+            const nextData = await onAction("updateContract", payload);
+            if (nextData) {
+              setEditingContract(null);
+            }
+          }}
+        />
+      ) : null}
+      {paydayContract ? (
+        <ModalFrame title="Set Next Payday" subtitle={paydayContract.title} onClose={() => setPaydayContract(null)}>
+          <form className="form-grid" onSubmit={submitPayday}>
+            <label className="field full">
+              <span>Next payday</span>
+              <input type="date" value={paydayDate} onChange={(event) => setPaydayDate(event.target.value)} required />
+            </label>
+            <div className="actions full">
+              <button className="primary-button" type="submit" disabled={busy || !paydayDate}>
+                Save next payday
+              </button>
+              <button className="ghost-button" type="button" onClick={() => setPaydayContract(null)}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        </ModalFrame>
+      ) : null}
     </div>
+  );
+}
+
+function ContractEditModal({
+  contract,
+  busy,
+  onClose,
+  onSave,
+}: {
+  contract: ContractRecord;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState({
+    title: contract.title,
+    criteria: contract.criteria,
+    ratePerApplication: String(contract.ratePerApplication || 0),
+    bonusPerInterview: String(contract.bonusPerInterview || 0),
+    paymentFrequency: (contract.paymentFrequency || "weekly") as PaymentFrequency,
+    paymentWeekday: (contract.paymentWeekday || "friday") as PaymentWeekday,
+    nextPaymentDate: contract.nextPaymentDate || contractNextPaymentDateDefault(contract.paymentFrequency, contract.paymentWeekday, contract.startDate),
+    startDate: contract.startDate || today(),
+  });
+
+  function updateSchedule(updates: Partial<typeof draft>) {
+    const nextDraft = { ...draft, ...updates };
+    setDraft({
+      ...nextDraft,
+      nextPaymentDate: updates.nextPaymentDate ?? contractNextPaymentDateDefault(nextDraft.paymentFrequency, nextDraft.paymentWeekday, nextDraft.startDate),
+    });
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSave({
+      contractId: contract.id,
+      title: draft.title,
+      criteria: draft.criteria,
+      ratePerApplication: Number(draft.ratePerApplication),
+      bonusPerInterview: Number(draft.bonusPerInterview),
+      paymentFrequency: draft.paymentFrequency,
+      paymentWeekday: draft.paymentWeekday,
+      nextPaymentDate: draft.nextPaymentDate,
+      startDate: draft.startDate,
+    });
+  }
+
+  return (
+    <ModalFrame title="Edit Contract" subtitle="Update criteria, rates, schedule, and next payday." onClose={onClose}>
+      <form className="form-grid" onSubmit={submit}>
+        <label className="field">
+          <span>Contract title</span>
+          <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} required />
+        </label>
+        <label className="field">
+          <span>Rate per applied job</span>
+          <input type="number" min="0" step="0.01" value={draft.ratePerApplication} onChange={(event) => setDraft({ ...draft, ratePerApplication: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Interview bonus</span>
+          <input type="number" min="0" step="0.01" value={draft.bonusPerInterview} onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Frequency</span>
+          <select value={draft.paymentFrequency} onChange={(event) => updateSchedule({ paymentFrequency: event.target.value as PaymentFrequency })}>
+            {paymentFrequencies.filter((frequency) => frequency.value).map((frequency) => (
+              <option key={frequency.value} value={frequency.value}>{frequency.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Weekday</span>
+          <select value={draft.paymentWeekday} onChange={(event) => updateSchedule({ paymentWeekday: event.target.value as PaymentWeekday })}>
+            {paymentWeekdays.filter((weekday) => weekday.value).map((weekday) => (
+              <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Next payday</span>
+          <input type="date" value={draft.nextPaymentDate} onChange={(event) => updateSchedule({ nextPaymentDate: event.target.value })} required />
+        </label>
+        <label className="field">
+          <span>Start date</span>
+          <input type="date" value={draft.startDate} onChange={(event) => updateSchedule({ startDate: event.target.value })} />
+        </label>
+        <label className="field full">
+          <span>Specific criteria</span>
+          <textarea value={draft.criteria} onChange={(event) => setDraft({ ...draft, criteria: event.target.value })} required />
+        </label>
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy}>
+            Save contract
+          </button>
+          <button className="ghost-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </ModalFrame>
   );
 }
 
