@@ -3,7 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 test("keeps the bidder portal as the primary screen", async () => {
-  const [page, operationsPage, settingsPage, chatPage, biddersPage, postsPage, contractsPage, billingPage, layout, portalApp, packageJson] = await Promise.all([
+  const [page, operationsPage, settingsPage, chatPage, biddersPage, postsPage, contractsPage, billingPage, layout, portalApp, globals, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/operations/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/settings/page.tsx", import.meta.url), "utf8"),
@@ -14,6 +14,7 @@ test("keeps the bidder portal as the primary screen", async () => {
     readFile(new URL("../app/billing/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
@@ -30,6 +31,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(layout, /cryptomus: "d8702318"/);
   assert.match(portalApp, /digniware-logo-dark\.png/);
   assert.match(portalApp, /digniware-logo-light\.png/);
+  assert.match(globals, /\.contract-grid,\n\.bid-profile-grid\s*\{[\s\S]*grid-template-columns: repeat\(auto-fill, minmax\(280px, 420px\)\);/);
+  assert.match(globals, /\.contract-card,\n\.bid-profile-card\s*\{/);
   assert.match(portalApp, /Email and password sign-in/);
   assert.match(portalApp, /Password/);
   assert.match(portalApp, /Sign up/);
@@ -207,6 +210,9 @@ test("declares the requested frontend records", async () => {
     "Release payment",
     "Bidder payout wallet",
     "Payout coin",
+    "Crypto type / network",
+    "TRC20 - TRON",
+    "BEP20 - BSC",
     "Wallet address",
     "Tip",
     "Credit Wallet",
@@ -325,7 +331,9 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /DepositRecord/);
   assert.match(portalApp, /PortalNotification/);
   assert.match(portalApp, /payoutCurrencies/);
-  assert.match(portalApp, /payoutNetworks/);
+  assert.match(portalApp, /payoutNetworkOptions/);
+  assert.match(portalApp, /depositNetworkOptions/);
+  assert.match(portalApp, /cryptoNetworkLabel/);
   assert.match(portalApp, /payoutMethodLabel/);
   assert.match(portalApp, /estimateForUserInRange/);
   assert.match(portalApp, /portalNotifications/);

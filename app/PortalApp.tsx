@@ -29,7 +29,34 @@ type AuthMode = "signIn" | "signUp" | "resetPassword";
 type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "people" | "bidderSettings" | "work" | "billing" | "payments" | "chat";
 
 const payoutCurrencies = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB"];
-const payoutNetworks = ["TRON", "BSC", "ETH", "BTC", "LTC", "TRX"];
+const payoutNetworkOptions = [
+  { value: "TRON", label: "TRC20 - TRON" },
+  { value: "BSC", label: "BEP20 - BSC" },
+  { value: "ETH", label: "ERC20 - Ethereum" },
+  { value: "BTC", label: "BTC - Bitcoin" },
+  { value: "LTC", label: "LTC - Litecoin" },
+  { value: "TRX", label: "TRX - TRON" },
+];
+const depositNetworkOptions = [
+  { value: "tron", label: "TRC20 - TRON" },
+  { value: "bsc", label: "BEP20 - BSC" },
+  { value: "ethereum", label: "ERC20 - Ethereum" },
+  { value: "", label: "Any supported network" },
+];
+const cryptoNetworkLabels: Record<string, string> = {
+  TRON: "TRC20 - TRON",
+  TRC20: "TRC20 - TRON",
+  BSC: "BEP20 - BSC",
+  BEP20: "BEP20 - BSC",
+  ETH: "ERC20 - Ethereum",
+  ERC20: "ERC20 - Ethereum",
+  ETHEREUM: "ERC20 - Ethereum",
+  BTC: "BTC - Bitcoin",
+  BITCOIN: "BTC - Bitcoin",
+  LTC: "LTC - Litecoin",
+  LITECOIN: "LTC - Litecoin",
+  TRX: "TRX - TRON",
+};
 const paymentFrequencies: { value: PaymentFrequency; label: string }[] = [
   { value: "weekly", label: "Weekly" },
   { value: "biweekly", label: "Biweekly" },
@@ -166,7 +193,19 @@ function money(value: number) {
 }
 
 function payoutMethodLabel(method: PaymentMethod) {
-  return [method.currency || method.method, method.network].filter(Boolean).join(" ");
+  const methodParts = method.method.split(/\s+/).filter(Boolean);
+  const currency = method.currency || methodParts[0] || method.method;
+  const network = method.network || methodParts[1] || "";
+  return [currency, cryptoNetworkLabel(network)].filter(Boolean).join(" ");
+}
+
+function cryptoNetworkLabel(network?: string) {
+  const normalized = (network || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  return cryptoNetworkLabels[normalized.toUpperCase()] || normalized;
 }
 
 function shortDate(value: string) {
@@ -5675,10 +5714,10 @@ function PaymentMethodForm({
         </select>
       </label>
       <label className="field">
-        <span>Network</span>
+        <span>Crypto type / network</span>
         <select value={network} onChange={(event) => setNetwork(event.target.value)}>
-          {payoutNetworks.map((option) => (
-            <option key={option} value={option}>{option}</option>
+          {payoutNetworkOptions.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
       </label>
@@ -6330,12 +6369,11 @@ function AdminPayments({
               </select>
             </label>
             <label className="field">
-              <span>Network</span>
+              <span>Crypto type / network</span>
               <select value={depositDraft.network} onChange={(event) => setDepositDraft({ ...depositDraft, network: event.target.value })}>
-                <option value="tron">TRON</option>
-                <option value="bsc">BEP20</option>
-                <option value="ethereum">Ethereum</option>
-                <option value="">Any supported network</option>
+                {depositNetworkOptions.map((option) => (
+                  <option key={option.value || "any"} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </label>
             <div className="actions full">
@@ -6817,12 +6855,13 @@ function DepositList({ deposits, users }: { deposits: DepositRecord[]; users: Po
       {deposits.map((deposit) => {
         const client = userById(users, deposit.clientId);
         const sourceLabel = deposit.provider === "manual" ? "manual credit" : "Cryptomus deposit";
+        const paymentMethod = [deposit.toCurrency, cryptoNetworkLabel(deposit.network)].filter(Boolean).join(" ");
         return (
           <div className="payment-row" key={deposit.id}>
             <div>
               <strong>{money(deposit.creditAmount)} credits</strong>
               <span className="muted">
-                {client?.name || "Client"} - {money(deposit.amount)} {sourceLabel} - {deposit.providerStatus || deposit.status}
+                {client?.name || "Client"} - {money(deposit.amount)} {paymentMethod} {sourceLabel} - {deposit.providerStatus || deposit.status}
               </span>
               {deposit.memo ? <span className="table-subtext">{deposit.memo}</span> : null}
             </div>

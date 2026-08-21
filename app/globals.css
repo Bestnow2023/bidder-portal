@@ -891,13 +891,13 @@ td > strong {
   gap: 8px;
 }
 
-.post-grid,
-.contract-grid {
+.post-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 12px;
 }
 
+.contract-grid,
 .bid-profile-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 420px));
@@ -939,16 +939,19 @@ td > strong {
   min-height: 0;
 }
 
+.contract-card,
 .bid-profile-card {
   gap: 8px;
   padding: 12px;
 }
 
+.contract-card p,
 .bid-profile-card p {
   font-size: 14px;
   line-height: 1.4;
 }
 
+.contract-card .badge,
 .bid-profile-card .badge {
   min-height: 28px;
   padding: 6px 10px;
