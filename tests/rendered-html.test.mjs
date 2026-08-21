@@ -123,11 +123,18 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Mark completed/);
   assert.match(portalApp, /Charge client credit/);
   assert.match(portalApp, /Charge credit/);
+  assert.match(portalApp, /Add Person/);
+  assert.match(portalApp, /Add person/);
+  assert.match(portalApp, /Mark email verified/);
   assert.match(portalApp, /Edit Payment/);
   assert.match(portalApp, /Edit User/);
   assert.match(portalApp, /Edit Bidder Settings/);
   assert.match(portalApp, /Remove/);
   assert.match(portalApp, /Delete/);
+  assert.match(portalApp, /Post Moderation/);
+  assert.match(portalApp, /Edit Post/);
+  assert.match(portalApp, /Save post/);
+  assert.match(portalApp, /Delete chat/);
   assert.doesNotMatch(portalApp, /Roles ready|Work logging|No Stripe|set payment rates/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.doesNotMatch(`${page}\n${layout}\n${portalApp}`, /codex-preview|Your site is taking shape/i);
@@ -202,6 +209,9 @@ test("declares the requested frontend records", async () => {
     "Charge client credit",
     "Credit amount",
     "Charge credit",
+    "Add Person",
+    "Add person",
+    "Mark email verified",
     "Mark read",
     "Escrow History",
     "Save paid payment",
@@ -213,6 +223,10 @@ test("declares the requested frontend records", async () => {
     "Payment link",
     "Inbox",
     "Monitored conversation",
+    "Delete chat",
+    "Post Moderation",
+    "Edit Post",
+    "Save post",
     "Local ",
     "Admin time ",
   ]) {
@@ -225,6 +239,7 @@ test("declares the requested frontend records", async () => {
     "resetPassword",
     "verifyEmail",
     "signIn",
+    "createUser",
     "updateUser",
     "setUserPassword",
     "deleteUser",
@@ -236,7 +251,9 @@ test("declares the requested frontend records", async () => {
     "createCreditDeposit",
     "addManualCredit",
     "createPost",
+    "updatePost",
     "updatePostStatus",
+    "deletePost",
     "createContract",
     "updateContract",
     "updateContractStatus",
@@ -254,6 +271,7 @@ test("declares the requested frontend records", async () => {
     "addChatMessage",
     "editChatMessage",
     "deleteChatMessage",
+    "deleteChatConversation",
   ]) {
     assert.match(portalApp, new RegExp(action));
   }
@@ -278,6 +296,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /profileCompletedAt/);
   assert.match(portalApp, /clientStats/);
   assert.match(portalApp, /clientUsers/);
+  assert.match(portalApp, /user\.role === "bidder" && user\.status === "approved"/);
   assert.match(portalApp, /PortalPost/);
   assert.match(portalApp, /ContractRecord/);
   assert.match(portalApp, /contractNextPaymentDateDefault/);
@@ -310,6 +329,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /relatedPostId/);
   assert.match(portalApp, /requestedPostId/);
   assert.match(portalApp, /conversation-list/);
+  assert.match(portalApp, /conversation-entry/);
   assert.match(portalApp, /conversation-badge/);
   assert.match(portalApp, /readReceipts/);
   assert.match(portalApp, /allowDirectMessages/);
@@ -320,12 +340,16 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /ActionMenu/);
   assert.match(portalApp, /AccountMenu/);
   assert.match(portalApp, /account-menu/);
+  assert.match(portalApp, /showAccountSettings/);
   assert.match(portalApp, /navViews/);
   assert.match(portalApp, /view !== "profile"/);
+  assert.match(portalApp, /pendingApprovalCount/);
   assert.match(portalApp, /viewRoutes/);
   assert.match(portalApp, /routeViews/);
   assert.match(portalApp, /navigateToView/);
-  assert.match(portalApp, /\["people", "contracts", "posts", "billing", "chat", "profile"\]/);
+  assert.match(portalApp, /\["people", "contracts", "posts", "billing", "chat"\]/);
+  assert.match(portalApp, /UserCreateModal/);
+  assert.match(portalApp, /PostEditModal/);
   assert.match(portalApp, /\/bidder-settings/);
   assert.match(portalApp, /\/payments/);
   assert.match(portalApp, /\/settings/);

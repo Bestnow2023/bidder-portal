@@ -19,6 +19,7 @@ import type {
   PortalNotification,
   PortalPost,
   PortalUser,
+  PostStatus,
   Role,
   UserStatus,
   WorkLog,
@@ -329,6 +330,13 @@ function roleLabel(role: Role) {
   return "Bidder";
 }
 
+const managedRoleOptions: { value: Role; label: string }[] = [
+  { value: "super_admin", label: "Super Admin" },
+  { value: "client", label: "Client" },
+  { value: "bidder", label: "Bidder" },
+  { value: "developer", label: "Developer" },
+];
+
 function isSuperAdminRole(role: Role) {
   return role === "super_admin";
 }
@@ -398,7 +406,7 @@ function viewSubtitle(view: string, isAdmin: boolean) {
 
 function viewsForUser(user: PortalUser): PortalView[] {
   if (isSuperAdminRole(user.role)) {
-    return ["people", "contracts", "posts", "billing", "chat", "profile"];
+    return ["people", "contracts", "posts", "billing", "chat"];
   }
 
   if (isClientRole(user.role)) {
@@ -793,7 +801,8 @@ function ActionMenu({ label = "...", items }: { label?: string; items: ActionMen
         aria-haspopup="menu"
         aria-expanded={isOpen}
         className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-transparent bg-transparent text-xl font-black leading-none text-slate-500 transition hover:bg-slate-100 hover:text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
-        onClick={() => {
+        onClick={(event) => {
+          event.stopPropagation();
           if (isOpen) {
             setMenuPosition(null);
           } else {
@@ -821,7 +830,8 @@ function ActionMenu({ label = "...", items }: { label?: string; items: ActionMen
                 ? "text-red-700 hover:bg-red-50"
                 : "text-slate-700 hover:bg-slate-100 hover:text-teal-700"
             }`}
-            onClick={() => {
+            onClick={(event) => {
+              event.stopPropagation();
               setMenuPosition(null);
               item.onClick();
             }}
@@ -1685,6 +1695,7 @@ export default function PortalApp() {
   const mustCompleteProfile = currentUser.status === "approved" && !isProfileComplete(currentUser);
   const portalNotifications = data.notifications || [];
   const unreadPortalNotifications = portalNotifications.filter((notification) => !notification.readAt).length;
+  const pendingApprovalCount = isSuperAdmin ? data.users.filter((user) => user.status === "pending").length : 0;
 
   function goToView(view: PortalView) {
     const nextPath = viewRoutes[view];
@@ -1757,6 +1768,7 @@ export default function PortalApp() {
               >
                 <span>{viewTitle(view)}</span>
                 {view === "chat" && chatUnreadCount > 0 ? <span className="nav-badge">{chatUnreadCount}</span> : null}
+                {view === "people" && pendingApprovalCount > 0 ? <span className="nav-badge">{pendingApprovalCount}</span> : null}
               </a>
             ))}
           </nav>
@@ -1772,6 +1784,7 @@ export default function PortalApp() {
             />
             <AccountMenu
               user={currentUser}
+              showAccountSettings={!isSuperAdmin}
               onProfileSettings={() => goToView("profile")}
               onSecurity={() => goToView("profile")}
               onSignOut={signOut}
@@ -1899,11 +1912,13 @@ function AdminNotificationMenu({
 
 function AccountMenu({
   user,
+  showAccountSettings,
   onProfileSettings,
   onSecurity,
   onSignOut,
 }: {
   user: PortalUser;
+  showAccountSettings: boolean;
   onProfileSettings: () => void;
   onSecurity: () => void;
   onSignOut: () => void;
@@ -1967,12 +1982,16 @@ function AccountMenu({
       </button>
       {open ? (
         <div className="account-menu" role="menu">
-          <button type="button" role="menuitem" onClick={() => choose(onProfileSettings)}>
-            Profile settings
-          </button>
-          <button type="button" role="menuitem" onClick={() => choose(onSecurity)}>
-            Security
-          </button>
+          {showAccountSettings ? (
+            <>
+              <button type="button" role="menuitem" onClick={() => choose(onProfileSettings)}>
+                Profile settings
+              </button>
+              <button type="button" role="menuitem" onClick={() => choose(onSecurity)}>
+                Security
+              </button>
+            </>
+          ) : null}
           <button type="button" role="menuitem" className="danger" onClick={() => choose(onSignOut)}>
             Sign out
           </button>
@@ -2963,7 +2982,7 @@ function BiddersDirectoryView({
   const [query, setQuery] = useState("");
   const [selectedBidder, setSelectedBidder] = useState<PortalUser | null>(null);
   const bidders = data.users
-    .filter((user) => isWorkerUser(user) && user.status === "approved")
+    .filter((user) => user.role === "bidder" && user.status === "approved")
     .filter((user) => userMatchesSearch(user, query))
     .sort((left, right) => {
       const leftAvailable = !left.assignedAdminId || left.assignedAdminId === data.currentUser.id;
@@ -3182,11 +3201,13 @@ function PostsView({
   onMessageUser: (userId: string, relatedPostId?: string) => void;
 }) {
   const currentUser = data.currentUser;
+  const isSuperAdmin = isSuperAdminRole(currentUser.role);
   const balances = userCreditBalances(currentUser, data);
   const canPublish = currentUser.role === "bidder";
   const [query, setQuery] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedPost, setSelectedPost] = useState<PortalPost | null>(null);
+  const [editingPost, setEditingPost] = useState<PortalPost | null>(null);
   const [draft, setDraft] = useState({
     title: "",
     criteria: "",
@@ -3200,9 +3221,9 @@ function PostsView({
   const myPosts = posts.filter((post) => post.authorId === currentUser.id);
   const availablePosts = posts
     .filter((post) => post.authorId !== currentUser.id)
-    .filter((post) => isSuperAdminRole(currentUser.role) || post.status === "active")
+    .filter((post) => isSuperAdmin || post.status === "active")
     .filter((post) => {
-      if (isSuperAdminRole(currentUser.role)) return true;
+      if (isSuperAdmin) return true;
       if (isClientRole(currentUser.role)) return post.type === "bidder";
       return false;
     })
@@ -3244,6 +3265,26 @@ function PostsView({
     }
   }
 
+  async function saveEditedPost(post: PortalPost, payload: Record<string, unknown>) {
+    const nextData = await onAction("updatePost", { postId: post.id, ...payload });
+    if (nextData) {
+      setEditingPost(null);
+      setSelectedPost(null);
+    }
+  }
+
+  async function deletePost(post: PortalPost) {
+    if (!window.confirm(`Delete post "${post.title}"? This removes it from marketplace moderation.`)) {
+      return;
+    }
+
+    const nextData = await onAction("deletePost", { postId: post.id });
+    if (nextData) {
+      setEditingPost(null);
+      setSelectedPost(null);
+    }
+  }
+
   async function startContractFromPost(post: PortalPost) {
     const author = userById(data.users, post.authorId);
     if (!author) {
@@ -3276,6 +3317,7 @@ function PostsView({
 
   return (
     <div className="dashboard-stack">
+      {canPublish ? (
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -3298,12 +3340,13 @@ function PostsView({
         </div>
         <CreditBalanceStrip balances={balances} />
       </section>
+      ) : null}
 
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Available Posts</h2>
-            <p>{isClientRole(currentUser.role) ? "Review bidder posts, start contracts, or close posts from the detail modal." : "All visible marketplace posts."}</p>
+            <h2>{isSuperAdmin ? "Post Moderation" : "Available Posts"}</h2>
+            <p>{isSuperAdmin ? "Review every marketplace post, edit details, or delete posts." : isClientRole(currentUser.role) ? "Review bidder posts, start contracts, or close posts from the detail modal." : "All visible marketplace posts."}</p>
           </div>
         </div>
         <div className="filter-bar">
@@ -3332,12 +3375,22 @@ function PostsView({
                   <span><strong>{paymentScheduleLabel(post.paymentFrequency, post.paymentWeekday) || "Flexible"}</strong> schedule</span>
                 </div>
                 <div className="actions">
-                  <button className="ghost-button compact-button" type="button" onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedPost(post);
-                  }}>
-                    Review
-                  </button>
+                  {isSuperAdmin ? (
+                    <ActionMenu
+                      items={[
+                        { label: "Review", onClick: () => setSelectedPost(post) },
+                        { label: "Edit", onClick: () => setEditingPost(post) },
+                        { label: "Delete", danger: true, disabled: busy, onClick: () => void deletePost(post) },
+                      ]}
+                    />
+                  ) : (
+                    <button className="ghost-button compact-button" type="button" onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedPost(post);
+                    }}>
+                      Review
+                    </button>
+                  )}
                 </div>
               </article>
             );
@@ -3449,7 +3502,9 @@ function PostsView({
           author={userById(data.users, selectedPost.authorId)}
           busy={busy}
           canStartContract={canStartContractFromPost(selectedPost)}
-          canClosePost={isSuperAdminRole(currentUser.role) || selectedPost.authorId === currentUser.id || (isClientRole(currentUser.role) && selectedPost.type === "bidder")}
+          canClosePost={isSuperAdmin || selectedPost.authorId === currentUser.id || (isClientRole(currentUser.role) && selectedPost.type === "bidder")}
+          canEditPost={isSuperAdmin}
+          canDeletePost={isSuperAdmin}
           onClose={() => setSelectedPost(null)}
           onMessage={(userId) => {
             setSelectedPost(null);
@@ -3457,6 +3512,17 @@ function PostsView({
           }}
           onStartContract={() => startContractFromPost(selectedPost)}
           onClosePost={() => closePost(selectedPost)}
+          onEditPost={() => setEditingPost(selectedPost)}
+          onDeletePost={() => deletePost(selectedPost)}
+        />
+      ) : null}
+
+      {editingPost ? (
+        <PostEditModal
+          post={editingPost}
+          busy={busy}
+          onClose={() => setEditingPost(null)}
+          onSave={(payload) => saveEditedPost(editingPost, payload)}
         />
       ) : null}
     </div>
@@ -3469,20 +3535,28 @@ function PostReviewModal({
   busy,
   canStartContract,
   canClosePost,
+  canEditPost,
+  canDeletePost,
   onClose,
   onMessage,
   onStartContract,
   onClosePost,
+  onEditPost,
+  onDeletePost,
 }: {
   post: PortalPost;
   author?: PortalUser;
   busy: boolean;
   canStartContract: boolean;
   canClosePost: boolean;
+  canEditPost: boolean;
+  canDeletePost: boolean;
   onClose: () => void;
   onMessage: (userId: string, relatedPostId?: string) => void;
   onStartContract: () => void;
   onClosePost: () => void;
+  onEditPost: () => void;
+  onDeletePost: () => void;
 }) {
   return (
     <ModalFrame title={post.title} subtitle={`${author?.name || "Unknown"} - ${postAudienceLabel(post)}`} className="client-detail-modal" onClose={onClose}>
@@ -3517,9 +3591,111 @@ function PostReviewModal({
                 Close post
               </button>
             ) : null}
+            {canEditPost ? (
+              <button className="ghost-button compact-button" type="button" disabled={busy} onClick={onEditPost}>
+                Edit post
+              </button>
+            ) : null}
+            {canDeletePost ? (
+              <button className="ghost-button danger compact-button" type="button" disabled={busy} onClick={onDeletePost}>
+                Delete post
+              </button>
+            ) : null}
           </div>
         </article>
       </div>
+    </ModalFrame>
+  );
+}
+
+function PostEditModal({
+  post,
+  busy,
+  onClose,
+  onSave,
+}: {
+  post: PortalPost;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState({
+    title: post.title,
+    criteria: post.criteria,
+    budgetAmount: String(post.budgetAmount || 0),
+    preferredRate: String(post.preferredRate || 0),
+    bonusPerInterview: String(post.bonusPerInterview || 0),
+    paymentFrequency: (post.paymentFrequency || "weekly") as PaymentFrequency,
+    paymentWeekday: (post.paymentWeekday || "friday") as PaymentWeekday,
+    status: post.status,
+  });
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSave({
+      title: draft.title,
+      criteria: draft.criteria,
+      budgetAmount: Number(draft.budgetAmount),
+      preferredRate: Number(draft.preferredRate),
+      bonusPerInterview: Number(draft.bonusPerInterview),
+      paymentFrequency: draft.paymentFrequency,
+      paymentWeekday: draft.paymentWeekday,
+      status: draft.status,
+    });
+  }
+
+  return (
+    <ModalFrame title="Edit Post" subtitle="Super admin post moderation." onClose={onClose}>
+      <form className="form-grid" onSubmit={submit}>
+        <label className="field full">
+          <span>Post title</span>
+          <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} required />
+        </label>
+        <label className="field">
+          <span>Budget</span>
+          <input type="number" min="0" step="0.01" value={draft.budgetAmount} onChange={(event) => setDraft({ ...draft, budgetAmount: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Preferred rate</span>
+          <input type="number" min="0" step="0.01" value={draft.preferredRate} onChange={(event) => setDraft({ ...draft, preferredRate: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Interview bonus</span>
+          <input type="number" min="0" step="0.01" value={draft.bonusPerInterview} onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Status</span>
+          <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as PostStatus })}>
+            <option value="active">Active</option>
+            <option value="closed">Closed</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Frequency</span>
+          <select value={draft.paymentFrequency} onChange={(event) => setDraft({ ...draft, paymentFrequency: event.target.value as PaymentFrequency })}>
+            {paymentFrequencies.filter((frequency) => frequency.value).map((frequency) => (
+              <option key={frequency.value} value={frequency.value}>{frequency.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Weekday</span>
+          <select value={draft.paymentWeekday} onChange={(event) => setDraft({ ...draft, paymentWeekday: event.target.value as PaymentWeekday })}>
+            {paymentWeekdays.filter((weekday) => weekday.value).map((weekday) => (
+              <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field full">
+          <span>Specific criteria</span>
+          <textarea value={draft.criteria} onChange={(event) => setDraft({ ...draft, criteria: event.target.value })} required />
+        </label>
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy}>
+            Save post
+          </button>
+        </div>
+      </form>
     </ModalFrame>
   );
 }
@@ -4174,6 +4350,7 @@ function PeopleView({
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
   const [editingUser, setEditingUser] = useState<PortalUser | null>(null);
+  const [creatingUser, setCreatingUser] = useState(false);
   const canManageRoles = data.currentUser.role === "super_admin";
   const adminUsers = data.users.filter((user) => isClientRole(user.role) && user.status === "approved");
   const visibleUsers = canManageRoles ? data.users : data.users.filter(isWorkerUser);
@@ -4206,6 +4383,9 @@ function PeopleView({
           <h2>User Management</h2>
           <p>Manage accounts, approval status, roles, passwords, and email verification.</p>
         </div>
+        <button className="primary-button compact-button" type="button" disabled={busy} onClick={() => setCreatingUser(true)}>
+          Add person
+        </button>
       </div>
 
       <div className="table-wrap">
@@ -4291,7 +4471,135 @@ function PeopleView({
           }}
         />
       ) : null}
+
+      {creatingUser ? (
+        <UserCreateModal
+          admins={adminUsers}
+          busy={busy}
+          onClose={() => setCreatingUser(false)}
+          onSave={async (payload) => {
+            const nextData = await onSave("createUser", payload);
+            if (nextData) {
+              setCreatingUser(false);
+            }
+            return nextData;
+          }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function UserCreateModal({
+  admins,
+  busy,
+  onClose,
+  onSave,
+}: {
+  admins: PortalUser[];
+  busy: boolean;
+  onClose: () => void;
+  onSave: (payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
+  const [draft, setDraft] = useState({
+    name: "",
+    email: "",
+    role: "bidder" as Role,
+    status: "pending" as UserStatus,
+    assignedAdminId: "",
+    password: "",
+    emailVerified: false,
+    sendVerificationEmail: true,
+  });
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSave({
+      name: draft.name,
+      email: draft.email,
+      role: draft.role,
+      status: draft.status,
+      assignedAdminId: draft.role === "bidder" ? draft.assignedAdminId : "",
+      password: draft.password,
+      emailVerified: draft.emailVerified,
+      sendVerificationEmail: !draft.emailVerified && draft.sendVerificationEmail,
+    });
+  }
+
+  return (
+    <ModalFrame title="Add Person" subtitle="Create a portal account manually." onClose={onClose}>
+      <form className="form-grid" onSubmit={submit}>
+        <label className="field">
+          <span>Name</span>
+          <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Full name" required />
+        </label>
+        <label className="field">
+          <span>Email</span>
+          <input type="email" value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} placeholder="name@example.com" required />
+        </label>
+        <label className="field">
+          <span>Role</span>
+          <select value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value as Role, assignedAdminId: "" })}>
+            {managedRoleOptions.map((role) => (
+              <option key={role.value} value={role.value}>{role.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Status</span>
+          <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as UserStatus })}>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="paused">Paused</option>
+          </select>
+        </label>
+        {draft.role === "bidder" ? (
+          <label className="field">
+            <span>Assigned client</span>
+            <select value={draft.assignedAdminId} onChange={(event) => setDraft({ ...draft, assignedAdminId: event.target.value })}>
+              <option value="">Unassigned</option>
+              {admins.map((adminUser) => (
+                <option key={adminUser.id} value={adminUser.id}>{adminUser.name}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        <label className="field">
+          <span>Temporary password</span>
+          <input
+            type="password"
+            value={draft.password}
+            minLength={8}
+            onChange={(event) => setDraft({ ...draft, password: event.target.value })}
+            placeholder="At least 8 characters"
+            required
+          />
+        </label>
+        <label className="checkbox-row full">
+          <input
+            type="checkbox"
+            checked={draft.emailVerified}
+            onChange={(event) => setDraft({ ...draft, emailVerified: event.target.checked })}
+          />
+          <span>Mark email verified</span>
+        </label>
+        {!draft.emailVerified ? (
+          <label className="checkbox-row full">
+            <input
+              type="checkbox"
+              checked={draft.sendVerificationEmail}
+              onChange={(event) => setDraft({ ...draft, sendVerificationEmail: event.target.checked })}
+            />
+            <span>Send verification email</span>
+          </label>
+        ) : null}
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy || draft.password.length < 8}>
+            Add person
+          </button>
+        </div>
+      </form>
+    </ModalFrame>
   );
 }
 
@@ -4364,10 +4672,9 @@ function UserEditModal({
               disabled={!canManageRoles}
               onChange={(event) => setDraft({ ...draft, role: event.target.value as Role })}
             >
-              {draft.role === "super_admin" ? <option value="super_admin">Super Admin</option> : null}
-              <option value="bidder">Bidder</option>
-              <option value="developer">Developer</option>
-              <option value="client">Client</option>
+              {managedRoleOptions.map((role) => (
+                <option key={role.value} value={role.value}>{role.label}</option>
+              ))}
             </select>
           </label>
           {draft.role === "bidder" ? (
@@ -6635,6 +6942,11 @@ function ChatView({
             new Set(messages.flatMap((message) => [message.userId, message.recipientId || ""]).filter(Boolean))
           );
           const participantNames = participantIds.map((id) => userDisplayName(membersById.get(id)));
+          const participantAvatar = participantIds
+            .map((id) => initialsForName(membersById.get(id)?.name || ""))
+            .filter(Boolean)
+            .slice(0, 2)
+            .join("/");
 
           return {
             id: `monitor:${conversationId}`,
@@ -6644,7 +6956,7 @@ function ChatView({
             title: participantNames.join(" / ") || "Monitored conversation",
             subtitle: "Monitored conversation",
             preview: latestMessage?.deletedAt ? "Message deleted" : latestMessage?.body || latestMessage?.attachments?.[0]?.name || "No messages yet",
-            avatar: "SA",
+            avatar: participantAvatar || "IN",
             unreadCount: 0,
             monitored: true,
           };
@@ -6834,6 +7146,20 @@ function ChatView({
     }
   }
 
+  async function deleteConversationById(conversationId: string) {
+    if (!conversationId || !window.confirm("Delete this entire chat conversation? This removes all messages in this thread.")) {
+      return;
+    }
+
+    const nextData = await onSend("deleteChatConversation", { conversationId });
+    if (nextData) {
+      setSelectedConversationId("");
+      setEditingMessageId("");
+      setEditBody("");
+      setChatError("");
+    }
+  }
+
   return (
     <section className="panel chat-panel">
       <div className="chat-toolbar">
@@ -6848,34 +7174,64 @@ function ChatView({
             </p>
           </div>
         </div>
-        {notificationSupported ? (
-          <button
-            className="ghost-button"
-            type="button"
-            disabled={notificationsEnabled}
-            onClick={onEnableNotifications}
-          >
-            {notificationsEnabled ? "Notifications on" : "Enable notifications"}
-          </button>
-        ) : null}
+        <div className="actions">
+          {isSuperAdminRole(currentUser.role) && activeConversation ? (
+            <ActionMenu
+              items={[
+                {
+                  label: "Delete chat",
+                  danger: true,
+                  disabled: busy,
+                  onClick: () => void deleteConversationById(activeConversationId),
+                },
+              ]}
+            />
+          ) : null}
+          {notificationSupported ? (
+            <button
+              className="ghost-button"
+              type="button"
+              disabled={notificationsEnabled}
+              onClick={onEnableNotifications}
+            >
+              {notificationsEnabled ? "Notifications on" : "Enable notifications"}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="inbox-layout">
         <div className="conversation-list" aria-label="Inbox conversations">
           {conversations.map((conversation) => (
-            <button
+            <div
+              className={`conversation-entry ${activeConversation?.id === conversation.id ? "active" : ""}`}
               key={conversation.id}
-              type="button"
-              className={`conversation-button ${activeConversation?.id === conversation.id ? "active" : ""}`}
-              onClick={() => selectConversation(conversation.id)}
             >
-              <span className="conversation-avatar">{conversation.avatar}</span>
-              <span>
-                <strong>{conversation.title}</strong>
-                <small>{conversation.preview}</small>
-              </span>
-              {conversation.unreadCount ? <span className="conversation-badge">{conversation.unreadCount}</span> : null}
-            </button>
+              <button
+                type="button"
+                className="conversation-button"
+                onClick={() => selectConversation(conversation.id)}
+              >
+                <span className="conversation-avatar">{conversation.avatar}</span>
+                <span>
+                  <strong>{conversation.title}</strong>
+                  <small>{conversation.preview}</small>
+                </span>
+                {conversation.unreadCount ? <span className="conversation-badge">{conversation.unreadCount}</span> : null}
+              </button>
+              {isSuperAdminRole(currentUser.role) ? (
+                <ActionMenu
+                  items={[
+                    {
+                      label: "Delete chat",
+                      danger: true,
+                      disabled: busy,
+                      onClick: () => void deleteConversationById(conversation.conversationId),
+                    },
+                  ]}
+                />
+              ) : null}
+            </div>
           ))}
           {!conversations.length ? (
             <div className="empty-state compact">No inbox contacts yet.</div>
