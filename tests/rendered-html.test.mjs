@@ -290,9 +290,12 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /NEXT_PUBLIC_PORTAL_MODE/);
   assert.match(portalApp, /\/api\/portal/);
   assert.match(portalApp, /filterWorkLogsByDate/);
+  assert.match(portalApp, /workLogsForUser/);
+  assert.match(portalApp, /paymentsForUser/);
   assert.match(portalApp, /dateRangeFromPreset/);
   assert.match(portalApp, /selectedUserId/);
   assert.match(portalApp, /isWorkLogPaid/);
+  assert.match(portalApp, /const userPayments = paymentsForUser\(user, data\.payments\)/);
   assert.match(portalApp, /isWorkLogApproved/);
   assert.match(portalApp, /workLogReviewStatus/);
   assert.match(portalApp, /reviewStatus/);

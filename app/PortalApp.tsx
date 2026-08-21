@@ -458,6 +458,14 @@ function estimateForUserInRange(user: PortalUser, logs: WorkLog[], periodStart: 
     );
 }
 
+function workLogsForUser(user: PortalUser, logs: WorkLog[]) {
+  return logs.filter((log) => log.userId === user.id);
+}
+
+function paymentsForUser(user: PortalUser, payments: PaymentRecord[]) {
+  return payments.filter((payment) => payment.userId === user.id);
+}
+
 function isCreditSpentPayment(payment: PaymentRecord) {
   return payment.status === "paid" || payment.status === "processing";
 }
@@ -955,11 +963,12 @@ function dateRangeFromPreset(preset: DatePreset, baseDateInput = today()): DateR
 }
 
 function workSummary(user: PortalUser, logs: WorkLog[]) {
+  const userLogs = workLogsForUser(user, logs);
   return {
-    appliedJobs: logs.reduce((total, log) => total + log.appliedJobs, 0),
-    interviewsScheduled: logs.reduce((total, log) => total + log.interviewsScheduled, 0),
-    earned: estimateForUser(user, logs),
-    logCount: logs.length,
+    appliedJobs: userLogs.reduce((total, log) => total + log.appliedJobs, 0),
+    interviewsScheduled: userLogs.reduce((total, log) => total + log.interviewsScheduled, 0),
+    earned: estimateForUser(user, userLogs),
+    logCount: userLogs.length,
   };
 }
 
@@ -5019,9 +5028,10 @@ function BidderSettingsModal({
 function BidderDashboard({ data }: { data: PortalData }) {
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
   const user = data.currentUser;
-  const allLogs = data.workLogs.filter((log) => log.userId === user.id);
+  const allLogs = workLogsForUser(user, data.workLogs);
+  const userPayments = paymentsForUser(user, data.payments);
   const filteredLogs = filterWorkLogsByDate(allLogs, dateRange);
-  const unpaidFilteredLogs = filteredLogs.filter((log) => !isWorkLogPaid(log, data.payments));
+  const unpaidFilteredLogs = filteredLogs.filter((log) => !isWorkLogPaid(log, userPayments));
   const summary = workSummary(user, filteredLogs);
   const openEstimate = estimateForUser(user, unpaidFilteredLogs);
 
@@ -5066,7 +5076,7 @@ function BidderDashboard({ data }: { data: PortalData }) {
         <WorkLogTable
           logs={filteredLogs}
           users={[user]}
-          payments={data.payments}
+          payments={userPayments}
           showPaymentStatus
           emptyMessage="No work logs match this date filter."
         />
@@ -5119,8 +5129,9 @@ function BidderWorkLog({
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
 
   const user = data.currentUser;
-  const allLogs = data.workLogs.filter((log) => log.userId === user.id);
-  const unpaidLogs = allLogs.filter((log) => !isWorkLogPaid(log, data.payments));
+  const allLogs = workLogsForUser(user, data.workLogs);
+  const userPayments = paymentsForUser(user, data.payments);
+  const unpaidLogs = allLogs.filter((log) => !isWorkLogPaid(log, userPayments));
   const logs = filterWorkLogsByDate(unpaidLogs, dateRange);
   const summary = workSummary(user, logs);
 
