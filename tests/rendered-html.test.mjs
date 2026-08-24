@@ -128,6 +128,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /chat-side-panel/);
   assert.match(portalApp, /messageTimeInZone/);
   assert.match(portalApp, /message-time/);
+  assert.match(portalApp, /compact-text-message/);
+  assert.doesNotMatch(portalApp, /message-author/);
   assert.match(portalApp, /Sent/);
   assert.match(portalApp, /Read/);
   assert.match(portalApp, /markChatConversationRead/);
@@ -343,6 +345,7 @@ test("declares the requested frontend records", async () => {
     "Assigned Bid Profile",
     "messageTimeInZone",
     "message-time",
+    "compact-text-message",
     "Mark Payment Completed",
     "Accept contract",
     "Sent",

@@ -1628,20 +1628,6 @@ td > strong {
   opacity: 0.72;
 }
 
-.message-author {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: #4d5a59;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.message-author span {
-  color: var(--muted);
-  font-weight: 700;
-}
-
 .message-footer {
   display: flex;
   flex-wrap: wrap;
@@ -1652,6 +1638,26 @@ td > strong {
   font-size: 11px;
   font-weight: 700;
   line-height: 1.1;
+}
+
+.compact-text-message {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.compact-text-message p {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.compact-text-message .message-footer {
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  margin-left: 0;
+  padding-bottom: 1px;
+  white-space: nowrap;
 }
 
 .message-check {

@@ -8593,18 +8593,13 @@ function SupportCenter({
 
           {activeMessages.map((message) => {
             const isMine = message.userId === currentUser.id;
-            const author = userById([currentUser, ...data.users, ...supportContacts], message.userId);
+            const messageAttachments = message.attachments || [];
+            const isCompactTextMessage = !message.deletedAt && Boolean(message.body) && !messageAttachments.length;
             return (
               <div className={`message-row ${isMine ? "mine" : ""}`} key={message.id}>
-                <div className={`message ${isMine ? "mine" : ""} ${message.deletedAt ? "deleted" : ""}`}>
-                  {!isMine ? (
-                    <div className="message-author">
-                      <strong>{userDisplayName(author) || message.authorName}</strong>
-                      <span>{roleLabel(author?.role || message.authorRole)}</span>
-                    </div>
-                  ) : null}
+                <div className={`message ${isMine ? "mine" : ""} ${message.deletedAt ? "deleted" : ""} ${isCompactTextMessage ? "compact-text-message" : ""}`}>
                   {message.deletedAt ? <p className="muted">Message deleted</p> : <p>{message.body}</p>}
-                  <ChatAttachments attachments={message.attachments || []} />
+                  <ChatAttachments attachments={messageAttachments} />
                   <div className="message-footer">
                     <span className="message-time">{messageTimeInZone(message.createdAt, browserTimeZone())}</span>
                   </div>
@@ -9243,7 +9238,7 @@ function ChatView({
             const isEditing = editingMessageId === message.id;
             const messageAttachments = message.attachments || [];
             const menuItems: ActionMenuItem[] = [];
-            const authorUser = membersById.get(message.userId);
+            const isCompactTextMessage = !deleted && !isEditing && Boolean(message.body) && !relatedContract && !messageAttachments.length;
 
             if (canEdit) {
               menuItems.push({ label: "Edit", onClick: () => startEditing(message) });
@@ -9254,14 +9249,7 @@ function ChatView({
 
             return (
               <div className={`message-row ${isMine ? "mine" : ""}`} key={message.id}>
-                <div className={`message ${isMine ? "mine" : ""} ${deleted ? "deleted" : ""}`}>
-                  {!isMine ? (
-                    <div className="message-author">
-                      <strong>{userDisplayName(authorUser) || message.authorName}</strong>
-                      <span>{authorUser?.companyName || authorUser?.profileTitle || roleLabel(authorUser?.role || message.authorRole)}</span>
-                    </div>
-                  ) : null}
-
+                <div className={`message ${isMine ? "mine" : ""} ${deleted ? "deleted" : ""} ${isCompactTextMessage ? "compact-text-message" : ""}`}>
                   {deleted ? (
                     <p className="muted">Message deleted</p>
                   ) : isEditing ? (
