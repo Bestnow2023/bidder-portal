@@ -1,5 +1,5 @@
-import PortalApp from "../PortalApp";
+import HelpCenterApp from "../HelpCenterApp";
 
 export default function HelpPage() {
-  return <PortalApp />;
+  return <HelpCenterApp view="help" />;
 }

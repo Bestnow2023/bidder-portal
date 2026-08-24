@@ -2,15 +2,12 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Bidder Work Portal",
-  description: "Internal portal for bidder work logs, payment details, schedules, history, and admin chat.",
+  title: "Help Center",
+  description: "Guides and support for the Digniware Bidder Portal.",
   icons: {
     icon: "/favicon.png",
     shortcut: "/favicon.png",
     apple: "/favicon.png",
-  },
-  other: {
-    cryptomus: "d8702318",
   },
 };
 
