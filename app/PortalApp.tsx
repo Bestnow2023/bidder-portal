@@ -454,6 +454,7 @@ function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
     if (view === "contracts") return "Review requests, active contracts, criteria, and connected client credit.";
     if (view === "disputes") return "Open and track contract, work, and payment disputes.";
     if (view === "profile") return "Complete your profile, direct-message preference, email, and password.";
+    if (view === "chat") return "";
     return "Log your bidder activity and keep payment details current.";
   }
 
@@ -483,7 +484,7 @@ function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
     credits: "Add, deduct, and audit user credits.",
     billing: "Deposit credits and release bidder payouts through Cryptomus.",
     payments: "Record payouts, review payment methods, and track client escrow.",
-    chat: "Client-bidder direct messaging with super admin monitoring.",
+    chat: "",
     help: "Learn how the portal works and contact support.",
   };
 
@@ -552,8 +553,24 @@ function paymentsForUser(user: PortalUser, payments: PaymentRecord[]) {
   return payments.filter((payment) => payment.userId === user.id);
 }
 
+function isWithdrawalPayment(payment: PaymentRecord) {
+  return payment.paymentType === "withdrawal";
+}
+
+function isClientReleasePayment(payment: PaymentRecord) {
+  return !isWithdrawalPayment(payment);
+}
+
 function isCreditSpentPayment(payment: PaymentRecord) {
-  return payment.status === "paid" || payment.status === "processing";
+  return isClientReleasePayment(payment) && (payment.status === "paid" || payment.status === "processing");
+}
+
+function paymentTypeLabel(payment: PaymentRecord) {
+  if (isWithdrawalPayment(payment)) {
+    return "Withdrawal";
+  }
+
+  return "Work credit";
 }
 
 function paymentStatusLabel(status: PaymentRecord["status"]) {
@@ -1037,7 +1054,7 @@ type DateRange = {
   preset?: DatePreset;
 };
 
-type DatePreset = "all" | "date" | "thisWeek" | "lastWeek" | "last7Days" | "yesterday" | "custom";
+type DatePreset = "all" | "date" | "today" | "thisWeek" | "lastWeek" | "last7Days" | "last3Days" | "lastMonth" | "yesterday" | "custom";
 
 function startOfWeek(date: Date) {
   return addDays(date, -((date.getDay() + 6) % 7));
@@ -1048,6 +1065,10 @@ function dateRangeFromPreset(preset: DatePreset, baseDateInput = today()): DateR
   const currentDate = dateInputValue(baseDate);
 
   if (preset === "date") {
+    return { preset, startDate: currentDate, endDate: "" };
+  }
+
+  if (preset === "today") {
     return { preset, startDate: currentDate, endDate: "" };
   }
 
@@ -1063,6 +1084,14 @@ function dateRangeFromPreset(preset: DatePreset, baseDateInput = today()): DateR
 
   if (preset === "last7Days") {
     return { preset, startDate: dateInputValue(addDays(baseDate, -6)), endDate: currentDate };
+  }
+
+  if (preset === "last3Days") {
+    return { preset, startDate: dateInputValue(addDays(baseDate, -2)), endDate: currentDate };
+  }
+
+  if (preset === "lastMonth") {
+    return { preset, startDate: dateInputValue(addDays(baseDate, -29)), endDate: currentDate };
   }
 
   if (preset === "yesterday") {
@@ -1088,7 +1117,7 @@ function logMatchesDateRange(log: WorkLog, range: DateRange) {
     return true;
   }
 
-  if (range.preset === "date" && range.startDate && !range.endDate) {
+  if ((range.preset === "date" || range.preset === "today" || range.preset === "yesterday") && range.startDate && !range.endDate) {
     return log.workDate === range.startDate;
   }
 
@@ -1113,6 +1142,122 @@ function logMatchesDateRange(log: WorkLog, range: DateRange) {
 
 function filterWorkLogsByDate(logs: WorkLog[], range: DateRange) {
   return logs.filter((log) => logMatchesDateRange(log, range));
+}
+
+function recordDateMatchesRange(value: string, range: DateRange) {
+  if (!range.startDate && !range.endDate) {
+    return true;
+  }
+
+  if ((range.preset === "date" || range.preset === "today" || range.preset === "yesterday") && range.startDate && !range.endDate) {
+    return value === range.startDate;
+  }
+
+  const itemDate = dateAtMidnight(value)?.getTime();
+  if (itemDate == null) {
+    return false;
+  }
+
+  const startDate = range.startDate ? dateAtMidnight(range.startDate)?.getTime() : null;
+  const endDate = range.endDate ? dateAtMidnight(range.endDate)?.getTime() : null;
+
+  if (startDate != null && itemDate < startDate) {
+    return false;
+  }
+
+  if (endDate != null && itemDate > endDate) {
+    return false;
+  }
+
+  return true;
+}
+
+function filterPaymentsByDate(payments: PaymentRecord[], range: DateRange) {
+  return payments.filter((payment) => recordDateMatchesRange(payment.scheduledDate, range));
+}
+
+function contractCoversWorkDate(contract: ContractRecord, workDate: string) {
+  if (contract.status === "rejected") {
+    return false;
+  }
+  if (contract.startDate && contract.startDate > workDate) {
+    return false;
+  }
+
+  const endedDate = contract.endedAt ? contract.endedAt.slice(0, 10) : "";
+  return !endedDate || workDate <= endedDate;
+}
+
+function clientIdsForWorkLog(log: WorkLog, contracts: ContractRecord[], payments: PaymentRecord[]) {
+  const clientIds = new Set<string>();
+
+  contracts.forEach((contract) => {
+    if (contract.workerId === log.userId && contractCoversWorkDate(contract, log.workDate)) {
+      clientIds.add(contract.clientId);
+    }
+  });
+
+  payments.forEach((payment) => {
+    if (
+      payment.userId === log.userId &&
+      payment.clientId &&
+      payment.periodStart <= log.workDate &&
+      log.workDate <= payment.periodEnd
+    ) {
+      clientIds.add(payment.clientId);
+    }
+  });
+
+  return Array.from(clientIds);
+}
+
+function clientNamesForWorkLog(log: WorkLog, users: PortalUser[], contracts: ContractRecord[], payments: PaymentRecord[]) {
+  const names = clientIdsForWorkLog(log, contracts, payments)
+    .map((clientId) => userById(users, clientId)?.name || "")
+    .filter(Boolean);
+
+  return names.length ? names.join(", ") : "-";
+}
+
+function connectedClientsForWorker(user: PortalUser, users: PortalUser[], contracts: ContractRecord[], payments: PaymentRecord[]) {
+  const clientIds = new Set<string>();
+  if (user.assignedAdminId) {
+    clientIds.add(user.assignedAdminId);
+  }
+
+  contracts.forEach((contract) => {
+    if (contract.workerId === user.id && contract.status !== "rejected") {
+      clientIds.add(contract.clientId);
+    }
+  });
+
+  payments.forEach((payment) => {
+    if (payment.userId === user.id && payment.clientId) {
+      clientIds.add(payment.clientId);
+    }
+  });
+
+  return users
+    .filter((candidate) => clientIds.has(candidate.id) && isClientRole(candidate.role))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function workLogBelongsToClient(log: WorkLog, clientId: string, data: PortalData) {
+  const relatedClientIds = clientIdsForWorkLog(log, data.contracts || [], data.payments || []);
+  if (relatedClientIds.length) {
+    return relatedClientIds.includes(clientId);
+  }
+
+  const worker = userById(data.users, log.userId);
+  return worker?.assignedAdminId === clientId;
+}
+
+function clientScopedWorkLogs(client: PortalUser, data: PortalData) {
+  return data.workLogs.filter((log) => workLogBelongsToClient(log, client.id, data));
+}
+
+function clientScopedPayments(client: PortalUser, data: PortalData) {
+  return data.payments.filter((payment) => payment.clientId === client.id && isCreditSpentPayment(payment));
 }
 
 function isEmailVerificationError(message: string) {
@@ -1922,7 +2067,9 @@ export default function PortalApp() {
         <header className="topbar">
           <div>
             <h1>{viewTitle(safeView, currentUser)}</h1>
-            <p>{viewSubtitle(safeView, canViewManaged, isSuperAdmin)}</p>
+            {viewSubtitle(safeView, canViewManaged, isSuperAdmin) ? (
+              <p>{viewSubtitle(safeView, canViewManaged, isSuperAdmin)}</p>
+            ) : null}
           </div>
           <div className="badge-row">
             <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
@@ -2169,24 +2316,69 @@ function AccountMenu({
 
 function AdminOverview({ data }: { data: PortalData }) {
   const currentUser = data.currentUser;
-  const personalWorkLogs = workLogsForUser(currentUser, data.workLogs);
-  const personalPayments = paymentsForUser(currentUser, data.payments);
-  const pendingUsers = isSuperAdminRole(currentUser.role) ? data.users.filter((user) => user.status === "pending").length : 0;
-  const totalApplied = personalWorkLogs.reduce((total, log) => total + log.appliedJobs, 0);
-  const totalInterviews = personalWorkLogs.reduce((total, log) => total + log.interviewsScheduled, 0);
-  const scheduled = personalPayments
-    .filter((payment) => payment.status === "scheduled")
-    .reduce((total, payment) => total + payment.amount, 0);
-  const paid = personalPayments
-    .filter((payment) => payment.status === "paid")
-    .reduce((total, payment) => total + payment.amount, 0);
+  const [dateRange, setDateRange] = useState<DateRange>(() => dateRangeFromPreset("last7Days"));
+  const clientLogs = filterWorkLogsByDate(clientScopedWorkLogs(currentUser, data), dateRange);
+  const clientPayments = filterPaymentsByDate(clientScopedPayments(currentUser, data), dateRange);
+  const clientContracts = (data.contracts || []).filter((contract) => contract.clientId === currentUser.id);
+  const bidderIds = new Set<string>([
+    ...clientContracts.map((contract) => contract.workerId),
+    ...clientLogs.map((log) => log.userId),
+    ...clientPayments.map((payment) => payment.userId),
+  ]);
+  const clientBidders = data.users.filter((user) => bidderIds.has(user.id) && isWorkerUser(user));
+  const totalApplied = clientLogs.reduce((total, log) => total + log.appliedJobs, 0);
+  const totalInterviews = clientLogs.reduce((total, log) => total + log.interviewsScheduled, 0);
+  const paid = clientPayments.reduce((total, payment) => total + payment.amount, 0);
+  const activeContracts = clientContracts.filter((contract) => contract.status === "active").length;
+  const bidderSummaries = clientBidders
+    .map((bidder) => {
+      const bidderLogs = clientLogs.filter((log) => log.userId === bidder.id);
+      const bidderPayments = clientPayments.filter((payment) => payment.userId === bidder.id);
+      return {
+        id: bidder.id,
+        name: bidder.name,
+        profileTitle: bidder.profileTitle || roleLabel(bidder.role),
+        appliedJobs: bidderLogs.reduce((total, log) => total + log.appliedJobs, 0),
+        interviewsScheduled: bidderLogs.reduce((total, log) => total + log.interviewsScheduled, 0),
+        moneyPaid: bidderPayments.reduce((total, payment) => total + payment.amount, 0),
+        logCount: bidderLogs.length,
+      };
+    })
+    .sort((left, right) => right.appliedJobs - left.appliedJobs || right.moneyPaid - left.moneyPaid);
+  const bidProfileSummaries = (data.bidProfiles || [])
+    .filter((profile) => profile.clientId === currentUser.id)
+    .map((profile) => {
+      const assignedIds = new Set(profile.assignedBidderIds || []);
+      const profileLogs = clientLogs.filter((log) => assignedIds.has(log.userId));
+      const profilePayments = clientPayments.filter((payment) => assignedIds.has(payment.userId));
+      return {
+        id: profile.id,
+        name: profile.profileName,
+        assignedCount: assignedIds.size,
+        appliedJobs: profileLogs.reduce((total, log) => total + log.appliedJobs, 0),
+        interviewsScheduled: profileLogs.reduce((total, log) => total + log.interviewsScheduled, 0),
+        moneyPaid: profilePayments.reduce((total, payment) => total + payment.amount, 0),
+      };
+    })
+    .sort((left, right) => right.appliedJobs - left.appliedJobs || left.name.localeCompare(right.name));
+  const recentLogs = [...clientLogs].sort((left, right) => right.workDate.localeCompare(left.workDate)).slice(0, 8);
 
   return (
     <div>
+      <section className="panel dashboard-filter-panel">
+        <div className="panel-header">
+          <div>
+            <h2>Client Analytics</h2>
+            <p>Only work, contracts, and payments connected to your client account are counted.</p>
+          </div>
+        </div>
+        <DateRangeFilter range={dateRange} onChange={setDateRange} />
+      </section>
+
       <div className="metric-grid">
         <div className="metric">
-          <span>Pending approval</span>
-          <strong>{pendingUsers}</strong>
+          <span>Money paid</span>
+          <strong>{money(paid)}</strong>
         </div>
         <div className="metric">
           <span>Applied jobs</span>
@@ -2197,63 +2389,189 @@ function AdminOverview({ data }: { data: PortalData }) {
           <strong>{totalInterviews}</strong>
         </div>
         <div className="metric">
-          <span>Scheduled payouts</span>
-          <strong>{money(scheduled)}</strong>
+          <span>Active contracts</span>
+          <strong>{activeContracts}</strong>
         </div>
       </div>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Performance Chart</h2>
+            <p>Compare money paid, applied jobs, and interviews by bidder.</p>
+          </div>
+        </div>
+        <ClientAnalyticsChart rows={bidderSummaries} />
+      </section>
 
       <div className="dashboard-grid">
         <section className="panel">
           <div className="panel-header">
             <div>
-              <h2>Payment Snapshot</h2>
-              <p>Your own payment records and payout links.</p>
+              <h2>Bidder Breakdown</h2>
+              <p>Filtered totals grouped by bidder.</p>
             </div>
-            <span className="badge paid">{money(paid)} paid</span>
           </div>
-          <div className="payment-method-list">
-            {personalPayments.slice(0, 5).map((payment) => {
-              return (
-                <div className="payment-row" key={payment.id}>
-                  <div>
-                    <strong>{shortDate(payment.scheduledDate)}</strong>
-                    <span className="muted">{shortDate(payment.periodStart)} - {shortDate(payment.periodEnd)}</span>
-                  </div>
-                  <div>
-                    <strong>{money(payment.amount)}</strong>
-                    <span className="mini-label">{paymentStatusLabel(payment.status).toLowerCase()}</span>
-                  </div>
-                </div>
-              );
-            })}
-            {!personalPayments.length ? <div className="empty-state compact">No payment records for your account yet.</div> : null}
-          </div>
+          <ClientBidderBreakdownTable rows={bidderSummaries} />
         </section>
 
         <section className="panel">
           <div className="panel-header">
             <div>
-              <h2>Recent Work</h2>
-              <p>Your latest Google Sheet logs.</p>
+              <h2>Bid Profile Breakdown</h2>
+              <p>Filtered totals grouped by assigned client bid profile.</p>
             </div>
           </div>
-          <div className="payment-method-list">
-            {personalWorkLogs.slice(0, 5).map((log) => {
-              const user = userById(data.users, log.userId);
-              return (
-                <div className="log-row" key={log.id}>
-                  <div>
-                    <strong>{user?.name || "Unknown user"}</strong>
-                    <span className="muted">{shortDate(log.workDate)} - {log.appliedJobs} applied - {log.interviewsScheduled} interviews</span>
-                  </div>
-                  <a href={log.sheetLink} target="_blank" rel="noreferrer">Sheet</a>
-                </div>
-              );
-            })}
-            {!personalWorkLogs.length ? <div className="empty-state">No work logs for your account yet.</div> : null}
-          </div>
+          <ClientProfileBreakdownTable rows={bidProfileSummaries} />
         </section>
       </div>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Recent Client Work</h2>
+            <p>Latest Google Sheet logs connected to your contracts.</p>
+          </div>
+        </div>
+        <WorkLogTable
+          logs={recentLogs}
+          users={data.users}
+          payments={data.payments}
+          showPaymentStatus
+          emptyMessage="No work logs match this date filter."
+        />
+      </section>
+    </div>
+  );
+}
+
+function ClientAnalyticsChart({
+  rows,
+}: {
+  rows: Array<{ id: string; name: string; appliedJobs: number; interviewsScheduled: number; moneyPaid: number }>;
+}) {
+  if (!rows.length) {
+    return <div className="empty-state compact">No bidder activity matches this date filter.</div>;
+  }
+
+  const maxApplied = Math.max(...rows.map((row) => row.appliedJobs), 1);
+  const maxInterviews = Math.max(...rows.map((row) => row.interviewsScheduled), 1);
+  const maxPaid = Math.max(...rows.map((row) => row.moneyPaid), 1);
+
+  return (
+    <div className="analytics-bars">
+      {rows.map((row) => (
+        <div className="analytics-row" key={row.id}>
+          <div className="analytics-row-title">
+            <strong>{row.name}</strong>
+            <span>{money(row.moneyPaid)} paid</span>
+          </div>
+          <AnalyticsBar label="Applied" value={row.appliedJobs} max={maxApplied} />
+          <AnalyticsBar label="Interviews" value={row.interviewsScheduled} max={maxInterviews} />
+          <AnalyticsBar label="Paid" value={row.moneyPaid} max={maxPaid} formatter={money} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AnalyticsBar({
+  label,
+  value,
+  max,
+  formatter = (nextValue: number) => String(nextValue),
+}: {
+  label: string;
+  value: number;
+  max: number;
+  formatter?: (value: number) => string;
+}) {
+  const width = Math.max(4, Math.min(100, (value / Math.max(max, 1)) * 100));
+
+  return (
+    <div className="analytics-bar">
+      <span>{label}</span>
+      <div className="bar-track" aria-hidden="true">
+        <div className="bar-fill" style={{ width: `${width}%` }} />
+      </div>
+      <strong>{formatter(value)}</strong>
+    </div>
+  );
+}
+
+function ClientBidderBreakdownTable({
+  rows,
+}: {
+  rows: Array<{ id: string; name: string; profileTitle: string; appliedJobs: number; interviewsScheduled: number; moneyPaid: number; logCount: number }>;
+}) {
+  if (!rows.length) {
+    return <div className="empty-state compact">No bidder totals match this filter.</div>;
+  }
+
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Bidder</th>
+            <th>Logs</th>
+            <th>Applied</th>
+            <th>Interviews</th>
+            <th>Money paid</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id}>
+              <td>
+                <strong>{row.name}</strong>
+                <span className="table-subtext">{row.profileTitle}</span>
+              </td>
+              <td>{row.logCount}</td>
+              <td>{row.appliedJobs}</td>
+              <td>{row.interviewsScheduled}</td>
+              <td>{money(row.moneyPaid)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ClientProfileBreakdownTable({
+  rows,
+}: {
+  rows: Array<{ id: string; name: string; assignedCount: number; appliedJobs: number; interviewsScheduled: number; moneyPaid: number }>;
+}) {
+  if (!rows.length) {
+    return <div className="empty-state compact">No bid profiles have activity in this date range.</div>;
+  }
+
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Bid profile</th>
+            <th>Bidders</th>
+            <th>Applied</th>
+            <th>Interviews</th>
+            <th>Money paid</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id}>
+              <td><strong>{row.name}</strong></td>
+              <td>{row.assignedCount}</td>
+              <td>{row.appliedJobs}</td>
+              <td>{row.interviewsScheduled}</td>
+              <td>{money(row.moneyPaid)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -3458,7 +3776,8 @@ function PostsView({
   const currentUser = data.currentUser;
   const isSuperAdmin = isSuperAdminRole(currentUser.role);
   const balances = userCreditBalances(currentUser, data);
-  const canPublish = currentUser.role === "bidder";
+  const canPublish = currentUser.role === "bidder" || isClientRole(currentUser.role);
+  const canAffordPost = balances.postCreditBalance + balances.moneyCreditBalance >= 1;
   const [query, setQuery] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedPost, setSelectedPost] = useState<PortalPost | null>(null);
@@ -3480,6 +3799,7 @@ function PostsView({
     .filter((post) => {
       if (isSuperAdmin) return true;
       if (isClientRole(currentUser.role)) return post.type === "bidder";
+      if (currentUser.role === "bidder") return post.type === "client";
       return false;
     })
     .filter((post) => {
@@ -3513,8 +3833,8 @@ function PostsView({
     }
   }
 
-  async function closePost(post: PortalPost) {
-    const nextData = await onAction("updatePostStatus", { postId: post.id, status: "closed" });
+  async function setPostStatus(post: PortalPost, status: PostStatus) {
+    const nextData = await onAction("updatePostStatus", { postId: post.id, status });
     if (nextData) {
       setSelectedPost(null);
     }
@@ -3570,6 +3890,22 @@ function PostsView({
     return (isClientRole(currentUser.role) && post.type === "bidder") || (currentUser.role === "bidder" && post.type === "client");
   }
 
+  function postActionItems(post: PortalPost): ActionMenuItem[] {
+    const isOwner = post.authorId === currentUser.id;
+    return [
+      { label: "Review", onClick: () => setSelectedPost(post) },
+      ...(isOwner || isSuperAdmin ? [{ label: "Edit", disabled: busy, onClick: () => setEditingPost(post) }] : []),
+      ...(isOwner || isSuperAdmin
+        ? [{
+          label: post.status === "active" ? "Close" : "Reopen",
+          disabled: busy,
+          onClick: () => void setPostStatus(post, post.status === "active" ? "closed" : "active"),
+        }]
+        : []),
+      ...(isOwner || isSuperAdmin ? [{ label: "Delete", danger: true, disabled: busy, onClick: () => void deletePost(post) }] : []),
+    ];
+  }
+
   return (
     <div className="dashboard-stack">
       {canPublish ? (
@@ -3577,7 +3913,7 @@ function PostsView({
         <div className="panel-header">
           <div>
             <h2>Post Credit</h2>
-            <p>Posts cost $1 post credit. Money credit is separate and is not used for publishing posts.</p>
+            <p>Posts cost $1. Post credit is used first; money credit can cover the post if post credit is empty.</p>
           </div>
           <div className="actions">
             <span className="badge approved">$1 per post</span>
@@ -3585,7 +3921,7 @@ function PostsView({
               <button
                 className="primary-button compact-button"
                 type="button"
-                disabled={busy || balances.postCreditBalance < 1}
+                disabled={busy || !canAffordPost}
                 onClick={() => setShowCreateModal(true)}
               >
                 Create post
@@ -3610,48 +3946,13 @@ function PostsView({
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Title, criteria, author" />
           </label>
         </div>
-        <div className="post-grid">
-          {availablePosts.map((post) => {
-            const author = userById(data.users, post.authorId);
-            return (
-              <article className="profile-card post-card clickable-row" key={post.id} onClick={() => setSelectedPost(post)}>
-                <div className="person-title">
-                  <div>
-                    <h3>{post.title}</h3>
-                    <span className="table-subtext">{author?.name || "Unknown"} - {postAudienceLabel(post)}</span>
-                  </div>
-                  <span className={`badge ${post.status === "active" ? "approved" : "paused"}`}>{titleCase(post.status)}</span>
-                </div>
-                <p>{post.criteria}</p>
-                <div className="mini-metrics">
-                  <span><strong>{money(post.budgetAmount || 0)}</strong> budget</span>
-                  <span><strong>{money(post.preferredRate || 0)}</strong> rate</span>
-                  <span><strong>{money(post.bonusPerInterview || 0)}</strong> bonus</span>
-                  <span><strong>{paymentScheduleLabel(post.paymentFrequency, post.paymentWeekday) || "Flexible"}</strong> schedule</span>
-                </div>
-                <div className="actions">
-                  {isSuperAdmin ? (
-                    <ActionMenu
-                      items={[
-                        { label: "Review", onClick: () => setSelectedPost(post) },
-                        { label: "Edit", onClick: () => setEditingPost(post) },
-                        { label: "Delete", danger: true, disabled: busy, onClick: () => void deletePost(post) },
-                      ]}
-                    />
-                  ) : (
-                    <button className="ghost-button compact-button" type="button" onClick={(event) => {
-                      event.stopPropagation();
-                      setSelectedPost(post);
-                    }}>
-                      Review
-                    </button>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-        {!availablePosts.length ? <div className="empty-state">No posts are available for this view.</div> : null}
+        <PostTable
+          posts={availablePosts}
+          users={data.users}
+          emptyMessage="No posts are available for this view."
+          onSelect={setSelectedPost}
+          actionItemsForPost={postActionItems}
+        />
       </section>
 
       {myPosts.length || canPublish ? (
@@ -3662,49 +3963,22 @@ function PostsView({
             <p>Your published posts and posting-credit usage.</p>
           </div>
         </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Post</th>
-                <th>Audience</th>
-                <th>Cost</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {myPosts.map((post) => (
-                <tr key={post.id}>
-                  <td>
-                    <strong>{post.title}</strong>
-                    <span className="table-subtext">{post.criteria}</span>
-                  </td>
-                  <td>{postAudienceLabel(post)}</td>
-                  <td>{money((post.postCreditUsed ?? post.giftCreditUsed ?? 0) + (post.moneyCreditUsed || 0))}</td>
-                  <td><span className={`badge ${post.status === "active" ? "approved" : "paused"}`}>{titleCase(post.status)}</span></td>
-                  <td>{dateTime(post.createdAt)}</td>
-                  <td>
-                    {post.status === "active" ? (
-                      <button className="ghost-button compact-button" type="button" disabled={busy} onClick={() => closePost(post)}>
-                        Close
-                      </button>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {!myPosts.length ? <div className="empty-state">No posts published yet.</div> : null}
+        <PostTable
+          posts={myPosts}
+          users={data.users}
+          emptyMessage="No posts published yet."
+          onSelect={setSelectedPost}
+          actionItemsForPost={postActionItems}
+        />
       </section>
       ) : null}
 
       {showCreateModal ? (
-        <ModalFrame title="Create Post" subtitle="Bidder posts are visible to clients." onClose={() => setShowCreateModal(false)}>
+        <ModalFrame
+          title="Create Post"
+          subtitle={isClientRole(currentUser.role) ? "Client posts are visible to bidders." : "Bidder posts are visible to clients."}
+          onClose={() => setShowCreateModal(false)}
+        >
           <form className="form-grid" onSubmit={submitPost}>
             <label className="field">
               <span>Post title</span>
@@ -3743,7 +4017,7 @@ function PostsView({
               <textarea value={draft.criteria} onChange={(event) => setDraft({ ...draft, criteria: event.target.value })} placeholder="Describe your skills, availability, work expectations, and preferred client criteria." required />
             </label>
             <div className="actions full">
-              <button className="primary-button" type="submit" disabled={busy || balances.postCreditBalance < 1}>
+              <button className="primary-button" type="submit" disabled={busy || !canAffordPost}>
                 Publish post
               </button>
             </div>
@@ -3758,15 +4032,15 @@ function PostsView({
           busy={busy}
           canStartContract={canStartContractFromPost(selectedPost)}
           canClosePost={isSuperAdmin || selectedPost.authorId === currentUser.id || (isClientRole(currentUser.role) && selectedPost.type === "bidder")}
-          canEditPost={isSuperAdmin}
-          canDeletePost={isSuperAdmin}
+          canEditPost={isSuperAdmin || selectedPost.authorId === currentUser.id}
+          canDeletePost={isSuperAdmin || selectedPost.authorId === currentUser.id}
           onClose={() => setSelectedPost(null)}
           onMessage={(userId) => {
             setSelectedPost(null);
             onMessageUser(userId, selectedPost.id);
           }}
           onStartContract={() => startContractFromPost(selectedPost)}
-          onClosePost={() => closePost(selectedPost)}
+          onClosePost={() => setPostStatus(selectedPost, "closed")}
           onEditPost={() => setEditingPost(selectedPost)}
           onDeletePost={() => deletePost(selectedPost)}
         />
@@ -3780,6 +4054,82 @@ function PostsView({
           onSave={(payload) => saveEditedPost(editingPost, payload)}
         />
       ) : null}
+    </div>
+  );
+}
+
+function PostTable({
+  posts,
+  users,
+  emptyMessage,
+  onSelect,
+  actionItemsForPost,
+}: {
+  posts: PortalPost[];
+  users: PortalUser[];
+  emptyMessage: string;
+  onSelect: (post: PortalPost) => void;
+  actionItemsForPost?: (post: PortalPost) => ActionMenuItem[];
+}) {
+  if (!posts.length) {
+    return <div className="empty-state">{emptyMessage}</div>;
+  }
+
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Post</th>
+            <th>Author</th>
+            <th>Audience</th>
+            <th>Budget</th>
+            <th>Rate</th>
+            <th>Bonus</th>
+            <th>Schedule</th>
+            <th>Status</th>
+            <th>Created</th>
+            {actionItemsForPost ? <th>Actions</th> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {posts.map((post) => {
+            const author = userById(users, post.authorId);
+            const actionItems = actionItemsForPost?.(post) || [];
+            return (
+              <tr
+                className="clickable-row"
+                key={post.id}
+                tabIndex={0}
+                onClick={() => onSelect(post)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    onSelect(post);
+                  }
+                }}
+              >
+                <td>
+                  <strong>{post.title}</strong>
+                  <span className="table-subtext">{post.criteria}</span>
+                </td>
+                <td>{author?.name || "Unknown"}</td>
+                <td>{postAudienceLabel(post)}</td>
+                <td>{money(post.budgetAmount || 0)}</td>
+                <td>{money(post.preferredRate || 0)}</td>
+                <td>{money(post.bonusPerInterview || 0)}</td>
+                <td>{paymentScheduleLabel(post.paymentFrequency, post.paymentWeekday) || "Flexible"}</td>
+                <td><span className={`badge ${post.status === "active" ? "approved" : "paused"}`}>{titleCase(post.status)}</span></td>
+                <td>{dateTime(post.createdAt)}</td>
+                {actionItemsForPost ? (
+                  <td>
+                    {actionItems.length ? <ActionMenu items={actionItems} /> : "-"}
+                  </td>
+                ) : null}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -3900,7 +4250,7 @@ function PostEditModal({
   }
 
   return (
-    <ModalFrame title="Edit Post" subtitle="Super admin post moderation." onClose={onClose}>
+    <ModalFrame title="Edit Post" subtitle="Update post details and status." onClose={onClose}>
       <form className="form-grid" onSubmit={submit}>
         <label className="field full">
           <span>Post title</span>
@@ -4198,6 +4548,9 @@ function ContractsView({
           worker={userById(data.users, selectedContract.workerId)}
           requester={userById(data.users, selectedContract.requestedByUserId)}
           currentUser={currentUser}
+          assignedBidProfiles={(data.bidProfiles || []).filter(
+            (profile) => profile.clientId === selectedContract.clientId && (profile.assignedBidderIds || []).includes(selectedContract.workerId)
+          )}
           actions={contractActionItems(selectedContract)}
           onClose={() => setSelectedContract(null)}
         />
@@ -4319,6 +4672,7 @@ function ContractDetailModal({
   worker,
   requester,
   currentUser,
+  assignedBidProfiles,
   actions,
   onClose,
 }: {
@@ -4327,6 +4681,7 @@ function ContractDetailModal({
   worker?: PortalUser | null;
   requester?: PortalUser | null;
   currentUser: PortalUser;
+  assignedBidProfiles: BidProfileRecord[];
   actions: ActionMenuItem[];
   onClose: () => void;
 }) {
@@ -4367,6 +4722,25 @@ function ContractDetailModal({
           <h3>Criteria</h3>
           <p>{contract.criteria || "No criteria added."}</p>
         </section>
+        {assignedBidProfiles.length ? (
+          <section className="detail-section">
+            <h3>Assigned Bid Profile</h3>
+            <div className="bid-profile-mini-list">
+              {assignedBidProfiles.map((profile) => (
+                <article className="mini-contract-row" key={profile.id}>
+                  <strong>{profile.profileName}</strong>
+                  <span>{profile.fullLegalName} - {profile.contactEmail}</span>
+                  <span>{profile.phone || "No phone"} - {profile.targetSalary || "No target salary"} - {profile.visaStatus || "No visa status"}</span>
+                  <span>{profile.jobTitles.join(", ") || "No job titles"}</span>
+                  {profile.extraFields?.length ? (
+                    <span>{profile.extraFields.map((field) => `${field.label}: ${field.value}`).join(" - ")}</span>
+                  ) : null}
+                  {profile.notes ? <span>{profile.notes}</span> : null}
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
         <p className="muted">
           Created {dateTime(contract.createdAt)}
           {contract.acceptedAt ? ` - accepted ${dateTime(contract.acceptedAt)}` : ""}
@@ -4564,6 +4938,13 @@ function DisputesView({
     }
   }
 
+  async function addDisputeUpdate(dispute: DisputeRecord, payload: Record<string, unknown>) {
+    const nextData = await onAction("addDisputeUpdate", { disputeId: dispute.id, ...payload });
+    if (nextData) {
+      setSelectedDispute(nextData.disputes.find((item) => item.id === dispute.id) || null);
+    }
+  }
+
   return (
     <div className="dashboard-stack">
       <section className="panel">
@@ -4647,7 +5028,9 @@ function DisputesView({
           target={userById(data.users, selectedDispute.targetUserId)}
           contract={data.contracts.find((item) => item.id === selectedDispute.contractId)}
           payment={data.payments.find((item) => item.id === selectedDispute.paymentId)}
+          busy={busy}
           canResolve={canResolveDisputes}
+          onAddUpdate={(payload) => addDisputeUpdate(selectedDispute, payload)}
           onResolve={() => startResolve(selectedDispute)}
           onClose={() => setSelectedDispute(null)}
         />
@@ -4739,7 +5122,9 @@ function DisputeDetailModal({
   target,
   contract,
   payment,
+  busy,
   canResolve,
+  onAddUpdate,
   onResolve,
   onClose,
 }: {
@@ -4748,10 +5133,54 @@ function DisputeDetailModal({
   target?: PortalUser | null;
   contract?: ContractRecord | null;
   payment?: PaymentRecord | null;
+  busy: boolean;
   canResolve: boolean;
+  onAddUpdate: (payload: Record<string, unknown>) => Promise<void>;
   onResolve: () => void;
   onClose: () => void;
 }) {
+  const [updateBody, setUpdateBody] = useState("");
+  const [attachments, setAttachments] = useState<ChatAttachmentDraft[]>([]);
+  const [attachmentError, setAttachmentError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const canAddUpdate = dispute.status !== "closed";
+
+  async function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || []);
+    setAttachmentError("");
+    if (!files.length) {
+      return;
+    }
+
+    const nextAttachments: ChatAttachmentDraft[] = [];
+    for (const file of files) {
+      if (file.size > maxChatAttachmentBytes) {
+        setAttachmentError(`${file.name} is larger than ${formatBytes(maxChatAttachmentBytes)}.`);
+        continue;
+      }
+      nextAttachments.push({
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        size: file.size,
+        dataUrl: await readFileAsDataUrl(file),
+      });
+    }
+
+    setAttachments((currentAttachments) => [...currentAttachments, ...nextAttachments].slice(0, chatAttachmentLimit));
+    event.target.value = "";
+  }
+
+  async function submitUpdate(event: FormEvent) {
+    event.preventDefault();
+    await onAddUpdate({
+      body: updateBody,
+      attachments,
+    });
+    setUpdateBody("");
+    setAttachments([]);
+    setAttachmentError("");
+  }
+
   return (
     <ModalFrame title="Dispute Details" subtitle={dispute.subject} onClose={onClose}>
       <div className="detail-stack">
@@ -4782,6 +5211,50 @@ function DisputeDetailModal({
           <h3>Issue</h3>
           <p>{dispute.body}</p>
         </section>
+        <section className="detail-section">
+          <h3>Updates</h3>
+          <div className="dispute-updates">
+            <div className="dispute-update-row">
+              <strong>{client?.name || "Client"}</strong>
+              <span>{dateTime(dispute.createdAt)}</span>
+              <p>{dispute.body}</p>
+            </div>
+            {(dispute.updates || []).map((update) => (
+              <div className="dispute-update-row" key={update.id}>
+                <strong>{update.authorName || roleLabel(update.authorRole)}</strong>
+                <span>{dateTime(update.createdAt)}</span>
+                {update.body ? <p>{update.body}</p> : null}
+                <ChatAttachments attachments={update.attachments || []} />
+              </div>
+            ))}
+            {!dispute.updates?.length ? <div className="empty-state compact">No follow-up updates yet.</div> : null}
+          </div>
+        </section>
+        {canAddUpdate ? (
+          <form className="form-grid" onSubmit={submitUpdate}>
+            <label className="field full">
+              <span>Add details or screenshots</span>
+              <textarea value={updateBody} onChange={(event) => setUpdateBody(event.target.value)} placeholder="Add more details, context, or what needs to happen next." />
+            </label>
+            <input ref={fileInputRef} type="file" multiple accept="image/*,.pdf" onChange={handleAttachmentChange} hidden />
+            {attachments.length ? (
+              <div className="full attachment-preview-list">
+                <ChatAttachments attachments={attachments} />
+              </div>
+            ) : null}
+            {attachmentError ? <div className="error full">{attachmentError}</div> : null}
+            <div className="actions full">
+              <button className="ghost-button" type="button" onClick={() => fileInputRef.current?.click()}>
+                Attach screenshots
+              </button>
+              <button className="primary-button" type="submit" disabled={busy || (!updateBody.trim() && !attachments.length)}>
+                Add update
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="status-strip compact">Closed disputes cannot be updated.</div>
+        )}
         <section className="detail-section">
           <h3>Resolution</h3>
           <p>{dispute.resolution || "No resolution note yet."}</p>
@@ -5503,15 +5976,31 @@ function BidderWorkLog({
     interviewsScheduled: "",
     notes: "",
   });
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingWorkLog, setEditingWorkLog] = useState<WorkLog | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
+  const [selectedClientId, setSelectedClientId] = useState("all");
+  const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "unpaid">("all");
 
   const user = data.currentUser;
   const allLogs = workLogsForUser(user, data.workLogs);
   const userPayments = paymentsForUser(user, data.payments);
-  const unpaidLogs = allLogs.filter((log) => !isWorkLogPaid(log, userPayments));
-  const logs = filterWorkLogsByDate(unpaidLogs, dateRange);
+  const clientOptions = connectedClientsForWorker(user, data.users, data.contracts || [], data.payments || []);
+  const clientFilteredLogs = selectedClientId === "all"
+    ? allLogs
+    : allLogs.filter((log) => {
+      const relatedClientIds = clientIdsForWorkLog(log, data.contracts || [], data.payments || []);
+      return relatedClientIds.length ? relatedClientIds.includes(selectedClientId) : user.assignedAdminId === selectedClientId;
+    });
+  const dateFilteredLogs = filterWorkLogsByDate(clientFilteredLogs, dateRange);
+  const logs = dateFilteredLogs.filter((log) => {
+    const paid = isWorkLogPaid(log, userPayments);
+    if (paymentFilter === "paid") return paid;
+    if (paymentFilter === "unpaid") return !paid;
+    return true;
+  });
   const summary = workSummary(user, logs);
+  const unpaidSummary = workSummary(user, logs.filter((log) => !isWorkLogPaid(log, userPayments)));
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -5524,6 +6013,7 @@ function BidderWorkLog({
     });
     if (nextData) {
       setDraft({ workDate: today(), sheetLink: "", appliedJobs: "", interviewsScheduled: "", notes: "" });
+      setShowCreateModal(false);
     }
   }
 
@@ -5536,52 +6026,27 @@ function BidderWorkLog({
   }
 
   return (
-    <div className="two-column">
+    <div className="dashboard-stack">
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Daily Bidder Log</h2>
-            <p>Attach the Google Sheet and enter daily totals.</p>
+            <h2>Work Logs</h2>
+            <p>Add daily work, then review every paid and unpaid log by client and date.</p>
           </div>
+          <button className="primary-button compact-button" type="button" disabled={busy} onClick={() => setShowCreateModal(true)}>
+            Add work log
+          </button>
         </div>
-        <form className="form-grid" onSubmit={submit}>
-          <label className="field">
-            <span>Date</span>
-            <input type="date" value={draft.workDate} onChange={(event) => setDraft({ ...draft, workDate: event.target.value })} required />
-          </label>
-          <label className="field">
-            <span>Applied jobs</span>
-            <input type="number" min="0" value={draft.appliedJobs} onChange={(event) => setDraft({ ...draft, appliedJobs: event.target.value })} required />
-          </label>
-          <label className="field">
-            <span>Interviews scheduled</span>
-            <input type="number" min="0" value={draft.interviewsScheduled} onChange={(event) => setDraft({ ...draft, interviewsScheduled: event.target.value })} required />
-          </label>
-          <label className="field">
-            <span>Google Sheet link</span>
-            <input type="url" value={draft.sheetLink} onChange={(event) => setDraft({ ...draft, sheetLink: event.target.value })} placeholder="https://docs.google.com/spreadsheets/..." required />
-          </label>
-          <label className="field full">
-            <span>Notes</span>
-            <textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
-          </label>
-          <div className="actions full">
-            <button className="primary-button" type="submit" disabled={busy}>
-              Save daily log
-            </button>
-          </div>
-        </form>
       </section>
 
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Unpaid Work Totals</h2>
-            <p>Only unpaid work logs are included here.</p>
+            <h2>Work Summary</h2>
+            <p>Totals update from the filters below.</p>
           </div>
         </div>
-        <DateRangeFilter range={dateRange} onChange={setDateRange} />
-        <div className="metric-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+        <div className="metric-grid">
           <div className="metric">
             <span>Applied jobs</span>
             <strong>{summary.appliedJobs}</strong>
@@ -5595,28 +6060,65 @@ function BidderWorkLog({
             <strong>{money(user.ratePerApplication)}</strong>
           </div>
           <div className="metric">
-            <span>Estimate</span>
+            <span>Total estimate</span>
             <strong>{money(summary.earned)}</strong>
+          </div>
+          <div className="metric">
+            <span>Unpaid estimate</span>
+            <strong>{money(unpaidSummary.earned)}</strong>
           </div>
         </div>
       </section>
 
-      <section className="panel" style={{ gridColumn: "1 / -1" }}>
+      <section className="panel">
         <div className="section-heading">
           <div>
-            <h2>Unpaid Work Logs</h2>
-            <p>Logs disappear from this list after a paid payment record covers their work date.</p>
+            <h2>Work Log History</h2>
+            <p>All logs you applied, including paid and unpaid work.</p>
           </div>
-          <span className="badge pending">{logs.length} open</span>
+          <span className="badge">{logs.length} logs</span>
+        </div>
+        <div className="filter-bar">
+          <DateRangeFilter range={dateRange} onChange={setDateRange} embedded />
+          <label className="field">
+            <span>Client filter</span>
+            <select value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)}>
+              <option value="all">All clients</option>
+              {clientOptions.map((client) => (
+                <option key={client.id} value={client.id}>{client.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Paid status</span>
+            <select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value as "all" | "paid" | "unpaid")}>
+              <option value="all">Paid and unpaid</option>
+              <option value="unpaid">Unpaid only</option>
+              <option value="paid">Paid only</option>
+            </select>
+          </label>
         </div>
         <WorkLogTable
           logs={logs}
           users={[user]}
-          emptyMessage="No unpaid work logs match this date filter."
+          payments={userPayments}
+          showPaymentStatus
+          clientLabelForLog={(log) => clientNamesForWorkLog(log, data.users, data.contracts || [], data.payments || [])}
+          emptyMessage="No work logs match these filters."
           onEditLog={setEditingWorkLog}
           onDeleteLog={deleteWorkLog}
         />
       </section>
+
+      {showCreateModal ? (
+        <WorkLogCreateModal
+          draft={draft}
+          busy={busy}
+          onChange={setDraft}
+          onClose={() => setShowCreateModal(false)}
+          onSubmit={submit}
+        />
+      ) : null}
 
       {editingWorkLog ? (
         <WorkLogEditModal
@@ -5737,9 +6239,12 @@ function DateRangeFilter({
         <select value={activePreset} onChange={(event) => selectPreset(event.target.value as DatePreset)}>
           <option value="all">All dates</option>
           <option value="date">Specific date</option>
+          <option value="today">Today</option>
           <option value="thisWeek">This week</option>
           <option value="lastWeek">Last week</option>
+          <option value="last3Days">Last 3 days</option>
           <option value="last7Days">Last 7 days</option>
+          <option value="lastMonth">Last 1 month</option>
           <option value="yesterday">Yesterday</option>
           <option value="custom">Custom range</option>
         </select>
@@ -5783,6 +6288,63 @@ function DateRangeFilter({
     <div className="filter-bar">
       {controls}
     </div>
+  );
+}
+
+type WorkLogDraft = {
+  workDate: string;
+  sheetLink: string;
+  appliedJobs: string;
+  interviewsScheduled: string;
+  notes: string;
+};
+
+function WorkLogCreateModal({
+  draft,
+  busy,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  draft: WorkLogDraft;
+  busy: boolean;
+  onChange: (draft: WorkLogDraft) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  return (
+    <ModalFrame title="Add Work Log" subtitle="Attach the Google Sheet and enter daily totals." onClose={onClose}>
+      <form className="form-grid" onSubmit={onSubmit}>
+        <label className="field">
+          <span>Date</span>
+          <input type="date" value={draft.workDate} onChange={(event) => onChange({ ...draft, workDate: event.target.value })} required />
+        </label>
+        <label className="field">
+          <span>Applied jobs</span>
+          <input type="number" min="0" value={draft.appliedJobs} onChange={(event) => onChange({ ...draft, appliedJobs: event.target.value })} required />
+        </label>
+        <label className="field">
+          <span>Interviews scheduled</span>
+          <input type="number" min="0" value={draft.interviewsScheduled} onChange={(event) => onChange({ ...draft, interviewsScheduled: event.target.value })} required />
+        </label>
+        <label className="field">
+          <span>Google Sheet link</span>
+          <input type="url" value={draft.sheetLink} onChange={(event) => onChange({ ...draft, sheetLink: event.target.value })} placeholder="https://docs.google.com/spreadsheets/..." required />
+        </label>
+        <label className="field full">
+          <span>Notes</span>
+          <textarea value={draft.notes} onChange={(event) => onChange({ ...draft, notes: event.target.value })} />
+        </label>
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy}>
+            Save daily log
+          </button>
+          <button className="ghost-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </ModalFrame>
   );
 }
 
@@ -5907,6 +6469,7 @@ function WorkLogTable({
   users,
   payments = [],
   showPaymentStatus = false,
+  clientLabelForLog,
   emptyMessage = "No work logs yet.",
   onEditLog,
   onDeleteLog,
@@ -5917,6 +6480,7 @@ function WorkLogTable({
   users: PortalUser[];
   payments?: PaymentRecord[];
   showPaymentStatus?: boolean;
+  clientLabelForLog?: (log: WorkLog) => string;
   emptyMessage?: string;
   onEditLog?: (log: WorkLog) => void;
   onDeleteLog?: (log: WorkLog) => void;
@@ -5934,6 +6498,7 @@ function WorkLogTable({
           <tr>
             <th>Date</th>
             <th>User</th>
+            {clientLabelForLog ? <th>Client</th> : null}
             <th>Sheet</th>
             <th>Applied</th>
             <th>Interviews</th>
@@ -5955,13 +6520,14 @@ function WorkLogTable({
               ...(onRequestEditLog
                 ? [{ label: "Request edit", disabled: paid, onClick: () => onRequestEditLog(log) }]
                 : []),
-              ...(onEditLog ? [{ label: "Edit", onClick: () => onEditLog(log) }] : []),
-              ...(onDeleteLog ? [{ label: "Delete", danger: true, onClick: () => onDeleteLog(log) }] : []),
+              ...(onEditLog ? [{ label: "Edit", disabled: paid, onClick: () => onEditLog(log) }] : []),
+              ...(onDeleteLog ? [{ label: "Delete", danger: true, disabled: paid, onClick: () => onDeleteLog(log) }] : []),
             ];
             return (
               <tr key={log.id}>
                 <td>{shortDate(log.workDate)}</td>
                 <td>{user?.name || "Unknown"}</td>
+                {clientLabelForLog ? <td>{clientLabelForLog(log)}</td> : null}
                 <td><a href={log.sheetLink} target="_blank" rel="noreferrer">Open sheet</a></td>
                 <td>{log.appliedJobs}</td>
                 <td>{log.interviewsScheduled}</td>
@@ -6107,6 +6673,86 @@ function PaymentMethodList({
   );
 }
 
+function WithdrawalRequestModal({
+  methods,
+  balance,
+  busy,
+  onClose,
+  onSave,
+}: {
+  methods: PaymentMethod[];
+  balance: number;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const primaryMethod = methods.find((method) => method.isPrimary) || methods[0];
+  const [draft, setDraft] = useState({
+    amount: balance > 0 ? balance.toFixed(2) : "",
+    paymentMethodId: primaryMethod?.id || "",
+    memo: "",
+  });
+  const selectedMethod = methods.find((method) => method.id === draft.paymentMethodId);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSave({
+      amount: Number(draft.amount),
+      paymentMethodId: draft.paymentMethodId,
+      memo: draft.memo,
+    });
+  }
+
+  return (
+    <ModalFrame title="Request Withdrawal" subtitle="Super admin will complete the payout and add the payment link." onClose={onClose}>
+      <form className="form-grid" onSubmit={submit}>
+        <div className="status-strip compact full">
+          Available money credit: {money(balance)}
+        </div>
+        <label className="field">
+          <span>Amount</span>
+          <input
+            type="number"
+            min="0"
+            max={balance}
+            step="0.01"
+            value={draft.amount}
+            onChange={(event) => setDraft({ ...draft, amount: event.target.value })}
+            required
+          />
+        </label>
+        <label className="field">
+          <span>Payout wallet</span>
+          <select value={draft.paymentMethodId} onChange={(event) => setDraft({ ...draft, paymentMethodId: event.target.value })} required>
+            {methods.map((method) => (
+              <option key={method.id} value={method.id}>
+                {payoutMethodLabel(method)} - {method.address}
+              </option>
+            ))}
+          </select>
+        </label>
+        {selectedMethod ? (
+          <div className="status-strip compact full">
+            {payoutMethodLabel(selectedMethod)}: {selectedMethod.address}
+          </div>
+        ) : null}
+        <label className="field full">
+          <span>Memo</span>
+          <textarea value={draft.memo} onChange={(event) => setDraft({ ...draft, memo: event.target.value })} placeholder="Optional note for super admin" />
+        </label>
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy || !methods.length || Number(draft.amount) <= 0 || Number(draft.amount) > balance}>
+            Request withdrawal
+          </button>
+          <button className="ghost-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}
+
 function UserPayments({
   data,
   busy,
@@ -6119,10 +6765,21 @@ function UserPayments({
   const user = data.currentUser;
   const methods = data.paymentMethods.filter((method) => method.userId === user.id);
   const [editingMethod, setEditingMethod] = useState<PaymentMethod | null>(null);
+  const [showWithdrawalModal, setShowWithdrawalModal] = useState(false);
   const earned = estimateForUser(user, data.workLogs);
   const paid = paidForUser(user.id, data.payments);
   const scheduled = scheduledForUser(user.id, data.payments);
   const open = Math.max(0, earned - paid);
+  const balances = userCreditBalances(user, data);
+  const userPayments = paymentsForUser(user, data.payments);
+  const pendingWithdrawals = userPayments.filter((payment) => isWithdrawalPayment(payment) && payment.status === "processing");
+
+  async function requestWithdrawal(payload: Record<string, unknown>) {
+    const nextData = await onAction("requestWithdrawal", payload);
+    if (nextData) {
+      setShowWithdrawalModal(false);
+    }
+  }
 
   return (
     <div className="two-column">
@@ -6130,8 +6787,16 @@ function UserPayments({
         <div className="panel-header">
           <div>
             <h2>Payment Method</h2>
-            <p>Select the crypto coin and wallet address clients will use for Cryptomus payouts.</p>
+            <p>Select the crypto coin and wallet address super admin will use for withdrawals.</p>
           </div>
+          <button
+            className="primary-button compact-button"
+            type="button"
+            disabled={busy || !methods.length || balances.moneyCreditBalance <= 0}
+            onClick={() => setShowWithdrawalModal(true)}
+          >
+            Request withdrawal
+          </button>
         </div>
         <PaymentMethodForm
           key={editingMethod?.id || "new-method"}
@@ -6170,6 +6835,14 @@ function UserPayments({
             <span>Scheduled</span>
             <strong>{money(scheduled)}</strong>
           </div>
+          <div className="metric">
+            <span>Money credit</span>
+            <strong>{money(balances.moneyCreditBalance)}</strong>
+          </div>
+          <div className="metric">
+            <span>Pending withdrawal</span>
+            <strong>{money(pendingWithdrawals.reduce((total, payment) => total + payment.amount, 0))}</strong>
+          </div>
         </div>
       </section>
 
@@ -6180,8 +6853,18 @@ function UserPayments({
             <p>Client-added payout records and receipt links.</p>
           </div>
         </div>
-        <PaymentTable payments={data.payments} users={[user]} />
+        <PaymentTable payments={userPayments} users={[user]} />
       </section>
+
+      {showWithdrawalModal ? (
+        <WithdrawalRequestModal
+          methods={methods}
+          balance={balances.moneyCreditBalance}
+          busy={busy}
+          onClose={() => setShowWithdrawalModal(false)}
+          onSave={requestWithdrawal}
+        />
+      ) : null}
     </div>
   );
 }
@@ -6421,8 +7104,8 @@ function SuperAdminBillingManagementView({
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Pending Payment List</h2>
-            <p>Client releases stay pending until super admin marks them completed.</p>
+            <h2>Pending Withdrawal Requests</h2>
+            <p>Bidders request withdrawals here. Add the payment link when the payout is completed.</p>
           </div>
           <span className="badge pending">{pendingPayments.length} pending</span>
         </div>
@@ -6430,15 +7113,15 @@ function SuperAdminBillingManagementView({
           payments={pendingPayments}
           users={data.users}
           onComplete={setCompletingPayment}
-          emptyMessage="No pending payouts need completion."
+          emptyMessage="No pending withdrawal requests need completion."
         />
       </section>
 
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Completed Payment History</h2>
-            <p>Completed bidder payouts and receipt references.</p>
+            <h2>Completed Billing History</h2>
+            <p>Completed withdrawals, work-credit releases, and receipt references.</p>
           </div>
           <span className="badge paid">{completedPayments.length} completed</span>
         </div>
@@ -6498,7 +7181,6 @@ function AdminPayments({
     periodEnd: today(),
     baseAmount: "",
     tipAmount: "",
-    paymentMethodId: "",
     sourcePaymentId: "",
     memo: "",
   });
@@ -6520,14 +7202,14 @@ function AdminPayments({
 
   const selectedUser = payableUsers.find((user) => user.id === draft.userId);
   const selectedReleaseUser = payableUsers.find((user) => user.id === releaseDraft.userId);
-  const releaseMethods = data.paymentMethods.filter((method) => method.userId === releaseDraft.userId && method.address);
-  const selectedReleaseMethodId = releaseDraft.paymentMethodId || releaseMethods.find((method) => method.isPrimary)?.id || releaseMethods[0]?.id || "";
   const paymentClientId = isSuperAdminRole(data.currentUser.role)
     ? selectedUser?.assignedAdminId || depositDraft.clientId
     : data.currentUser.id;
   const depositClientId = isSuperAdminRole(data.currentUser.role) ? depositDraft.clientId : data.currentUser.id;
-  const creditBalance = paymentClientId ? creditBalanceForClient(paymentClientId, data.deposits || [], data.payments, data.posts || []) : 0;
-  const releaseCreditBalance = depositClientId ? creditBalanceForClient(depositClientId, data.deposits || [], data.payments, data.posts || []) : 0;
+  const paymentClient = paymentClientId ? userById(data.users, paymentClientId) : undefined;
+  const depositClient = depositClientId ? userById(data.users, depositClientId) : undefined;
+  const creditBalance = paymentClient ? userCreditBalances(paymentClient, data).moneyCreditBalance : 0;
+  const releaseCreditBalance = depositClient ? userCreditBalances(depositClient, data).moneyCreditBalance : 0;
   const depositAmount = Number(depositDraft.amount) || 0;
   const depositFee = Math.round(depositAmount * 0.05 * 100) / 100;
   const depositCredit = Math.max(0, Math.round((depositAmount - depositFee) * 100) / 100);
@@ -6628,7 +7310,6 @@ function AdminPayments({
       periodEnd: releaseDraft.periodEnd,
       baseAmount: releaseBaseAmount,
       tipAmount: Number(releaseDraft.tipAmount),
-      paymentMethodId: selectedReleaseMethodId,
       sourcePaymentId: releaseDraft.sourcePaymentId,
       memo: releaseDraft.memo,
     });
@@ -6671,7 +7352,7 @@ function AdminPayments({
   }
 
   function handleReleaseUserChange(userId: string) {
-    setReleaseDraft({ ...releaseDraft, userId, paymentMethodId: "", baseAmount: "", sourcePaymentId: "" });
+    setReleaseDraft({ ...releaseDraft, userId, baseAmount: "", sourcePaymentId: "" });
   }
 
   function setReleasePeriod(field: "periodStart" | "periodEnd", value: string) {
@@ -6684,15 +7365,12 @@ function AdminPayments({
       return;
     }
 
-    const methods = data.paymentMethods.filter((method) => method.userId === nextUser.id && method.address);
-    const primaryMethod = methods.find((method) => method.isPrimary) || methods[0];
     setReleaseDraft({
       userId: nextUser.id,
       periodStart: item?.periodStart || today(),
       periodEnd: item?.periodEnd || today(),
       baseAmount: item ? item.amount.toFixed(2) : "",
       tipAmount: "",
-      paymentMethodId: primaryMethod?.id || "",
       sourcePaymentId: item?.sourcePaymentId || "",
       memo: item ? `${item.sourceLabel} - ${item.description}` : "",
     });
@@ -6785,7 +7463,7 @@ function AdminPayments({
           <div className="metric-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
             <div className="metric">
               <span>Credit balance</span>
-              <strong>{money(depositClientId ? creditBalanceForClient(depositClientId, data.deposits || [], data.payments, data.posts || []) : 0)}</strong>
+              <strong>{money(releaseCreditBalance)}</strong>
             </div>
             <div className="metric">
               <span>Total deposited</span>
@@ -6942,8 +7620,11 @@ function AdminPayments({
       </section>
 
       {showReleaseModal ? (
-        <ModalFrame title="Release Payment" subtitle="Pay the bidder wallet through Cryptomus." onClose={() => setShowReleaseModal(false)}>
+        <ModalFrame title="Release Payment" subtitle="Move client credits into the bidder money-credit wallet." onClose={() => setShowReleaseModal(false)}>
           <form className="form-grid" onSubmit={submitReleasePayment}>
+            <div className="status-strip compact full">
+              This deducts client money credit and adds the same amount to the bidder. The bidder can request a withdrawal later.
+            </div>
             <label className="field full">
               <span>Bidder</span>
               <select value={releaseDraft.userId} onChange={(event) => handleReleaseUserChange(event.target.value)} required>
@@ -6959,21 +7640,6 @@ function AdminPayments({
             <label className="field">
               <span>Period end</span>
               <input type="date" value={releaseDraft.periodEnd} onChange={(event) => setReleasePeriod("periodEnd", event.target.value)} required />
-            </label>
-            <label className="field full">
-              <span>Bidder payout wallet</span>
-              <select
-                value={selectedReleaseMethodId}
-                onChange={(event) => setReleaseDraft({ ...releaseDraft, paymentMethodId: event.target.value })}
-                required
-              >
-                {!releaseMethods.length ? <option value="">Bidder needs a crypto payout method</option> : null}
-                {releaseMethods.map((method) => (
-                  <option key={method.id} value={method.id}>
-                    {payoutMethodLabel(method)} - {method.address}
-                  </option>
-                ))}
-              </select>
             </label>
             <label className="field">
               <span>Work amount</span>
@@ -6995,7 +7661,7 @@ function AdminPayments({
               <button
                 className="primary-button"
                 type="submit"
-                disabled={busy || !payableUsers.length || !selectedReleaseMethodId || releaseTotalAmount <= 0 || releaseTotalAmount > releaseCreditBalance}
+                disabled={busy || !payableUsers.length || releaseTotalAmount <= 0 || releaseTotalAmount > releaseCreditBalance}
               >
                 Release payment
               </button>
@@ -7225,10 +7891,10 @@ function PaymentCompleteModal({
   }
 
   return (
-    <ModalFrame title="Mark Payment Completed" subtitle="Add the receipt or transaction link before completing this payout." onClose={onClose}>
+    <ModalFrame title={isWithdrawalPayment(payment) ? "Complete Withdrawal" : "Mark Payment Completed"} subtitle="Add the receipt or transaction link before completing this payout." onClose={onClose}>
       <form className="form-grid" onSubmit={submit}>
         <div className="status-strip compact full">
-          {user?.name || "Unknown user"} - {money(payment.amount)} - {shortDate(payment.periodStart)} to {shortDate(payment.periodEnd)}
+          {user?.name || "Unknown user"} - {paymentTypeLabel(payment)} - {money(payment.amount)} - {shortDate(payment.periodStart)} to {shortDate(payment.periodEnd)}
         </div>
         <label className="field full">
           <span>Payment link *</span>
@@ -7277,6 +7943,7 @@ function PaymentTable({
         <thead>
           <tr>
             <th>User</th>
+            <th>Type</th>
             <th>Period</th>
             <th>Payment date</th>
             <th>Amount</th>
@@ -7299,6 +7966,7 @@ function PaymentTable({
             return (
               <tr key={payment.id}>
                 <td>{user?.name || "Unknown"}</td>
+                <td>{paymentTypeLabel(payment)}</td>
                 <td>{shortDate(payment.periodStart)} - {shortDate(payment.periodEnd)}</td>
                 <td>{shortDate(payment.scheduledDate)}</td>
                 <td>
@@ -8136,14 +8804,26 @@ function ChatView({
           ) : (
             <div className="telegram-avatar">{activeConversation?.avatar || "IN"}</div>
           )}
-          <div>
-            <h2>{activeConversation?.title || "Inbox"}</h2>
-            <p>
-              {activeConversation
-                ? `${activeConversation.subtitle} - ${activeMessages.length} messages`
-                : "Choose an approved member to start a conversation."}
-            </p>
-          </div>
+          {activeRecipient ? (
+            <button
+              className="chat-title-button"
+              type="button"
+              aria-label={`Show ${userDisplayName(activeRecipient)} profile`}
+              onClick={() => setProfilePanelOpen((open) => !open)}
+            >
+              <h2>{activeConversation?.title || "Inbox"}</h2>
+              <p>{activeConversation ? `${activeConversation.subtitle} - ${activeMessages.length} messages` : ""}</p>
+            </button>
+          ) : (
+            <div>
+              <h2>{activeConversation?.title || "Inbox"}</h2>
+              <p>
+                {activeConversation
+                  ? `${activeConversation.subtitle} - ${activeMessages.length} messages`
+                  : "Choose an approved member to start a conversation."}
+              </p>
+            </div>
+          )}
         </div>
         <div className="actions">
           {isSuperAdminRole(currentUser.role) && activeConversation ? (
@@ -8295,7 +8975,15 @@ function ChatView({
                   <div className="message-footer">
                     <span>Your time {dateTimeInZone(message.createdAt, userTimeZone)}</span>
                     <span>{memberTimeLabel(counterpartForTime)} {dateTimeInZone(message.createdAt, counterpartTimeZone)}</span>
-                    {isMine ? <span>{message.readAt ? "Read" : "Sent"}</span> : null}
+                    {isMine ? (
+                      <span
+                        className={`message-check ${message.readAt ? "read" : "sent"}`}
+                        aria-label={message.readAt ? "Read" : "Sent"}
+                        title={message.readAt ? "Read" : "Sent"}
+                      >
+                        {"\u2713"}
+                      </span>
+                    ) : null}
                     {message.editedAt ? <span>Edited</span> : null}
                     {menuItems.length ? <ActionMenu items={menuItems} /> : null}
                   </div>

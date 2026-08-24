@@ -138,10 +138,22 @@ export type DisputeRecord = {
   body: string;
   status: DisputeStatus;
   resolution: string;
+  updates?: DisputeUpdate[];
   createdAt: string;
   updatedAt: string;
   resolvedAt: string;
   closedAt: string;
+};
+
+export type DisputeUpdate = {
+  id: string;
+  userId: string;
+  authorName: string;
+  authorRole: Role;
+  body: string;
+  attachments?: ChatAttachment[];
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type PaymentMethod = {
@@ -175,6 +187,7 @@ export type WorkLog = {
 
 export type PaymentRecord = {
   id: string;
+  paymentType?: "client_release" | "withdrawal" | string;
   userId: string;
   clientId?: string;
   periodStart: string;

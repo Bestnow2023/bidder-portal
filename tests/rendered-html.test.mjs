@@ -90,16 +90,21 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Work Summary/);
   assert.match(portalApp, /Bidder Settings/);
   assert.match(portalApp, /All Work Logs/);
-  assert.match(portalApp, /Unpaid Work Logs/);
+  assert.match(portalApp, /Work Log History/);
+  assert.match(portalApp, /Add Work Log/);
+  assert.match(portalApp, /Client filter/);
+  assert.match(portalApp, /Paid status/);
   assert.match(portalApp, /Select bidder/);
   assert.match(portalApp, /Date filter/);
   assert.match(portalApp, /Specific date/);
   assert.match(portalApp, /This week/);
   assert.match(portalApp, /Last week/);
+  assert.match(portalApp, /Last 3 days/);
   assert.match(portalApp, /Last 7 days/);
+  assert.match(portalApp, /Last 1 month/);
   assert.match(portalApp, /Yesterday/);
   assert.match(portalApp, /Custom range/);
-  assert.match(portalApp, /Daily Bidder Log/);
+  assert.match(portalApp, /Save daily log/);
   assert.match(portalApp, /Pending review/);
   assert.match(portalApp, /Request edit/);
   assert.match(portalApp, /Request Work Log Edit/);
@@ -143,10 +148,17 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Billing/);
   assert.match(portalApp, /Search by name, email, or user ID/);
   assert.match(portalApp, /CreditAdjustmentModal/);
+  assert.match(portalApp, /Client Analytics/);
+  assert.match(portalApp, /Performance Chart/);
+  assert.match(portalApp, /Bidder Breakdown/);
+  assert.match(portalApp, /Bid Profile Breakdown/);
+  assert.match(portalApp, /ClientAnalyticsChart/);
   assert.match(portalApp, /Release Payment/);
   assert.match(portalApp, /Release payment/);
   assert.match(portalApp, /Payout coin/);
-  assert.match(portalApp, /Bidder payout wallet/);
+  assert.match(portalApp, /Move client credits into the bidder money-credit wallet/);
+  assert.match(portalApp, /WithdrawalRequestModal/);
+  assert.match(portalApp, /Request withdrawal/);
   assert.match(portalApp, /Tip/);
   assert.match(portalApp, /Escrow History/);
   assert.match(portalApp, /Credit Wallet/);
@@ -156,10 +168,10 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Notification center/);
   assert.match(portalApp, /notification-menu-wrap/);
   assert.match(portalApp, /onClose/);
-  assert.match(portalApp, /personalWorkLogs/);
-  assert.match(portalApp, /Your own payment records/);
-  assert.match(portalApp, /Pending Payment List/);
-  assert.match(portalApp, /Completed Payment History/);
+  assert.match(portalApp, /clientScopedWorkLogs/);
+  assert.match(portalApp, /Only work, contracts, and payments connected to your client account are counted/);
+  assert.match(portalApp, /Pending Withdrawal Requests/);
+  assert.match(portalApp, /Completed Billing History/);
   assert.match(portalApp, /Mark completed/);
   assert.match(portalApp, /Mark Payment Completed/);
   assert.match(portalApp, /Charge client credit/);
@@ -173,9 +185,17 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Remove/);
   assert.match(portalApp, /Delete/);
   assert.match(portalApp, /Post Moderation/);
+  assert.match(portalApp, /PostTable/);
   assert.match(portalApp, /Edit Post/);
   assert.match(portalApp, /Save post/);
+  assert.match(portalApp, /Post credit is used first/);
+  assert.match(portalApp, /money credit can cover/);
+  assert.match(portalApp, /Client posts are visible to bidders/);
   assert.match(portalApp, /Delete chat/);
+  assert.match(portalApp, /addDisputeUpdate/);
+  assert.match(portalApp, /Add details or screenshots/);
+  assert.match(portalApp, /Attach screenshots/);
+  assert.match(portalApp, /Assigned Bid Profile/);
   assert.match(portalApp, /Help Center/);
   assert.match(portalApp, /How This Works/);
   assert.match(portalApp, /Support Center/);
@@ -192,11 +212,12 @@ test("keeps the bidder portal as the primary screen", async () => {
 });
 
 test("declares the requested frontend records", async () => {
-  const [portalApp, packageJson, vercelConfig, envExample, appEntries] = await Promise.all([
+  const [portalApp, packageJson, vercelConfig, envExample, globals, appEntries] = await Promise.all([
     readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../vercel.json", import.meta.url), "utf8"),
     readFile(new URL("../.env.local.example", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readdir(new URL("../app/", import.meta.url), { recursive: true }),
   ]);
 
@@ -244,8 +265,10 @@ test("declares the requested frontend records", async () => {
     "Assigned client",
     "Bidder Settings",
     "Work Summary",
-    "Daily Bidder Log",
-    "Unpaid Work Totals",
+    "Add Work Log",
+    "Work Log History",
+    "Client filter",
+    "Paid status",
     "Pending review",
     "Approve",
     "Request edit",
@@ -263,7 +286,8 @@ test("declares the requested frontend records", async () => {
     "Billing",
     "Release Payment",
     "Release payment",
-    "Bidder payout wallet",
+    "Move client credits into the bidder money-credit wallet",
+    "Request withdrawal",
     "Payout coin",
     "Crypto type / network",
     "TRC20 - TRON",
@@ -273,8 +297,8 @@ test("declares the requested frontend records", async () => {
     "Credit Wallet",
     "Create Cryptomus invoice",
     "Notification center",
-    "Pending Payment List",
-    "Completed Payment History",
+    "Pending Withdrawal Requests",
+    "Completed Billing History",
     "Mark completed",
     "Charge client credit",
     "Credit amount",
@@ -299,8 +323,11 @@ test("declares the requested frontend records", async () => {
     "How This Works",
     "Support Center",
     "Post Moderation",
+    "PostTable",
     "Edit Post",
     "Save post",
+    "Add details or screenshots",
+    "Assigned Bid Profile",
     "Your time ",
     "Member time",
     "Mark Payment Completed",
@@ -341,6 +368,7 @@ test("declares the requested frontend records", async () => {
     "markChatConversationRead",
     "releasePayment",
     "completePayment",
+    "requestWithdrawal",
     "savePaymentMethod",
     "saveWorkLog",
     "deleteWorkLog",
@@ -352,6 +380,7 @@ test("declares the requested frontend records", async () => {
     "editChatMessage",
     "deleteChatMessage",
     "deleteChatConversation",
+    "addDisputeUpdate",
   ]) {
     assert.match(portalApp, new RegExp(action));
   }
@@ -473,6 +502,11 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /telegram-chat-title/);
   assert.match(portalApp, /composer-shell/);
   assert.match(portalApp, /message-row/);
+  assert.match(portalApp, /message-check/);
+  assert.match(portalApp, /chat-title-button/);
+  assert.match(globals, /data:image\/svg\+xml/);
+  assert.match(globals, /\.analytics-bars/);
+  assert.match(globals, /\.dispute-update-row/);
   assert.match(portalApp, /verificationPendingEmail/);
   assert.match(portalApp, /verificationSuccessEmail/);
   assert.match(portalApp, /paymentFrequency/);

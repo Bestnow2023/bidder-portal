@@ -1204,9 +1204,10 @@ td > strong {
 
 .chat-panel {
   display: grid;
-  grid-template-rows: auto minmax(420px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 0;
-  min-height: 680px;
+  height: min(760px, calc(100vh - 190px));
+  min-height: 520px;
   overflow: hidden;
 }
 
@@ -1260,11 +1261,27 @@ td > strong {
   font-weight: 700;
 }
 
+.chat-title-button {
+  display: grid;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-title-button:hover h2,
+.chat-title-button:focus-visible h2 {
+  color: var(--accent-strong);
+}
+
 .inbox-layout {
   display: grid;
   grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
   gap: 14px;
-  min-height: 420px;
+  min-height: 0;
+  height: 100%;
   padding: 14px 0;
 }
 
@@ -1276,6 +1293,7 @@ td > strong {
   display: grid;
   align-content: start;
   gap: 8px;
+  min-height: 0;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1360,13 +1378,16 @@ td > strong {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
+  max-height: 100%;
   overflow: auto;
-  padding: 16px 4px;
+  padding: 20px 18px 14px;
   border: 0;
-  border-radius: 0;
+  border-radius: 8px;
   background:
-    linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(36, 89, 166, 0.06)),
-    var(--surface-soft);
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='140' viewBox='0 0 180 140'%3E%3Cg fill='none' stroke='%235b925f' stroke-opacity='.22' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 18c13-12 35-7 38 9 3 15-11 28-25 22-12-5-14-20-3-28 8-6 20-4 24 5'/%3E%3Cpath d='M120 18l27 14-18 18-16-10z'/%3E%3Cpath d='M146 34l-18-2'/%3E%3Cpath d='M28 92c12-8 28-4 31 9 2 11-8 20-20 17-11-3-15-16-6-23'/%3E%3Cpath d='M101 88c10-11 27-8 32 3 5 12-6 25-20 22-9-2-14-10-12-18'/%3E%3Cpath d='M73 57c10 2 13 12 5 18-7 5-18 2-21-5'/%3E%3Cpath d='M158 93c11 10 8 25-3 30-10 5-23-2-24-14'/%3E%3Cpath d='M12 127h27M126 130h31M80 118l9 11 13-24'/%3E%3Ccircle cx='85' cy='26' r='3'/%3E%3Ccircle cx='155' cy='70' r='3'/%3E%3Ccircle cx='55' cy='128' r='2'/%3E%3C/g%3E%3C/svg%3E"),
+    linear-gradient(135deg, #93c394, #82b987);
+  background-size: 180px 140px, auto;
 }
 
 .chat-side-panel {
@@ -1495,6 +1516,7 @@ td > strong {
 .message-row {
   display: flex;
   justify-content: flex-start;
+  padding: 2px 0;
 }
 
 .message-row.mine {
@@ -1502,20 +1524,37 @@ td > strong {
 }
 
 .message {
-  max-width: min(76%, 720px);
+  position: relative;
+  max-width: min(72%, 680px);
   display: grid;
-  gap: 6px;
-  border: 1px solid rgba(15, 118, 110, 0.12);
-  border-radius: 8px 8px 8px 2px;
+  gap: 5px;
+  border: 0;
+  border-radius: 18px 18px 18px 4px;
   background: #ffffff;
-  padding: 9px 10px 7px;
-  box-shadow: 0 4px 18px rgba(18, 32, 30, 0.06);
+  padding: 8px 12px 6px;
+  box-shadow: 0 2px 5px rgba(28, 51, 36, 0.12);
+}
+
+.message::before {
+  position: absolute;
+  bottom: 0;
+  left: -8px;
+  width: 14px;
+  height: 14px;
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+  background: inherit;
+  content: "";
 }
 
 .message.mine {
-  border-color: rgba(15, 118, 110, 0.22);
-  border-radius: 8px 8px 2px 8px;
-  background: #dff4ee;
+  border-radius: 18px 18px 4px 18px;
+  background: #dcf8c6;
+}
+
+.message.mine::before {
+  right: -8px;
+  left: auto;
+  clip-path: polygon(0 0, 100% 100%, 0 100%);
 }
 
 .message.deleted {
@@ -1527,7 +1566,7 @@ td > strong {
   gap: 8px;
   align-items: center;
   color: var(--accent-strong);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
 }
 
@@ -1540,16 +1579,109 @@ td > strong {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 5px;
   align-items: center;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
+}
+
+.message-check {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 999px;
+  color: #6b7775;
+  font-size: 13px;
+  font-weight: 1000;
+  line-height: 1;
+}
+
+.message-check.read {
+  color: #1d9bf0;
+}
+
+.analytics-bars {
+  display: grid;
+  gap: 12px;
+}
+
+.analytics-row {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(242, 247, 245, 0.74);
+  padding: 12px;
+}
+
+.analytics-row-title {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.analytics-row-title span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.analytics-bar {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) minmax(58px, auto);
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.bar-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dcebe7;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #2459a6);
+}
+
+.dispute-updates,
+.bid-profile-mini-list {
+  display: grid;
+  gap: 10px;
+}
+
+.dispute-update-row {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.84);
+  padding: 10px;
+}
+
+.dispute-update-row span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dispute-update-row p {
+  margin: 0;
 }
 
 .message p {
   margin: 0;
-  line-height: 1.45;
+  color: #101b18;
+  font-size: 15px;
+  line-height: 1.35;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
@@ -1560,11 +1692,13 @@ td > strong {
 }
 
 .chat-composer {
+  position: sticky;
+  bottom: 0;
   display: grid;
   gap: 10px;
-  border-top: 1px solid var(--line);
+  border-top: 0;
   margin-top: auto;
-  padding-top: 12px;
+  padding-top: 10px;
 }
 
 .read-only-composer {
@@ -1579,10 +1713,11 @@ td > strong {
   grid-template-columns: auto 1fr auto;
   gap: 8px;
   align-items: end;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 18px;
   background: #ffffff;
   padding: 8px;
+  box-shadow: 0 3px 12px rgba(28, 51, 36, 0.12);
 }
 
 .composer-shell textarea {
