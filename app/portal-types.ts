@@ -1,5 +1,5 @@
 export type Role = "super_admin" | "client" | "admin" | "bidder" | "developer";
-export type UserStatus = "pending" | "approved" | "paused";
+export type UserStatus = "pending_review" | "active" | "temporarily_restricted" | "suspended" | "closed";
 export type PaymentStatus = "scheduled" | "processing" | "paid" | "failed";
 export type WorkLogReviewStatus = "pending" | "approved" | "changes_requested";
 export type PaymentFrequency = "" | "weekly" | "biweekly" | "monthly";

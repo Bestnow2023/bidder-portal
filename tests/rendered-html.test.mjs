@@ -50,7 +50,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Sign up/);
   assert.match(portalApp, /Requested role/);
   assert.match(portalApp, /Super Admin/);
-  assert.match(portalApp, /Approved client/);
+  assert.match(portalApp, /Active client/);
   assert.match(portalApp, /Assigned client/);
   assert.match(portalApp, /Dashboard/);
   assert.match(portalApp, /Settings/);
@@ -159,6 +159,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /markChatConversationRead/);
   assert.match(portalApp, /Attach/);
   assert.match(portalApp, /aria-label="Actions"/);
+  assert.match(portalApp, /createPortal/);
+  assert.match(portalApp, /z-\[120\]/);
   assert.match(portalApp, /Save edit/);
   assert.match(portalApp, /Save changes/);
   assert.match(portalApp, /Save method changes/);
@@ -224,6 +226,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Edit Payment/);
   assert.match(portalApp, /Edit User/);
   assert.match(portalApp, /Edit Bidder Settings/);
+  assert.match(portalApp, /visaStatusOptions/);
+  assert.match(portalApp, /Requires sponsorship/);
   assert.match(portalApp, /Remove/);
   assert.match(portalApp, /Delete/);
   assert.match(portalApp, /Post Moderation/);
@@ -482,7 +486,13 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /profileCompletedAt/);
   assert.match(portalApp, /clientStats/);
   assert.match(portalApp, /clientUsers/);
-  assert.match(portalApp, /user\.role === "bidder" && user\.status === "approved"/);
+  assert.match(portalApp, /accountStatusOptions/);
+  assert.match(portalApp, /Pending Review/);
+  assert.match(portalApp, /Temporarily Restricted/);
+  assert.match(portalApp, /Suspended/);
+  assert.match(portalApp, /Closed/);
+  assert.match(portalApp, /isActiveAccount/);
+  assert.match(portalApp, /user\.role === "bidder" && isActiveAccount\(user\)/);
   assert.match(portalApp, /PortalPost/);
   assert.match(portalApp, /ContractRecord/);
   assert.match(portalApp, /supportConversationIdForUser/);
@@ -573,7 +583,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /\/billing/);
   assert.match(portalApp, /\/help/);
   assert.match(portalApp, /aria-haspopup="menu"/);
-  assert.match(portalApp, /fixed z-50/);
+  assert.match(portalApp, /fixed z-\[120\]/);
   assert.match(portalApp, /portal-nav/);
   assert.match(portalApp, /notification-menu-wrap/);
   assert.match(portalApp, /manual-credit-box/);
