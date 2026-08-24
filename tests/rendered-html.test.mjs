@@ -228,6 +228,16 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Delete/);
   assert.match(portalApp, /Post Moderation/);
   assert.match(portalApp, /PostTable/);
+  assert.match(portalApp, /All authors/);
+  assert.match(portalApp, /All post types/);
+  assert.match(portalApp, /Bid rate range/);
+  assert.match(portalApp, /Bonus rate range/);
+  assert.match(portalApp, /Min review stars/);
+  assert.match(portalApp, /Min hired count/);
+  assert.match(portalApp, /Min client avg rate/);
+  assert.match(portalApp, /Min bidder earnings/);
+  assert.match(portalApp, /All timezones/);
+  assert.match(portalApp, /No posts match these filters/);
   assert.match(portalApp, /Edit Post/);
   assert.match(portalApp, /Save post/);
   assert.match(portalApp, /Posts cost 1 post credit/);
@@ -238,6 +248,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /All clients/);
   assert.match(portalApp, /All bidders/);
   assert.match(portalApp, /No contracts match these filters/);
+  assert.match(portalApp, /Search disputes/);
+  assert.match(portalApp, /No disputes match these filters/);
+  assert.match(portalApp, /disputes shown/);
   assert.match(portalApp, /Delete chat/);
   assert.match(portalApp, /addDisputeUpdate/);
   assert.match(portalApp, /Add details or screenshots/);

@@ -972,6 +972,27 @@ button:disabled {
   width: fit-content;
 }
 
+.range-field {
+  gap: 8px;
+}
+
+.range-pair {
+  display: grid;
+  gap: 6px;
+}
+
+.range-field input[type="range"] {
+  min-height: auto;
+  padding: 0;
+  accent-color: var(--primary);
+}
+
+.range-value {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .check-field {
   min-height: 42px;
   display: flex;

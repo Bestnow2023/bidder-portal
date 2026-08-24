@@ -11,6 +11,7 @@ import type {
   ContractStatus,
   ContractPaymentStyle,
   DisputeRecord,
+  DisputeStatus,
   DepositRecord,
   EscrowRecord,
   PaymentFrequency,
@@ -4526,6 +4527,19 @@ function PostsView({
   const canPublish = currentUser.role === "bidder" || isClientRole(currentUser.role);
   const canAffordPost = balances.postCreditBalance >= postCreditCost || balances.moneyCreditBalance >= postCreditMoneyPrice;
   const [query, setQuery] = useState("");
+  const [postAuthorFilter, setPostAuthorFilter] = useState("");
+  const [postTypeFilter, setPostTypeFilter] = useState<"all" | PortalPost["type"]>("all");
+  const [postStatusFilter, setPostStatusFilter] = useState<"all" | PostStatus>("all");
+  const [bidRateMin, setBidRateMin] = useState("");
+  const [bidRateMax, setBidRateMax] = useState("");
+  const [bonusRateMin, setBonusRateMin] = useState("");
+  const [bonusRateMax, setBonusRateMax] = useState("");
+  const [minRatingFilter, setMinRatingFilter] = useState("0");
+  const [minHiredCountFilter, setMinHiredCountFilter] = useState("");
+  const [minClientAverageRateFilter, setMinClientAverageRateFilter] = useState("");
+  const [minBidderEarningsFilter, setMinBidderEarningsFilter] = useState("");
+  const [postLocationFilter, setPostLocationFilter] = useState("");
+  const [postTimeZoneFilter, setPostTimeZoneFilter] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedPost, setSelectedPost] = useState<PortalPost | null>(null);
   const [editingPost, setEditingPost] = useState<PortalPost | null>(null);
@@ -4540,7 +4554,7 @@ function PostsView({
     });
   const posts = data.posts || [];
   const myPosts = posts.filter((post) => post.authorId === currentUser.id);
-  const availablePosts = posts
+  const availablePostPool = posts
     .filter((post) => post.authorId !== currentUser.id)
     .filter((post) => isSuperAdmin || post.status === "active")
     .filter((post) => {
@@ -4548,12 +4562,96 @@ function PostsView({
       if (isClientRole(currentUser.role)) return post.type === "bidder";
       if (currentUser.role === "bidder") return post.type === "client";
       return false;
-    })
-    .filter((post) => {
-      const author = userById(data.users, post.authorId);
-      const search = `${post.title} ${post.criteria} ${author?.name || ""} ${author?.email || ""}`.toLowerCase();
-      return !query.trim() || search.includes(query.trim().toLowerCase());
     });
+  const postAuthorOptions = data.users
+    .filter((user) => availablePostPool.some((post) => post.authorId === user.id))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const postTimeZoneOptions = Array.from(
+    new Set([
+      ...timeZoneOptions,
+      ...availablePostPool
+        .map((post) => userById(data.users, post.authorId)?.profileTimeZone || "")
+        .filter(Boolean),
+    ]),
+  ).sort();
+  const postRateCeiling = Math.max(1, Math.ceil(Math.max(10, ...availablePostPool.map((post) => post.preferredRate || 0))));
+  const postBonusCeiling = Math.max(1, Math.ceil(Math.max(10, ...availablePostPool.map((post) => post.bonusPerInterview || 0))));
+  const bidRateMinValue = Math.min(Number(bidRateMin || 0), postRateCeiling);
+  const bidRateMaxValue = Math.max(bidRateMinValue, Math.min(Number(bidRateMax || postRateCeiling), postRateCeiling));
+  const bonusRateMinValue = Math.min(Number(bonusRateMin || 0), postBonusCeiling);
+  const bonusRateMaxValue = Math.max(bonusRateMinValue, Math.min(Number(bonusRateMax || postBonusCeiling), postBonusCeiling));
+  const minRatingValue = Math.min(5, Math.max(0, Number(minRatingFilter || 0)));
+  const minHiredCountValue = Number(minHiredCountFilter || 0);
+  const minClientAverageRateValue = Number(minClientAverageRateFilter || 0);
+  const minBidderEarningsValue = Number(minBidderEarningsFilter || 0);
+  const normalizedPostQuery = query.trim().toLowerCase();
+  const availablePosts = availablePostPool.filter((post) => {
+      const author = userById(data.users, post.authorId);
+      const authorRating = ratingForUser(author);
+      const authorHiredCount = author
+        ? isClientRole(author.role)
+          ? author.clientStats?.assignedBidderCount || 0
+          : (data.contracts || []).filter((contract) => contract.workerId === author.id && ["active", "ended"].includes(contract.status)).length
+        : 0;
+      const authorClientAverageRate = author?.clientStats?.averageBidRate || 0;
+      const authorBidderEarnings = author?.bidderStats?.totalEarned || 0;
+      const authorLocationText = `${author?.country || ""} ${author?.profileLocation || ""}`.toLowerCase();
+      const search = [
+        post.id,
+        post.title,
+        post.criteria,
+        post.status,
+        postAudienceLabel(post),
+        author?.name,
+        author?.email,
+        displayUserId(author),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      const matchesQuery = !normalizedPostQuery || search.includes(normalizedPostQuery);
+      const matchesAuthor = !postAuthorFilter || post.authorId === postAuthorFilter;
+      const matchesType = postTypeFilter === "all" || post.type === postTypeFilter;
+      const matchesStatus = postStatusFilter === "all" || post.status === postStatusFilter;
+      const matchesBidRate = (!bidRateMin || (post.preferredRate || 0) >= bidRateMinValue) && (!bidRateMax || (post.preferredRate || 0) <= bidRateMaxValue);
+      const matchesBonusRate = (!bonusRateMin || (post.bonusPerInterview || 0) >= bonusRateMinValue) && (!bonusRateMax || (post.bonusPerInterview || 0) <= bonusRateMaxValue);
+      const matchesRating = authorRating >= minRatingValue;
+      const matchesHiredCount = !minHiredCountFilter || authorHiredCount >= minHiredCountValue;
+      const matchesClientAverageRate = !minClientAverageRateFilter || authorClientAverageRate >= minClientAverageRateValue;
+      const matchesBidderEarnings = !minBidderEarningsFilter || authorBidderEarnings >= minBidderEarningsValue;
+      const matchesLocation = !postLocationFilter.trim() || authorLocationText.includes(postLocationFilter.trim().toLowerCase());
+      const matchesTimeZone = !postTimeZoneFilter || author?.profileTimeZone === postTimeZoneFilter;
+      return (
+        matchesQuery &&
+        matchesAuthor &&
+        matchesType &&
+        matchesStatus &&
+        matchesBidRate &&
+        matchesBonusRate &&
+        matchesRating &&
+        matchesHiredCount &&
+        matchesClientAverageRate &&
+        matchesBidderEarnings &&
+        matchesLocation &&
+        matchesTimeZone
+      );
+    });
+  const hasPostFilters = Boolean(
+    query.trim() ||
+    postAuthorFilter ||
+    postTypeFilter !== "all" ||
+    postStatusFilter !== "all" ||
+    bidRateMin ||
+    bidRateMax ||
+    bonusRateMin ||
+    bonusRateMax ||
+    minRatingValue > 0 ||
+    minHiredCountFilter ||
+    minClientAverageRateFilter ||
+    minBidderEarningsFilter ||
+    postLocationFilter.trim() ||
+    postTimeZoneFilter,
+  );
 
   async function submitPost(event: FormEvent) {
     event.preventDefault();
@@ -4695,13 +4793,153 @@ function PostsView({
         <div className="filter-bar">
           <label className="field">
             <span>Search posts</span>
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Title, criteria, author" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Post ID, title, criteria, author" />
           </label>
+          <label className="field">
+            <span>Author</span>
+            <select value={postAuthorFilter} onChange={(event) => setPostAuthorFilter(event.target.value)}>
+              <option value="">All authors</option>
+              {postAuthorOptions.map((author) => (
+                <option key={author.id} value={author.id}>
+                  {author.name} - {displayUserId(author)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Post type</span>
+            <select value={postTypeFilter} onChange={(event) => setPostTypeFilter(event.target.value as "all" | PortalPost["type"])}>
+              <option value="all">All post types</option>
+              <option value="client">Client posts</option>
+              <option value="bidder">Bidder posts</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Status</span>
+            <select value={postStatusFilter} onChange={(event) => setPostStatusFilter(event.target.value as "all" | PostStatus)}>
+              <option value="all">All statuses</option>
+              <option value="active">Active</option>
+              <option value="closed">Closed</option>
+            </select>
+          </label>
+          <label className="field range-field">
+            <span>Bid rate range</span>
+            <div className="range-pair">
+              <input
+                aria-label="Minimum bid rate"
+                type="range"
+                min="0"
+                max={postRateCeiling}
+                step="0.01"
+                value={bidRateMinValue}
+                onChange={(event) => setBidRateMin(String(Math.min(Number(event.target.value), bidRateMaxValue)))}
+              />
+              <input
+                aria-label="Maximum bid rate"
+                type="range"
+                min="0"
+                max={postRateCeiling}
+                step="0.01"
+                value={bidRateMaxValue}
+                onChange={(event) => setBidRateMax(String(Math.max(Number(event.target.value), bidRateMinValue)))}
+              />
+            </div>
+            <small className="range-value">{money(bidRateMinValue)} - {money(bidRateMaxValue)}</small>
+          </label>
+          <label className="field range-field">
+            <span>Bonus rate range</span>
+            <div className="range-pair">
+              <input
+                aria-label="Minimum bonus rate"
+                type="range"
+                min="0"
+                max={postBonusCeiling}
+                step="0.01"
+                value={bonusRateMinValue}
+                onChange={(event) => setBonusRateMin(String(Math.min(Number(event.target.value), bonusRateMaxValue)))}
+              />
+              <input
+                aria-label="Maximum bonus rate"
+                type="range"
+                min="0"
+                max={postBonusCeiling}
+                step="0.01"
+                value={bonusRateMaxValue}
+                onChange={(event) => setBonusRateMax(String(Math.max(Number(event.target.value), bonusRateMinValue)))}
+              />
+            </div>
+            <small className="range-value">{money(bonusRateMinValue)} - {money(bonusRateMaxValue)}</small>
+          </label>
+          <label className="field range-field">
+            <span>Min review stars</span>
+            <input
+              aria-label="Minimum review stars"
+              type="range"
+              min="0"
+              max="5"
+              step="0.1"
+              value={minRatingValue}
+              onChange={(event) => setMinRatingFilter(event.target.value)}
+            />
+            <small className="range-value">{minRatingValue.toFixed(1)} stars</small>
+          </label>
+          <label className="field">
+            <span>Min hired count</span>
+            <input type="number" min="0" value={minHiredCountFilter} onChange={(event) => setMinHiredCountFilter(event.target.value)} placeholder="Any" />
+          </label>
+          <label className="field">
+            <span>Min client avg rate</span>
+            <input type="number" min="0" step="0.01" value={minClientAverageRateFilter} onChange={(event) => setMinClientAverageRateFilter(event.target.value)} placeholder="Any" />
+          </label>
+          <label className="field">
+            <span>Min bidder earnings</span>
+            <input type="number" min="0" step="0.01" value={minBidderEarningsFilter} onChange={(event) => setMinBidderEarningsFilter(event.target.value)} placeholder="Any" />
+          </label>
+          <label className="field">
+            <span>Location</span>
+            <input value={postLocationFilter} onChange={(event) => setPostLocationFilter(event.target.value)} placeholder="Country or city" />
+          </label>
+          <label className="field">
+            <span>Timezone</span>
+            <select value={postTimeZoneFilter} onChange={(event) => setPostTimeZoneFilter(event.target.value)}>
+              <option value="">All timezones</option>
+              {postTimeZoneOptions.map((timeZone) => (
+                <option key={timeZone} value={timeZone}>{timeZoneDisplay(timeZone)}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="ghost-button compact-button"
+            type="button"
+            disabled={!hasPostFilters}
+            onClick={() => {
+              setQuery("");
+              setPostAuthorFilter("");
+              setPostTypeFilter("all");
+              setPostStatusFilter("all");
+              setBidRateMin("");
+              setBidRateMax("");
+              setBonusRateMin("");
+              setBonusRateMax("");
+              setMinRatingFilter("0");
+              setMinHiredCountFilter("");
+              setMinClientAverageRateFilter("");
+              setMinBidderEarningsFilter("");
+              setPostLocationFilter("");
+              setPostTimeZoneFilter("");
+            }}
+          >
+            Clear filters
+          </button>
+        </div>
+        <div className="table-toolbar">
+          <span>Filter by user stats, rate ranges, stars, location, timezone, and post status.</span>
+          <span>{availablePosts.length} of {availablePostPool.length} posts shown</span>
         </div>
         <PostTable
           posts={availablePosts}
           users={data.users}
-          emptyMessage="No posts are available for this view."
+          emptyMessage={hasPostFilters ? "No posts match these filters." : "No posts are available for this view."}
           onSelect={setSelectedPost}
           actionItemsForPost={postActionItems}
         />
@@ -5784,9 +6022,62 @@ function DisputesView({
     body: "",
   });
   const [resolutionDraft, setResolutionDraft] = useState({
-    status: "reviewing",
+    status: "reviewing" as DisputeStatus,
     resolution: "",
   });
+  const [disputeQuery, setDisputeQuery] = useState("");
+  const [disputeClientFilter, setDisputeClientFilter] = useState("");
+  const [disputeBidderFilter, setDisputeBidderFilter] = useState("");
+  const [disputeStatusFilter, setDisputeStatusFilter] = useState<"all" | DisputeStatus>("all");
+  const [disputeContractFilter, setDisputeContractFilter] = useState("");
+  const disputes = data.disputes || [];
+  const disputeClientOptions = data.users
+    .filter((user) => disputes.some((dispute) => dispute.clientId === user.id))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const disputeBidderOptions = data.users
+    .filter((user) => disputes.some((dispute) => dispute.targetUserId === user.id))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const disputeContractOptions = data.contracts
+    .filter((contract) => disputes.some((dispute) => dispute.contractId === contract.id))
+    .sort((left, right) => left.title.localeCompare(right.title));
+  const normalizedDisputeQuery = disputeQuery.trim().toLowerCase();
+  const filteredDisputes = disputes.filter((dispute) => {
+    const client = userById(data.users, dispute.clientId);
+    const target = userById(data.users, dispute.targetUserId);
+    const contract = data.contracts.find((item) => item.id === dispute.contractId);
+    const payment = data.payments.find((item) => item.id === dispute.paymentId);
+    const search = [
+      dispute.id,
+      dispute.subject,
+      dispute.body,
+      dispute.status,
+      dispute.resolution,
+      client?.name,
+      client?.email,
+      displayUserId(client),
+      target?.name,
+      target?.email,
+      displayUserId(target),
+      contract?.id,
+      contract?.title,
+      contract?.criteria,
+      payment?.id,
+      payment ? money(payment.amount) : "",
+      payment?.scheduledDate,
+      ...(dispute.updates || []).map((update) => update.body),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return (
+      (!normalizedDisputeQuery || search.includes(normalizedDisputeQuery)) &&
+      (!disputeClientFilter || dispute.clientId === disputeClientFilter) &&
+      (!disputeBidderFilter || dispute.targetUserId === disputeBidderFilter) &&
+      (disputeStatusFilter === "all" || dispute.status === disputeStatusFilter) &&
+      (!disputeContractFilter || dispute.contractId === disputeContractFilter)
+    );
+  });
+  const hasDisputeFilters = Boolean(disputeQuery.trim() || disputeClientFilter || disputeBidderFilter || disputeStatusFilter !== "all" || disputeContractFilter);
 
   async function submitDispute(event: FormEvent) {
     event.preventDefault();
@@ -5849,8 +6140,75 @@ function DisputesView({
             <p>Resolution requests are tracked here with status and notes.</p>
           </div>
           <div className="actions">
-            <span className="badge">{(data.disputes || []).length} total</span>
+            <span className="badge">{filteredDisputes.length} of {disputes.length} total</span>
           </div>
+        </div>
+        <div className="filter-bar">
+          <label className="field">
+            <span>Search disputes</span>
+            <input value={disputeQuery} onChange={(event) => setDisputeQuery(event.target.value)} placeholder="Dispute ID, subject, client, bidder" />
+          </label>
+          <label className="field">
+            <span>Client</span>
+            <select value={disputeClientFilter} onChange={(event) => setDisputeClientFilter(event.target.value)}>
+              <option value="">All clients</option>
+              {disputeClientOptions.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name} - {displayUserId(client)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Bidder</span>
+            <select value={disputeBidderFilter} onChange={(event) => setDisputeBidderFilter(event.target.value)}>
+              <option value="">All bidders</option>
+              {disputeBidderOptions.map((bidder) => (
+                <option key={bidder.id} value={bidder.id}>
+                  {bidder.name} - {displayUserId(bidder)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Status</span>
+            <select value={disputeStatusFilter} onChange={(event) => setDisputeStatusFilter(event.target.value as "all" | DisputeStatus)}>
+              <option value="all">All statuses</option>
+              <option value="open">Open</option>
+              <option value="reviewing">Reviewing</option>
+              <option value="resolved">Resolved</option>
+              <option value="closed">Closed</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Contract</span>
+            <select value={disputeContractFilter} onChange={(event) => setDisputeContractFilter(event.target.value)}>
+              <option value="">All contracts</option>
+              {disputeContractOptions.map((contract) => (
+                <option key={contract.id} value={contract.id}>
+                  {contract.title} - {contract.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="ghost-button compact-button"
+            type="button"
+            disabled={!hasDisputeFilters}
+            onClick={() => {
+              setDisputeQuery("");
+              setDisputeClientFilter("");
+              setDisputeBidderFilter("");
+              setDisputeStatusFilter("all");
+              setDisputeContractFilter("");
+            }}
+          >
+            Clear filters
+          </button>
+        </div>
+        <div className="table-toolbar">
+          <span>Search by dispute ID, client, bidder, contract, payment, status, or notes.</span>
+          <span>{filteredDisputes.length} disputes shown</span>
         </div>
         <div className="table-wrap">
           <table>
@@ -5866,7 +6224,7 @@ function DisputesView({
               </tr>
             </thead>
             <tbody>
-              {(data.disputes || []).map((dispute) => {
+              {filteredDisputes.map((dispute) => {
                 const client = userById(data.users, dispute.clientId);
                 const target = userById(data.users, dispute.targetUserId);
                 const contract = data.contracts.find((item) => item.id === dispute.contractId);
@@ -5899,7 +6257,8 @@ function DisputesView({
             </tbody>
           </table>
         </div>
-        {!data.disputes?.length ? <div className="empty-state">No disputes yet.</div> : null}
+        {!disputes.length ? <div className="empty-state">No disputes yet.</div> : null}
+        {disputes.length && !filteredDisputes.length ? <div className="empty-state">No disputes match these filters.</div> : null}
       </section>
 
       {selectedDispute ? (
@@ -5974,7 +6333,7 @@ function DisputesView({
           <form className="form-grid" onSubmit={submitResolution}>
             <label className="field">
               <span>Status</span>
-              <select value={resolutionDraft.status} onChange={(event) => setResolutionDraft({ ...resolutionDraft, status: event.target.value })}>
+              <select value={resolutionDraft.status} onChange={(event) => setResolutionDraft({ ...resolutionDraft, status: event.target.value as DisputeStatus })}>
                 <option value="open">Open</option>
                 <option value="reviewing">Reviewing</option>
                 <option value="resolved">Resolved</option>
