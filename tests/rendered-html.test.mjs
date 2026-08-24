@@ -466,6 +466,10 @@ test("declares the requested frontend records", async () => {
   const parsedPackage = JSON.parse(packageJson);
   assert.match(portalApp, /NEXT_PUBLIC_API_BASE_URL/);
   assert.match(portalApp, /NEXT_PUBLIC_PORTAL_MODE/);
+  assert.match(portalApp, /NEXT_PUBLIC_HELP_BASE_URL/);
+  assert.match(portalApp, /help-bp\.digniware\.com/);
+  assert.match(portalApp, /openHelpCenter/);
+  assert.match(portalApp, /window\.open\(url, "_blank", "noopener,noreferrer"\)/);
   assert.match(portalApp, /\/api\/portal/);
   assert.match(portalApp, /filterWorkLogsByDate/);
   assert.match(portalApp, /workLogsForUser/);
@@ -620,6 +624,7 @@ test("declares the requested frontend records", async () => {
   assert.doesNotMatch(portalApp, /Visible Profiles|ProfileCardGrid/);
   assert.match(envExample, /NEXT_PUBLIC_API_BASE_URL/);
   assert.match(envExample, /NEXT_PUBLIC_PORTAL_MODE/);
+  assert.match(envExample, /NEXT_PUBLIC_HELP_BASE_URL/);
   assert.match(envExample, /NEXT_PUBLIC_ADMIN_TIME_ZONE/);
   assert.equal(parsedPackage.dependencies.mongodb, undefined);
   assert.equal(parsedPackage.scripts.build, "next build");

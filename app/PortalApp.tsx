@@ -99,6 +99,7 @@ const portalApiUrl = `${apiBaseUrl}/api/portal`;
 const portalMode = process.env.NEXT_PUBLIC_PORTAL_MODE?.toLowerCase() === "live" ? "live" : "dev";
 const isLiveMode = portalMode === "live";
 const adminTimeZone = process.env.NEXT_PUBLIC_ADMIN_TIME_ZONE || "America/New_York";
+const helpBaseUrl = (process.env.NEXT_PUBLIC_HELP_BASE_URL || "https://help-bp.digniware.com").replace(/\/$/, "");
 const chatPollIntervalMs = 15000;
 const chatAttachmentLimit = 3;
 const maxChatAttachmentBytes = 2 * 1024 * 1024;
@@ -2251,6 +2252,16 @@ export default function PortalApp() {
     goToView(view);
   }
 
+  function openHelpCenter() {
+    const hashParams = new URLSearchParams();
+    if (currentUser.email && sessionToken) {
+      hashParams.set("email", currentUser.email);
+      hashParams.set("sessionToken", sessionToken);
+    }
+    const url = `${helpBaseUrl}/help${hashParams.toString() ? `#${hashParams.toString()}` : ""}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
   function openInboxForUser(userId: string, relatedPostId = "") {
     const params = new URLSearchParams({ recipient: userId });
     if (relatedPostId) {
@@ -2374,7 +2385,7 @@ export default function PortalApp() {
               showAccountSettings={!isSuperAdmin}
               onProfileSettings={() => goToView("profile")}
               onSecurity={() => goToView("profile")}
-              onHelp={() => goToView("help")}
+              onHelp={openHelpCenter}
               onSignOut={signOut}
             />
           </div>
