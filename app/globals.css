@@ -1272,6 +1272,67 @@ td > strong {
   min-height: 0;
 }
 
+.help-hero-panel {
+  background:
+    linear-gradient(135deg, rgba(240, 253, 250, 0.88), rgba(255, 255, 255, 0.96)),
+    var(--panel);
+}
+
+.help-summary-grid,
+.help-guide {
+  display: grid;
+  gap: 12px;
+}
+
+.help-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.help-summary-grid article,
+.guide-section {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(247, 251, 250, 0.84);
+}
+
+.help-summary-grid article {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+}
+
+.help-summary-grid strong,
+.guide-section h3 {
+  color: var(--ink);
+}
+
+.help-summary-grid span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.help-guide {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.guide-section {
+  padding: 18px;
+}
+
+.guide-section h3 {
+  margin: 0 0 10px;
+  font-size: 20px;
+}
+
+.guide-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .support-layout {
   display: grid;
   grid-template-columns: minmax(220px, 0.28fr) minmax(0, 0.72fr);
@@ -2399,6 +2460,8 @@ td > strong {
   .credit-strip,
   .bid-profile-grid,
   .help-grid,
+  .help-summary-grid,
+  .help-guide,
   .support-layout {
     grid-template-columns: 1fr;
   }

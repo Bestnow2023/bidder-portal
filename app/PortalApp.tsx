@@ -30,7 +30,7 @@ import type {
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
 type PublicPortalData = { posts: PortalPost[]; users: PortalUser[] };
-type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "disputes" | "people" | "bidderSettings" | "work" | "credits" | "billing" | "payments" | "chat" | "help";
+type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "disputes" | "people" | "bidderSettings" | "work" | "credits" | "billing" | "payments" | "chat" | "help" | "support";
 
 const payoutCurrencies = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB"];
 const signupPostCreditAmount = 10;
@@ -185,6 +185,7 @@ const viewRoutes: Record<PortalView, string> = {
   payments: "/payments",
   chat: "/chat",
   help: "/help",
+  support: "/support",
 };
 const routeViews: Record<string, PortalView> = {
   "/operations": "overview",
@@ -204,6 +205,7 @@ const routeViews: Record<string, PortalView> = {
   "/payments": "payments",
   "/chat": "chat",
   "/help": "help",
+  "/support": "support",
 };
 
 function DigniwareLogo({
@@ -577,6 +579,9 @@ function viewTitle(view: string, user?: PortalUser) {
   if (user && isSuperAdminRole(user.role) && view === "help") {
     return "Help Center";
   }
+  if (view === "support") {
+    return "Support Center";
+  }
 
   const titles: Record<string, string> = {
     dashboard: "Dashboard",
@@ -595,6 +600,7 @@ function viewTitle(view: string, user?: PortalUser) {
     payments: "Payments",
     chat: "Inbox",
     help: "Help",
+    support: "Support Center",
   };
   return titles[view] || "Portal";
 }
@@ -607,6 +613,7 @@ function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
     if (view === "contracts") return "Review requests, active contracts, criteria, and connected client credit.";
     if (view === "disputes") return "Open and track contract, work, and payment disputes.";
     if (view === "profile") return "Complete your profile, direct-message preference, email, and password.";
+    if (view === "support") return "Contact super admin support for account, billing, contract, work-log, or dispute help.";
     if (view === "chat") return "";
     return "Log your bidder activity and keep payment details current.";
   }
@@ -615,7 +622,8 @@ function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
     const superAdminSubtitles: Record<string, string> = {
       credits: "Add, deduct, and audit money credit and post credit by client and bidder.",
       billing: "Review pending payout releases and completed payout history.",
-      help: "Review platform guidance and handle support messages from users.",
+      help: "Review platform guidance for clients, bidders, and super admins.",
+      support: "Respond to support messages from portal users.",
     };
 
     if (superAdminSubtitles[view]) {
@@ -638,7 +646,8 @@ function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
     billing: "Deposit credits and release bidder payouts through Cryptomus.",
     payments: "Record payouts, review payment methods, and track client escrow.",
     chat: "",
-    help: "Learn how the portal works and contact support.",
+    help: "Learn how the portal works for clients, bidders, contracts, posts, billing, and feedback.",
+    support: "Message super admin support separately from your client-bidder inbox.",
   };
 
   return subtitles[view] || "Manage the bidder portal.";
@@ -646,18 +655,18 @@ function viewSubtitle(view: string, isAdmin: boolean, isSuperAdmin = false) {
 
 function viewsForUser(user: PortalUser): PortalView[] {
   if (isSuperAdminRole(user.role)) {
-    return ["people", "contracts", "disputes", "posts", "credits", "billing", "chat", "help"];
+    return ["people", "contracts", "disputes", "posts", "credits", "billing", "chat", "help", "support"];
   }
 
   if (isClientRole(user.role)) {
-    return ["overview", "profile", "bidders", "posts", "contracts", "disputes", "work", "billing", "chat", "help"];
+    return ["overview", "profile", "bidders", "posts", "contracts", "disputes", "work", "billing", "chat", "help", "support"];
   }
 
   if (user.role === "bidder") {
-    return ["dashboard", "profile", "clients", "posts", "contracts", "disputes", "work", "payments", "chat", "help"];
+    return ["dashboard", "profile", "clients", "posts", "contracts", "disputes", "work", "payments", "chat", "help", "support"];
   }
 
-  return ["profile", "contracts", "disputes", "payments", "chat", "help"];
+  return ["profile", "contracts", "disputes", "payments", "chat", "help", "support"];
 }
 
 function safeViewForUser(user: PortalUser, view: PortalView) {
@@ -2180,7 +2189,7 @@ export default function PortalApp() {
   const isSuperAdmin = isSuperAdminRole(currentUser.role);
   const canViewManaged = canViewManagedRecords(currentUser.role);
   const availableViews = viewsForUser(currentUser);
-  const navViews = availableViews.filter((view) => view !== "profile" && view !== "help");
+  const navViews = availableViews.filter((view) => view !== "profile" && view !== "help" && view !== "support");
   const safeView = safeViewForUser(currentUser, activeView);
   const mustCompleteProfile = currentUser.status === "approved" && !isProfileComplete(currentUser);
   const portalNotifications = data.notifications || [];
@@ -2333,6 +2342,7 @@ export default function PortalApp() {
               onProfileSettings={() => goToView("profile")}
               onSecurity={() => goToView("profile")}
               onHelp={() => goToView("help")}
+              onSupport={() => goToView("support")}
               onSignOut={signOut}
             />
           </div>
@@ -2379,7 +2389,8 @@ export default function PortalApp() {
             {safeView === "work" ? <WorkView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "credits" && isSuperAdmin ? <SuperAdminCreditManagementView data={data} busy={busy} onAction={postAction} /> : null}
             {safeView === "billing" || safeView === "payments" ? <PaymentsView data={data} busy={busy} onAction={postAction} /> : null}
-            {safeView === "help" ? <HelpView data={data} busy={busy} onSend={postAction} /> : null}
+            {safeView === "help" ? <HelpView currentUser={currentUser} onOpenSupport={() => goToView("support")} /> : null}
+            {safeView === "support" ? <SupportCenter data={data} busy={busy} onSend={postAction} /> : null}
             {safeView === "chat" ? (
               <ChatView
                 data={data}
@@ -2648,6 +2659,7 @@ function AccountMenu({
   onProfileSettings,
   onSecurity,
   onHelp,
+  onSupport,
   onSignOut,
 }: {
   user: PortalUser;
@@ -2655,6 +2667,7 @@ function AccountMenu({
   onProfileSettings: () => void;
   onSecurity: () => void;
   onHelp: () => void;
+  onSupport: () => void;
   onSignOut: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -2728,6 +2741,9 @@ function AccountMenu({
           ) : null}
           <button type="button" role="menuitem" onClick={() => choose(onHelp)}>
             Help
+          </button>
+          <button type="button" role="menuitem" onClick={() => choose(onSupport)}>
+            Support Center
           </button>
           <button type="button" role="menuitem" className="danger" onClick={() => choose(onSignOut)}>
             Sign out
@@ -9861,51 +9877,205 @@ function ChatAttachments({ attachments }: { attachments: ChatAttachmentDraft[] }
 }
 
 function HelpView({
-  data,
-  busy,
-  onSend,
+  currentUser,
+  onOpenSupport,
 }: {
-  data: PortalData;
-  busy: boolean;
-  onSend: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  currentUser: PortalUser;
+  onOpenSupport: () => void;
 }) {
-  const isSuperAdmin = isSuperAdminRole(data.currentUser.role);
+  const isSuperAdmin = isSuperAdminRole(currentUser.role);
 
   return (
     <div className="dashboard-stack">
-      <section className="panel">
+      <section className="panel help-hero-panel">
         <div className="panel-header">
           <div>
             <h2>{isSuperAdmin ? "Help Center" : "How This Works"}</h2>
-            <p>{isSuperAdmin ? "Review the operating guide and respond to support messages." : "Use this guide to set up your account and work through the portal."}</p>
+            <p>
+              Bidder Portal by Digniware LLC helps clients, bidders, and super admins manage
+              posts, contracts, work approvals, credits, withdrawals, and support in one place.
+            </p>
           </div>
+          <button className="secondary-button" type="button" onClick={onOpenSupport}>
+            Support Center
+          </button>
         </div>
-
-        <div className="help-grid">
-          <article className="profile-card help-card">
-            <h3>Client Setup</h3>
-            <p>Complete your profile with name, company, country, timezone, and preferences. Add money credit from Billing before releasing bidder payments.</p>
-            <p>Create or review bidder posts, open a contract, set rates, set the next payday, and release payment after approving work logs.</p>
+        <div className="help-summary-grid">
+          <article>
+            <strong>Client-bidder inbox</strong>
+            <span>Use Inbox only for direct client and bidder communication.</span>
           </article>
-          <article className="profile-card help-card">
-            <h3>Bidder Setup</h3>
-            <p>Complete your profile with country, timezone, skills, and languages. Add a crypto payout method from Payments so clients can release payouts.</p>
-            <p>Log daily work with the Google Sheet link, applied jobs, interviews scheduled, and notes. Work logs must be approved before payment.</p>
+          <article>
+            <strong>Support messages</strong>
+            <span>Use Support Center for super admin help with accounts, payments, disputes, or access.</span>
           </article>
-          <article className="profile-card help-card">
-            <h3>Contracts</h3>
-            <p>Contracts connect one client and one bidder with criteria, rates, bonus, schedule, and next payday. A bidder can hold more than one contract.</p>
-            <p>Each contract has a contract ID. Use it when discussing work, payment, disputes, or support questions.</p>
-          </article>
-          <article className="profile-card help-card">
-            <h3>Support</h3>
-            <p>Support messages are separate from the Inbox. Inbox is only for client-bidder communication.</p>
-            <p>Use the Support Center below when you need help from the super admin.</p>
+          <article>
+            <strong>Contract ID</strong>
+            <span>Every contract has an ID so users can reference the same work, payment, or dispute.</span>
           </article>
         </div>
       </section>
 
-      <SupportCenter data={data} busy={busy} onSend={onSend} />
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Client Guide</h2>
+            <p>Use this flow when you want to find bidders, fund work, approve logs, and pay through portal credits.</p>
+          </div>
+        </div>
+        <div className="help-guide">
+          <article className="guide-section">
+            <h3>1. Complete your profile</h3>
+            <ul className="guide-list">
+              <li>Add your name, company, country, timezone, and work preferences.</li>
+              <li>Turn direct messages on or off from Settings.</li>
+              <li>Create one or more bid profiles for US job bidding, including contact details, job titles, resume, LinkedIn, portfolio, and optional EEO details.</li>
+            </ul>
+          </article>
+          <article className="guide-section">
+            <h3>2. Add credit</h3>
+            <ul className="guide-list">
+              <li>Money credit is dollar credit and can be used for bidder payments or posts.</li>
+              <li>Post credit is counted as credits, not dollars. New users receive 10 post credits, and 1 post costs 1 post credit.</li>
+              <li>If post credit is empty, money credit can cover posts at $0.10 for 1 post credit.</li>
+            </ul>
+          </article>
+          <article className="guide-section">
+            <h3>3. Find bidders and review posts</h3>
+            <ul className="guide-list">
+              <li>Search bidders by name, user ID, location, timezone, review stars, rates, hired count, and earning signals.</li>
+              <li>Open a bidder profile to see rating, current work status, past collaborations, skills, languages, and profile details.</li>
+              <li>Review bidder posts in table view, then message the bidder or start a contract.</li>
+            </ul>
+          </article>
+          <article className="guide-section">
+            <h3>4. Start and manage contracts</h3>
+            <ul className="guide-list">
+              <li>Send contracts by bidder user ID so there is no confusion about the selected bidder.</li>
+              <li>Choose the payment style: fixed, hourly, per bid, per bid + bonus, or regular monthly.</li>
+              <li>Set budget, hourly rate, per bid rate, interview bonus, monthly salary, next payday, and contract timeline as needed.</li>
+              <li>You can edit contract content later while it is still manageable.</li>
+            </ul>
+          </article>
+          <article className="guide-section">
+            <h3>5. Review work logs and pay</h3>
+            <ul className="guide-list">
+              <li>Bidders submit Google Sheet links, applied jobs, interview counts, and notes.</li>
+              <li>Approve a work log or request edits. Requested changes appear in notifications.</li>
+              <li>When work is approved, release payment from Billing. Client money credit is deducted and bidder money credit is increased.</li>
+              <li>After payment is processing, the super admin marks it completed and adds the payment link.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Bidder Guide</h2>
+            <p>Use this flow to set up payout details, accept contracts, log work, and withdraw earned credit.</p>
+          </div>
+        </div>
+        <div className="help-guide">
+          <article className="guide-section">
+            <h3>1. Complete your profile</h3>
+            <ul className="guide-list">
+              <li>Add your name, country, timezone, skills, languages, and public bidder profile summary.</li>
+              <li>The profile timezone is shown with understandable local time so clients can schedule work clearly.</li>
+              <li>Set whether clients can contact you directly.</li>
+            </ul>
+          </article>
+          <article className="guide-section">
+            <h3>2. Set your payment method</h3>
+            <ul className="guide-list">
+              <li>Add a crypto payout method from Payments, including coin, network, and wallet address.</li>
+              <li>Use clear network labels such as TRC20 - TRON, BEP20 - BSC, ERC20 - Ethereum, BTC - Bitcoin, or LTC - Litecoin.</li>
+              <li>You can edit your payout method before requesting withdrawals.</li>
+            </ul>
+          </article>
+          <article className="guide-section">
+            <h3>3. Earn through contracts</h3>
+            <ul className="guide-list">
+              <li>Contracts explain exactly how you earn: fixed budget, hourly, per bid, per bid + bonus, or regular monthly.</li>
+              <li>Per bid + bonus means you earn a bid rate plus an interview bonus when interviews are scheduled.</li>
+              <li>Open contract details to see the contract ID, next payday, payment style, assigned client, and any attached client bid profile.</li>
+            </ul>
+          </article>
+          <article className="guide-section">
+            <h3>4. Post and manage availability</h3>
+            <ul className="guide-list">
+              <li>Create posts to show clients your availability, skills, preferred work, and bid rate.</li>
+              <li>You can edit, close, or repost your own posts. Reposting boosts visibility.</li>
+              <li>Only the owner and super admin can edit or close a post.</li>
+            </ul>
+          </article>
+          <article className="guide-section">
+            <h3>5. Log work and withdraw</h3>
+            <ul className="guide-list">
+              <li>Add work logs from Work Logs, then choose the related client and date.</li>
+              <li>Only approved work logs are used for payment calculations.</li>
+              <li>After a client releases payment, your bidder money credit increases.</li>
+              <li>Use Request withdrawal to send a payout request to the super admin. The super admin adds the payment link and marks it completed.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Contracts, Feedback, And Disputes</h2>
+            <p>Use these rules to keep work history, ratings, and payment records clean.</p>
+          </div>
+        </div>
+        <div className="help-grid">
+          <article className="profile-card help-card">
+            <h3>Ending a paid contract</h3>
+            <p>When a contract ends after payment, users are asked how the work went. That feedback can contribute to the public rating shown as stars and a 1-5 point value.</p>
+          </article>
+          <article className="profile-card help-card">
+            <h3>Canceling unpaid work</h3>
+            <p>If a contract is completed or canceled without payment, the user records a reason. Canceled unpaid work does not affect client or bidder rating.</p>
+          </article>
+          <article className="profile-card help-card">
+            <h3>Disputes</h3>
+            <p>Open a dispute from Contracts when there is a conflict about work, payment, or contract terms. Both sides can add details and screenshots after it is opened.</p>
+          </article>
+          <article className="profile-card help-card">
+            <h3>Notifications</h3>
+            <p>New messages, disputes, contracts, billing updates, work-log edit requests, and approval requests appear in the notification center and relevant tab badges.</p>
+          </article>
+        </div>
+      </section>
+
+      {isSuperAdmin ? (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Super Admin Guide</h2>
+              <p>Super admins manage access, monitor safety, and complete billing operations.</p>
+            </div>
+          </div>
+          <div className="help-guide">
+            <article className="guide-section">
+              <h3>User management</h3>
+              <ul className="guide-list">
+                <li>Approve pending users, manage roles, change account status, and send verification or reset-password emails.</li>
+                <li>Use filters by role, status, user ID, name, or email to find people quickly.</li>
+                <li>Use Support Center to message any user directly for support.</li>
+              </ul>
+            </article>
+            <article className="guide-section">
+              <h3>Marketplace and billing</h3>
+              <ul className="guide-list">
+                <li>Moderate posts and disputes, monitor client-bidder inboxes, and remove full conversations when needed.</li>
+                <li>Adjust money credit and post credit by user type, then audit pending withdrawals and completed billing history.</li>
+                <li>When a payment or withdrawal is processing, add the payment link before marking it completed.</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }
