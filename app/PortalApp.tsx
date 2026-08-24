@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { createPortal } from "react-dom";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import type {
@@ -105,9 +106,9 @@ const demoPassword = "demo1234";
 
 const demoAccounts = [
   { label: "Super admin", email: "admin@portal.local", name: "Super Admin Owner" },
-  { label: "Approved client", email: "client@portal.local", name: "Demo Client" },
-  { label: "Approved bidder", email: "maya.bidder@example.com", name: "Maya Bidder" },
-  { label: "Pending bidder", email: "pending.bidder@example.com", name: "Pending Bidder" },
+  { label: "Active client", email: "client@portal.local", name: "Demo Client" },
+  { label: "Active bidder", email: "maya.bidder@example.com", name: "Maya Bidder" },
+  { label: "Pending review bidder", email: "pending.bidder@example.com", name: "Pending Bidder" },
 ];
 const clientPreferenceOptions = ["Remote", "Startup", "LinkedIn", "Dice", "Indeed", "Glassdoor", "Upwork", "W2", "Contract"];
 const jobTitleOptions = [
@@ -147,6 +148,22 @@ const disabilityStatusOptions = [
   "Has disability",
   "History of disability",
   "Prefer not to answer",
+];
+const visaStatusOptions = [
+  "",
+  "US citizen",
+  "Green card holder",
+  "H-1B",
+  "H-4 EAD",
+  "L-1",
+  "L-2 EAD",
+  "TN",
+  "OPT",
+  "STEM OPT",
+  "CPT",
+  "EAD",
+  "Requires sponsorship",
+  "Other",
 ];
 const languageLevelOptions = ["English - native", "English - fluent", "English - conversational", "Spanish - fluent", "French - fluent"];
 const timeZoneOptions = [
@@ -551,6 +568,30 @@ const managedRoleOptions: { value: Role; label: string }[] = [
   { value: "bidder", label: "Bidder" },
   { value: "developer", label: "Developer" },
 ];
+const accountStatusOptions: { value: UserStatus; label: string; actionLabel?: string }[] = [
+  { value: "pending_review", label: "Pending Review" },
+  { value: "active", label: "Active", actionLabel: "Activate" },
+  { value: "temporarily_restricted", label: "Temporarily Restricted", actionLabel: "Temporarily restrict" },
+  { value: "suspended", label: "Suspended", actionLabel: "Suspend" },
+  { value: "closed", label: "Closed", actionLabel: "Close" },
+];
+const activeAccountStatuses = new Set<string>(["active", "approved"]);
+const pendingReviewAccountStatuses = new Set<string>(["pending_review", "pending"]);
+const restrictedAccountStatuses = new Set<string>(["temporarily_restricted", "restricted", "paused"]);
+
+function normalizeAccountStatus(status: string): UserStatus {
+  const normalized = status.toLowerCase().trim().replace(/\s+/g, "_");
+  if (activeAccountStatuses.has(normalized)) return "active";
+  if (pendingReviewAccountStatuses.has(normalized)) return "pending_review";
+  if (restrictedAccountStatuses.has(normalized)) return "temporarily_restricted";
+  if (normalized === "suspended") return "suspended";
+  if (normalized === "closed") return "closed";
+  return "pending_review";
+}
+
+function isActiveAccount(user: PortalUser) {
+  return normalizeAccountStatus(user.status) === "active";
+}
 
 function isSuperAdminRole(role: Role) {
   return role === "super_admin";
@@ -569,7 +610,7 @@ function isWorkerUser(user: PortalUser) {
 }
 
 function statusLabel(status: UserStatus) {
-  return titleCase(status);
+  return accountStatusOptions.find((option) => option.value === normalizeAccountStatus(status))?.label || titleCase(status);
 }
 
 function viewTitle(view: string, user?: PortalUser) {
@@ -670,7 +711,7 @@ function viewsForUser(user: PortalUser): PortalView[] {
 }
 
 function safeViewForUser(user: PortalUser, view: PortalView) {
-  if (user.status === "approved" && !isProfileComplete(user)) {
+  if (isActiveAccount(user) && !isProfileComplete(user)) {
     return "profile";
   }
 
@@ -876,11 +917,11 @@ function isProfileComplete(user: PortalUser) {
 }
 
 function clientUsers(users: PortalUser[]) {
-  return users.filter((user) => isClientRole(user.role) && user.status === "approved");
+  return users.filter((user) => isClientRole(user.role) && isActiveAccount(user));
 }
 
 function workerUsers(users: PortalUser[]) {
-  return users.filter((user) => isWorkerUser(user) && user.status === "approved");
+  return users.filter((user) => isWorkerUser(user) && isActiveAccount(user));
 }
 
 function displayUserId(user?: PortalUser | null) {
@@ -1110,11 +1151,11 @@ function ActionMenu({ label = "...", items }: { label?: string; items: ActionMen
       >
         {label}
       </button>
-      {menuPosition ? (
+      {menuPosition ? createPortal(
         <div
           ref={menuRef}
           role="menu"
-          className="fixed z-50 grid w-52 gap-1 rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl shadow-slate-900/15"
+          className="fixed z-[120] grid w-52 gap-1 rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl shadow-slate-900/15"
           style={{ top: menuPosition.top, left: menuPosition.left }}
         >
         {items.map((item) => (
@@ -1137,7 +1178,8 @@ function ActionMenu({ label = "...", items }: { label?: string; items: ActionMen
             {item.label}
           </button>
         ))}
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   );
@@ -2055,10 +2097,10 @@ export default function PortalApp() {
             <h2>{authMode === "signUp" ? "Sign up" : authMode === "resetPassword" ? "Reset password" : "Email and password sign-in"}</h2>
             <p>
               {authMode === "signUp"
-                ? "New users enter as pending until approval. Clients must be approved by a super admin."
+                ? "New users enter as pending review until a super admin activates the account."
                 : authMode === "resetPassword"
                   ? "Create a new password from your reset email."
-                  : "Use your approved email and password to enter the portal."}
+                  : "Use your active email and password to enter the portal."}
             </p>
 
             {authMode !== "resetPassword" ? (
@@ -2191,10 +2233,10 @@ export default function PortalApp() {
   const availableViews = viewsForUser(currentUser);
   const navViews = availableViews.filter((view) => view !== "profile" && view !== "help" && view !== "support");
   const safeView = safeViewForUser(currentUser, activeView);
-  const mustCompleteProfile = currentUser.status === "approved" && !isProfileComplete(currentUser);
+  const mustCompleteProfile = isActiveAccount(currentUser) && !isProfileComplete(currentUser);
   const portalNotifications = data.notifications || [];
   const unreadPortalNotifications = portalNotifications.filter((notification) => !notification.readAt).length;
-  const pendingApprovalCount = isSuperAdmin ? data.users.filter((user) => user.status === "pending").length : 0;
+  const pendingApprovalCount = isSuperAdmin ? data.users.filter((user) => normalizeAccountStatus(user.status) === "pending_review").length : 0;
 
   function goToView(view: PortalView) {
     const nextPath = viewRoutes[view];
@@ -2360,7 +2402,7 @@ export default function PortalApp() {
             </div>
             <div className="badge-row">
               <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
-              <span className={`badge ${currentUser.status}`}>{statusLabel(currentUser.status)}</span>
+              <span className={`badge ${normalizeAccountStatus(currentUser.status)}`}>{statusLabel(currentUser.status)}</span>
             </div>
           </header>
         ) : null}
@@ -2372,7 +2414,7 @@ export default function PortalApp() {
           </div>
         ) : null}
 
-        {currentUser.status !== "approved" ? (
+        {!isActiveAccount(currentUser) ? (
           <PendingView data={data} busy={busy} onSaveMethod={postAction} />
         ) : (
           <>
@@ -2501,7 +2543,7 @@ function PublicHomePage({
           <div className="panel-header">
             <div>
               <h2>Featured Members</h2>
-              <p>Approved public profiles connected to currently open posts.</p>
+              <p>Active public profiles connected to currently open posts.</p>
             </div>
           </div>
           <div className="public-member-grid">
@@ -2538,7 +2580,7 @@ function PublicHomePage({
             </article>
             <article className="profile-card">
               <h3>Access</h3>
-              <p>Create an approved account to message the author, send or accept contracts, and manage work through the portal.</p>
+              <p>Create an active account to message the author, send or accept contracts, and manage work through the portal.</p>
               <a className="primary-button compact-button" href="#portal-access" onClick={() => setSelectedPost(null)}>
                 Sign in or sign up
               </a>
@@ -3632,12 +3674,15 @@ function ClientBidProfilesManager({
   const user = data.currentUser;
   const profiles = (data.bidProfiles || []).filter((profile) => profile.clientId === user.id);
   const attachableBidders = data.users
-    .filter((candidate) => candidate.role === "bidder" && candidate.status === "approved" && candidate.assignedAdminId === user.id)
+    .filter((candidate) => candidate.role === "bidder" && isActiveAccount(candidate) && candidate.assignedAdminId === user.id)
     .sort((left, right) => left.name.localeCompare(right.name));
   const [editingProfile, setEditingProfile] = useState<BidProfileRecord | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<BidProfileRecord | null>(null);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [draft, setDraft] = useState(() => bidProfileDraft(null, user));
+  const draftVisaStatusOptions = visaStatusOptions.includes(draft.visaStatus)
+    ? visaStatusOptions
+    : [draft.visaStatus, ...visaStatusOptions].filter(Boolean);
 
   function addProfile() {
     setEditingProfile(null);
@@ -3779,7 +3824,11 @@ function ClientBidProfilesManager({
         </label>
         <label className="field">
           <span>Visa status</span>
-          <input value={draft.visaStatus} onChange={(event) => setDraft({ ...draft, visaStatus: event.target.value })} placeholder="US citizen, GC, H1B..." />
+          <select value={draft.visaStatus} onChange={(event) => setDraft({ ...draft, visaStatus: event.target.value })}>
+            {draftVisaStatusOptions.map((option) => (
+              <option key={option || "blank"} value={option}>{option || "Not set"}</option>
+            ))}
+          </select>
         </label>
         <label className="field full">
           <span>Job titles *</span>
@@ -4190,7 +4239,7 @@ function BiddersDirectoryView({
   const [query, setQuery] = useState("");
   const [selectedBidder, setSelectedBidder] = useState<PortalUser | null>(null);
   const bidders = data.users
-    .filter((user) => user.role === "bidder" && user.status === "approved")
+    .filter((user) => user.role === "bidder" && isActiveAccount(user))
     .filter((user) => userMatchesSearch(user, query))
     .sort((left, right) => {
       const leftActiveCount = contractsForBidder(left).filter((contract) => contract.status === "active").length;
@@ -6680,12 +6729,18 @@ function PeopleView({
   const [statusFilter, setStatusFilter] = useState<"all" | UserStatus>("all");
   const [assignmentFilter, setAssignmentFilter] = useState<"all" | "assigned" | "unassigned">("all");
   const canManageRoles = data.currentUser.role === "super_admin";
-  const adminUsers = data.users.filter((user) => isClientRole(user.role) && user.status === "approved");
-  const statusRank: Record<UserStatus, number> = { pending: 0, approved: 1, paused: 2 };
+  const adminUsers = data.users.filter((user) => isClientRole(user.role) && isActiveAccount(user));
+  const statusRank: Record<UserStatus, number> = {
+    pending_review: 0,
+    active: 1,
+    temporarily_restricted: 2,
+    suspended: 3,
+    closed: 4,
+  };
   const visibleUsers = (canManageRoles ? data.users : data.users.filter(isWorkerUser))
     .filter((user) => userMatchesSearch(user, query))
     .filter((user) => roleFilter === "all" || user.role === roleFilter)
-    .filter((user) => statusFilter === "all" || user.status === statusFilter)
+    .filter((user) => statusFilter === "all" || normalizeAccountStatus(user.status) === statusFilter)
     .filter((user) => {
       if (assignmentFilter === "all") {
         return true;
@@ -6696,7 +6751,7 @@ function PeopleView({
       return assignmentFilter === "assigned" ? Boolean(user.assignedAdminId) : !user.assignedAdminId;
     })
     .sort((left, right) => {
-      const statusDelta = statusRank[left.status] - statusRank[right.status];
+      const statusDelta = statusRank[normalizeAccountStatus(left.status)] - statusRank[normalizeAccountStatus(right.status)];
       if (statusDelta) {
         return statusDelta;
       }
@@ -6755,9 +6810,9 @@ function PeopleView({
           <span>Status filter</span>
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | UserStatus)}>
             <option value="all">All statuses</option>
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="paused">Paused</option>
+            {accountStatusOptions.map((status) => (
+              <option key={status.value} value={status.value}>{status.label}</option>
+            ))}
           </select>
         </label>
         <label className="field">
@@ -6784,7 +6839,7 @@ function PeopleView({
       </div>
       <div className="table-toolbar">
         <span>{visibleUsers.length} of {canManageRoles ? data.users.length : data.users.filter(isWorkerUser).length} users shown</span>
-        <span>{data.users.filter((user) => user.status === "pending").length} pending approval</span>
+        <span>{data.users.filter((user) => normalizeAccountStatus(user.status) === "pending_review").length} pending review</span>
       </div>
 
       <div className="table-wrap">
@@ -6811,7 +6866,7 @@ function PeopleView({
                 </td>
                 <td><span className="table-subtext">{displayUserId(user)}</span></td>
                 <td><span className={`badge ${user.role}`}>{roleLabel(user.role)}</span></td>
-                <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
+                <td><span className={`badge ${normalizeAccountStatus(user.status)}`}>{statusLabel(user.status)}</span></td>
                 <td>{assignedClientName(data.users, user)}</td>
                 <td>{user.passwordSet ? "Set" : "Not set"}</td>
                 <td>{user.emailVerifiedAt ? "Verified" : "Not verified"}</td>
@@ -6821,19 +6876,29 @@ function PeopleView({
                     items={[
                       { label: "Edit", onClick: () => setEditingUser(user) },
                       {
-                        label: "Approve",
-                        disabled: busy || user.status === "approved",
-                        onClick: () => updateUser(user, { status: "approved" }),
+                        label: "Move to pending review",
+                        disabled: busy || normalizeAccountStatus(user.status) === "pending_review",
+                        onClick: () => updateUser(user, { status: "pending_review" }),
                       },
                       {
                         label: "Activate",
-                        disabled: busy || user.status === "approved",
-                        onClick: () => updateUser(user, { status: "approved" }),
+                        disabled: busy || normalizeAccountStatus(user.status) === "active",
+                        onClick: () => updateUser(user, { status: "active" }),
                       },
                       {
-                        label: "Disable",
-                        disabled: busy || user.status === "paused",
-                        onClick: () => updateUser(user, { status: "paused" }),
+                        label: "Temporarily restrict",
+                        disabled: busy || normalizeAccountStatus(user.status) === "temporarily_restricted",
+                        onClick: () => updateUser(user, { status: "temporarily_restricted" }),
+                      },
+                      {
+                        label: "Suspend",
+                        disabled: busy || normalizeAccountStatus(user.status) === "suspended",
+                        onClick: () => updateUser(user, { status: "suspended" }),
+                      },
+                      {
+                        label: "Close",
+                        disabled: busy || normalizeAccountStatus(user.status) === "closed",
+                        onClick: () => updateUser(user, { status: "closed" }),
                       },
                       {
                         label: "Send verification",
@@ -6907,7 +6972,7 @@ function UserCreateModal({
     name: "",
     email: "",
     role: "bidder" as Role,
-    status: "pending" as UserStatus,
+    status: "pending_review" as UserStatus,
     assignedAdminId: "",
     password: "",
     emailVerified: false,
@@ -6950,9 +7015,9 @@ function UserCreateModal({
         <label className="field">
           <span>Status</span>
           <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as UserStatus })}>
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="paused">Paused</option>
+            {accountStatusOptions.map((status) => (
+              <option key={status.value} value={status.value}>{status.label}</option>
+            ))}
           </select>
         </label>
         {draft.role === "bidder" ? (
@@ -7023,7 +7088,7 @@ function UserEditModal({
   const [draft, setDraft] = useState({
     name: user.name,
     role: user.role,
-    status: user.status,
+    status: normalizeAccountStatus(user.status),
     assignedAdminId: user.assignedAdminId || "",
   });
   const [passwordDraft, setPasswordDraft] = useState("");
@@ -7097,9 +7162,9 @@ function UserEditModal({
           <label className="field">
             <span>Status</span>
             <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as UserStatus })}>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="paused">Paused</option>
+              {accountStatusOptions.map((status) => (
+                <option key={status.value} value={status.value}>{status.label}</option>
+              ))}
             </select>
           </label>
           <div className="actions full">
@@ -7187,7 +7252,7 @@ function BidderSettingsView({
                   <td>{money(user.bonusPerInterview)}</td>
                   <td>{user.paymentSchedule || "Not set"}</td>
                   <td>{shortDate(user.nextPaymentDate)}</td>
-                  <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
+                  <td><span className={`badge ${normalizeAccountStatus(user.status)}`}>{statusLabel(user.status)}</span></td>
                   <td>
                     <ActionMenu items={[{ label: "Edit", onClick: () => setEditingBidder(user) }]} />
                   </td>
@@ -8512,7 +8577,7 @@ function SuperAdminCreditManagementView({
     return (
       userMatchesSearch(user, query) &&
       roleMatches &&
-      (statusFilter === "all" || user.status === statusFilter) &&
+      (statusFilter === "all" || normalizeAccountStatus(user.status) === statusFilter) &&
       balanceMatches
     );
   }
@@ -8548,9 +8613,9 @@ function SuperAdminCreditManagementView({
             <span>Status</span>
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | UserStatus)}>
               <option value="all">All statuses</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="paused">Paused</option>
+              {accountStatusOptions.map((status) => (
+                <option key={status.value} value={status.value}>{status.label}</option>
+              ))}
             </select>
           </label>
           <label className="field">
@@ -8671,7 +8736,7 @@ function CreditBalanceTable({
                   <span className="table-subtext">{user.email}</span>
                 </td>
                 <td><span className="table-subtext">{displayUserId(user)}</span></td>
-                <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
+                <td><span className={`badge ${normalizeAccountStatus(user.status)}`}>{statusLabel(user.status)}</span></td>
                 <td>{money(balances.moneyCreditBalance)}</td>
                 <td>{postCreditCount(balances.postCreditBalance)}</td>
               </tr>
@@ -9297,7 +9362,7 @@ function AdminPayments({
                     <strong>{user.name}</strong>
                     <span className="muted">{primary ? `${payoutMethodLabel(primary)}: ${primary.address}` : "No method saved"}</span>
                   </div>
-                  <span className={`badge ${user.status}`}>{statusLabel(user.status)}</span>
+                  <span className={`badge ${normalizeAccountStatus(user.status)}`}>{statusLabel(user.status)}</span>
                 </div>
               );
             })}
@@ -10405,7 +10470,7 @@ function ChatView({
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const markReadSignatureRef = useRef("");
   const currentUser = data.currentUser;
-  const canSend = currentUser.status === "approved";
+  const canSend = isActiveAccount(currentUser);
   const userTimeZone = browserTimeZone();
   const membersById = new Map<string, PortalUser>();
   [currentUser, ...data.users, ...(data.chatContacts || [])].forEach((user) => {
@@ -10789,7 +10854,7 @@ function ChatView({
                   <p>
                     {activeConversation
                       ? `${activeConversation.subtitle} - ${activeMessages.length} messages`
-                      : "Choose an approved member to start a conversation."}
+                      : "Choose an active member to start a conversation."}
                   </p>
                 </div>
               )}
@@ -10969,7 +11034,7 @@ function ChatView({
               <span className="muted">
                 {activeConversation?.monitored
                   ? "Read-only monitoring. Client and bidder messages stay in their own direct thread."
-                  : "No approved inbox contacts are available yet."}
+                  : "No active inbox contacts are available yet."}
               </span>
             </div>
           )}
@@ -11020,7 +11085,7 @@ function PendingView({
   return (
     <div className="pending-box">
       <div className="status-strip">
-        <h2>Account pending approval</h2>
+        <h2>Account pending review</h2>
         <p>
           {isClientRole(user.role)
             ? "A super admin must approve client accounts before management tools are available."
