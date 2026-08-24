@@ -8,6 +8,8 @@ import type {
   ChatMessage,
   BidProfileRecord,
   ContractRecord,
+  ContractStatus,
+  ContractPaymentStyle,
   DisputeRecord,
   DepositRecord,
   EscrowRecord,
@@ -26,9 +28,13 @@ import type {
 } from "./portal-types";
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
+type PublicPortalData = { posts: PortalPost[]; users: PortalUser[] };
 type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "disputes" | "people" | "bidderSettings" | "work" | "credits" | "billing" | "payments" | "chat" | "help";
 
 const payoutCurrencies = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB"];
+const signupPostCreditAmount = 10;
+const postCreditCost = 1;
+const postCreditMoneyPrice = 0.1;
 const payoutNetworkOptions = [
   { value: "TRON", label: "TRC20 - TRON" },
   { value: "BSC", label: "BEP20 - BSC" },
@@ -61,6 +67,13 @@ const paymentFrequencies: { value: PaymentFrequency; label: string }[] = [
   { value: "weekly", label: "Weekly" },
   { value: "biweekly", label: "Biweekly" },
   { value: "monthly", label: "Monthly" },
+];
+const contractPaymentStyles: { value: ContractPaymentStyle; label: string }[] = [
+  { value: "fixed", label: "Fixed budget" },
+  { value: "hourly", label: "Hourly" },
+  { value: "per_bid", label: "Per bid" },
+  { value: "per_bid_bonus", label: "Per bid + bonus" },
+  { value: "regular", label: "Regular monthly" },
 ];
 const paymentWeekdays: { value: PaymentWeekday; label: string }[] = [
   { value: "monday", label: "Monday" },
@@ -223,6 +236,11 @@ function money(value: number) {
   }).format(value || 0);
 }
 
+function postCreditCount(value: number) {
+  const count = Math.max(0, Math.floor(Number(value) || 0));
+  return `${count.toLocaleString()} ${count === 1 ? "credit" : "credits"}`;
+}
+
 function ratingForUser(user?: PortalUser | null) {
   if (!user) {
     return 0;
@@ -237,12 +255,11 @@ function ratingForUser(user?: PortalUser | null) {
 
 function RatingStars({ value }: { value: number }) {
   const normalized = Math.max(0, Math.min(5, Number(value) || 0));
+  const filled = Math.round(normalized);
   return (
     <span className="rating-stars" aria-label={`${normalized.toFixed(1)} out of 5`}>
       <span className="star-track" aria-hidden="true">
-        {Array.from({ length: 5 }).map((_, index) => (
-          <span key={index}>{index + 1 <= Math.round(normalized) ? "\u2605" : "\u2606"}</span>
-        ))}
+        {Array.from({ length: 5 }).map((_, index) => (index + 1 <= filled ? "\u2605" : "\u2606")).join("")}
       </span>
       <strong>{normalized.toFixed(1)}</strong>
     </span>
@@ -480,6 +497,38 @@ function paymentScheduleLabel(frequencyInput?: string, weekdayInput?: string) {
   const frequencyLabel = paymentFrequencies.find((item) => item.value === frequency)?.label || titleCase(frequency);
   const weekdayLabel = paymentWeekdays.find((item) => item.value === weekday)?.label || titleCase(weekday);
   return `${frequencyLabel} on ${weekdayLabel}`;
+}
+
+function normalizeContractPaymentStyle(value?: string): ContractPaymentStyle {
+  return contractPaymentStyles.some((style) => style.value === value) ? value as ContractPaymentStyle : "per_bid_bonus";
+}
+
+function contractPaymentStyleLabel(value?: string) {
+  const style = normalizeContractPaymentStyle(value);
+  return contractPaymentStyles.find((item) => item.value === style)?.label || "Per bid + bonus";
+}
+
+function contractPayTerms(contract: Pick<ContractRecord, "paymentStyle" | "fixedBudget" | "hourlyRate" | "regularSalary" | "ratePerApplication" | "bonusPerInterview">) {
+  const style = normalizeContractPaymentStyle(contract.paymentStyle);
+  if (style === "fixed") {
+    return `Fixed ${money(contract.fixedBudget || 0)}`;
+  }
+  if (style === "hourly") {
+    return `${money(contract.hourlyRate || 0)} hourly`;
+  }
+  if (style === "per_bid") {
+    return `${money(contract.ratePerApplication || 0)} per bid`;
+  }
+  if (style === "regular") {
+    return `${money(contract.regularSalary || 0)} monthly`;
+  }
+
+  return `${money(contract.ratePerApplication || 0)} per bid + ${money(contract.bonusPerInterview || 0)} interview bonus`;
+}
+
+function contractTimelineLabel(contract: Pick<ContractRecord, "startDate" | "endDate" | "endedAt">) {
+  const endDate = contract.endDate || contract.endedAt?.slice(0, 10) || "";
+  return `${shortDate(contract.startDate)} - ${endDate ? shortDate(endDate) : "Open ended"}`;
 }
 
 function contractNextPaymentDateDefault(frequencyInput?: string, weekdayInput?: string, startDateInput = today()) {
@@ -736,7 +785,7 @@ function userCreditBalances(user: PortalUser, data: PortalData) {
   const postCreditUsed = (data.posts || [])
     .filter((post) => post.authorId === user.id)
     .reduce((total, post) => total + (post.postCreditUsed ?? post.giftCreditUsed ?? 0), 0);
-  const postCreditBalance = Math.max(0, 10 - postCreditUsed);
+  const postCreditBalance = Math.max(0, signupPostCreditAmount - postCreditUsed);
 
   return {
     moneyCreditBalance,
@@ -1463,6 +1512,9 @@ export default function PortalApp() {
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [portalNavVisible, setPortalNavVisible] = useState(true);
+  const [publicData, setPublicData] = useState<PublicPortalData>({ posts: [], users: [] });
+  const [publicLoading, setPublicLoading] = useState(false);
+  const [publicError, setPublicError] = useState("");
   const latestChatMessageIdRef = useRef("");
   const notificationRequestAttemptedRef = useRef(false);
   const lastScrollYRef = useRef(0);
@@ -1540,6 +1592,62 @@ export default function PortalApp() {
       setBusy(false);
     }
   }, [loginEmail]);
+
+  useEffect(() => {
+    if (data) {
+      return;
+    }
+
+    let active = true;
+
+    async function loadPublicPortal() {
+      if (active) {
+        setPublicLoading(true);
+        setPublicError("");
+      }
+
+      try {
+        const response = await fetch(portalApiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "publicPortal" }),
+        });
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+          throw new Error(`Portal API returned ${contentType || "non-JSON"} from ${portalApiUrl}. Check NEXT_PUBLIC_API_BASE_URL.`);
+        }
+
+        const nextData = await response.json();
+        if (!response.ok) {
+          throw new Error(nextData.error || "Could not load public posts.");
+        }
+
+        if (active) {
+          setPublicData({
+            posts: Array.isArray(nextData.posts) ? nextData.posts : [],
+            users: Array.isArray(nextData.users) ? nextData.users : [],
+          });
+        }
+      } catch (loadError) {
+        if (active) {
+          setPublicError(loadError instanceof Error ? loadError.message : "Could not load public posts.");
+        }
+      } finally {
+        if (active) {
+          setPublicLoading(false);
+        }
+      }
+    }
+
+    const timeout = window.setTimeout(() => {
+      void loadPublicPortal();
+    }, 0);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
+  }, [data]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1932,19 +2040,8 @@ export default function PortalApp() {
       );
     }
 
-    return (
-      <main className="app login-page">
-        <section className="login-card">
-          <div className="login-story">
-            <DigniwareLogo className="brand-logo auth-logo" variant="dark" />
-            <h1>Bidder Work Portal</h1>
-            <p>
-              Sign in with email, log bidder work, keep payment method details in one place,
-              and let clients manage approvals, rates, next payout dates, history, and chat.
-            </p>
-          </div>
-
-          <form className="login-form" onSubmit={handleLogin}>
+    const authForm = (
+          <form className="login-form public-auth-card" onSubmit={handleLogin}>
             <h2>{authMode === "signUp" ? "Sign up" : authMode === "resetPassword" ? "Reset password" : "Email and password sign-in"}</h2>
             <p>
               {authMode === "signUp"
@@ -2066,8 +2163,15 @@ export default function PortalApp() {
             {authNotice ? <div className="status-strip compact">{authNotice}</div> : null}
             {error ? <div className="error">{error}</div> : null}
           </form>
-        </section>
-      </main>
+    );
+
+    return (
+      <PublicHomePage
+        authForm={authForm}
+        publicData={publicData}
+        publicLoading={publicLoading}
+        publicError={publicError}
+      />
     );
   }
 
@@ -2122,6 +2226,58 @@ export default function PortalApp() {
     setPortalNavVisible(true);
   }
 
+  function openNotification(notification: PortalNotification) {
+    const type = notification.type.toLowerCase();
+
+    if (type.includes("approval")) {
+      goToView("people");
+      return;
+    }
+
+    if (notification.relatedPostId) {
+      goToView("posts");
+      return;
+    }
+
+    if (notification.relatedContractId) {
+      goToView("contracts");
+      return;
+    }
+
+    if (notification.relatedDisputeId) {
+      goToView("disputes");
+      return;
+    }
+
+    if (notification.relatedWorkLogId) {
+      goToView("work");
+      return;
+    }
+
+    if (
+      notification.relatedPaymentId ||
+      notification.relatedDepositId ||
+      type.includes("payment") ||
+      type.includes("credit") ||
+      type.includes("withdrawal")
+    ) {
+      goToView("billing");
+      return;
+    }
+
+    if (notification.relatedMessageId || type.includes("message") || type.includes("chat")) {
+      if (notification.actorUserId && notification.actorUserId !== currentUser.id) {
+        openInboxForUser(notification.actorUserId, notification.relatedPostId || "");
+        return;
+      }
+
+      goToView("chat");
+      return;
+    }
+
+    goToView(isSuperAdmin ? "people" : "dashboard");
+  }
+
   async function markPortalNotificationsRead(notificationIds?: string[]) {
     await postAction("markNotificationsRead", {
       notificationIds: notificationIds?.length ? notificationIds : portalNotifications.filter((notification) => !notification.readAt).map((notification) => notification.id),
@@ -2168,6 +2324,7 @@ export default function PortalApp() {
               onToggle={() => setNotificationMenuOpen((open) => !open)}
               onClose={() => setNotificationMenuOpen(false)}
               onMarkRead={markPortalNotificationsRead}
+              onOpenNotification={openNotification}
             />
             <AccountMenu
               user={currentUser}
@@ -2238,6 +2395,149 @@ export default function PortalApp() {
   );
 }
 
+function PublicHomePage({
+  authForm,
+  publicData,
+  publicLoading,
+  publicError,
+}: {
+  authForm: ReactNode;
+  publicData: PublicPortalData;
+  publicLoading: boolean;
+  publicError: string;
+}) {
+  const [selectedPost, setSelectedPost] = useState<PortalPost | null>(null);
+  const activePosts = (publicData.posts || []).filter((post) => post.status === "active");
+  const clientPostCount = activePosts.filter((post) => post.type === "client").length;
+  const bidderPostCount = activePosts.filter((post) => post.type === "bidder").length;
+  const featuredUsers = publicData.users.slice(0, 4);
+  const selectedPostAuthor = selectedPost ? userById(publicData.users, selectedPost.authorId) : undefined;
+
+  return (
+    <main className="app public-home">
+      <header className="public-nav">
+        <div className="public-brand">
+          <DigniwareLogo className="brand-logo sidebar-logo" />
+          <div>
+            <strong>Bidder Portal</strong>
+            <span>by Digniware LLC</span>
+          </div>
+        </div>
+        <div className="public-nav-links">
+          <a href="https://digniware.com/" target="_blank" rel="noreferrer">digniware.com</a>
+          <a href="#public-posts">Posts</a>
+          <a href="#portal-access">Log in / sign up</a>
+        </div>
+      </header>
+
+      <section className="public-hero">
+        <div className="public-copy">
+          <span className="public-eyebrow">High skill. Equal respect.</span>
+          <h1>Bidder Portal developed by Digniware LLC</h1>
+          <p>
+            Digniware builds reliable digital products with remote-first global software teams.
+            This portal brings that operating style into one place for clients, bidders, contracts,
+            posts, work logs, credits, and monitored communication.
+          </p>
+          <div className="public-actions">
+            <a className="primary-button" href="#portal-access">Get started</a>
+            <a className="ghost-button" href="https://digniware.com/" target="_blank" rel="noreferrer">Visit Digniware</a>
+          </div>
+        </div>
+        <div id="portal-access" className="public-auth">
+          {authForm}
+        </div>
+      </section>
+
+      <section className="public-feature-grid" aria-label="Portal overview">
+        <article className="metric">
+          <span>Open posts</span>
+          <strong>{activePosts.length}</strong>
+          <p>Browse client needs and bidder availability before creating an account.</p>
+        </article>
+        <article className="metric">
+          <span>Client posts</span>
+          <strong>{clientPostCount}</strong>
+          <p>Clients can publish requirements, review bidder profiles, and start contracts.</p>
+        </article>
+        <article className="metric">
+          <span>Bidder posts</span>
+          <strong>{bidderPostCount}</strong>
+          <p>Bidders can promote availability, share skills, and connect through contracts.</p>
+        </article>
+      </section>
+
+      <section id="public-posts" className="panel public-posts-card">
+        <div className="panel-header">
+          <div>
+            <h2>Public Posts</h2>
+            <p>Active marketplace posts are visible without signing in. Sign up to message, contract, or manage work.</p>
+          </div>
+          <span className="badge approved">{publicLoading ? "Loading" : `${activePosts.length} open`}</span>
+        </div>
+        {publicError ? <div className="error">{publicError}</div> : null}
+        <PostTable
+          posts={activePosts}
+          users={publicData.users}
+          emptyMessage={publicLoading ? "Loading public posts..." : "No public posts are open yet."}
+          onSelect={setSelectedPost}
+        />
+      </section>
+
+      {featuredUsers.length ? (
+        <section className="panel public-members-card">
+          <div className="panel-header">
+            <div>
+              <h2>Featured Members</h2>
+              <p>Approved public profiles connected to currently open posts.</p>
+            </div>
+          </div>
+          <div className="public-member-grid">
+            {featuredUsers.map((user) => (
+              <article className="public-member-card" key={user.id}>
+                <MemberAvatar user={user} />
+                <div>
+                  <strong>{userDisplayName(user)}</strong>
+                  <span>{roleLabel(user.role)} - {user.profileTitle || user.companyName || "Profile available"}</span>
+                  <RatingStars value={ratingForUser(user)} />
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {selectedPost ? (
+        <ModalFrame
+          title={selectedPost.title}
+          subtitle={selectedPostAuthor ? `${userDisplayName(selectedPostAuthor)} - ${roleLabel(selectedPostAuthor.role)}` : postAudienceLabel(selectedPost)}
+          onClose={() => setSelectedPost(null)}
+        >
+          <div className="profile-detail-grid">
+            <article className="profile-card">
+              <h3>Post Details</h3>
+              <p>{selectedPost.criteria || "No details added."}</p>
+              <div className="mini-metrics">
+                <span><strong>{money(selectedPost.budgetAmount || 0)}</strong> budget</span>
+                <span><strong>{money(selectedPost.preferredRate || 0)}</strong> preferred rate</span>
+                <span><strong>{money(selectedPost.bonusPerInterview || 0)}</strong> interview bonus</span>
+                <span><strong>{paymentScheduleLabel(selectedPost.paymentFrequency, selectedPost.paymentWeekday) || "Flexible"}</strong> schedule</span>
+              </div>
+            </article>
+            <article className="profile-card">
+              <h3>Access</h3>
+              <p>Create an approved account to message the author, send or accept contracts, and manage work through the portal.</p>
+              <a className="primary-button compact-button" href="#portal-access" onClick={() => setSelectedPost(null)}>
+                Sign in or sign up
+              </a>
+            </article>
+          </div>
+        </ModalFrame>
+      ) : null}
+    </main>
+  );
+}
+
 function AdminNotificationMenu({
   notifications,
   unreadCount,
@@ -2246,6 +2546,7 @@ function AdminNotificationMenu({
   onToggle,
   onClose,
   onMarkRead,
+  onOpenNotification,
 }: {
   notifications: PortalNotification[];
   unreadCount: number;
@@ -2254,6 +2555,7 @@ function AdminNotificationMenu({
   onToggle: () => void;
   onClose: () => void;
   onMarkRead: (notificationIds?: string[]) => Promise<void>;
+  onOpenNotification: (notification: PortalNotification) => void;
 }) {
   const latestNotifications = notifications.slice(0, 8);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -2323,6 +2625,7 @@ function AdminNotificationMenu({
                   if (!notification.readAt) {
                     void onMarkRead([notification.id]);
                   }
+                  onOpenNotification(notification);
                 }}
               >
                 <strong>{notification.title}</strong>
@@ -2589,6 +2892,32 @@ function ClientAnalyticsChart({
           <AnalyticsBar label="Applied" value={row.appliedJobs} max={maxApplied} />
           <AnalyticsBar label="Interviews" value={row.interviewsScheduled} max={maxInterviews} />
           <AnalyticsBar label="Paid" value={row.moneyPaid} max={maxPaid} formatter={money} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BidderEarningsChart({
+  rows,
+}: {
+  rows: Array<{ id: string; date: string; clientName: string; amount: number }>;
+}) {
+  if (!rows.length) {
+    return <div className="empty-state compact">No released earnings match this date filter.</div>;
+  }
+
+  const maxEarned = Math.max(...rows.map((row) => row.amount), 1);
+
+  return (
+    <div className="analytics-bars">
+      {rows.map((row) => (
+        <div className="analytics-row" key={row.id}>
+          <div className="analytics-row-title">
+            <strong>{shortDate(row.date)}</strong>
+            <span>{row.clientName}</span>
+          </div>
+          <AnalyticsBar label="Earned" value={row.amount} max={maxEarned} formatter={money} />
         </div>
       ))}
     </div>
@@ -3604,19 +3933,6 @@ function ClientDirectoryView({
       if (filters.sortBy === "averageBonusGiven") return (rightStats?.averageBonusGiven || 0) - (leftStats?.averageBonusGiven || 0);
       return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
     });
-  const selectedClientWorkers = selectedClient
-    ? data.users.filter((user) => user.assignedAdminId === selectedClient.id)
-    : [];
-  const selectedClientWorkerIds = new Set(selectedClientWorkers.map((user) => user.id));
-  if (selectedClient?.id && data.currentUser.assignedAdminId === selectedClient.id) {
-    selectedClientWorkerIds.add(data.currentUser.id);
-  }
-  const selectedClientWorkLogs = selectedClient
-    ? data.workLogs.filter((log) => selectedClientWorkerIds.has(log.userId)).slice(0, 8)
-    : [];
-  const selectedClientPayments = selectedClient
-    ? data.payments.filter((payment) => selectedClientWorkerIds.has(payment.userId)).slice(0, 8)
-    : [];
   const selectedClientBidProfiles = selectedClient
     ? (data.bidProfiles || []).filter((profile) => profile.clientId === selectedClient.id)
     : [];
@@ -3823,55 +4139,15 @@ function ClientDirectoryView({
               </section>
             ) : null}
 
-            <div className="two-column">
-              <section className="panel nested-panel">
-                <div className="panel-header">
-                  <div>
-                    <h2>Client Work History</h2>
-                    <p>Recent logs tied to bidders assigned to this client.</p>
-                  </div>
+            <section className="panel nested-panel">
+              <div className="panel-header">
+                <div>
+                  <h2>Worked With</h2>
+                  <p>Only collaboration totals, pay rate, and contract timeline are shown.</p>
                 </div>
-                <div className="payment-method-list">
-                  {selectedClientWorkLogs.map((log) => {
-                    const user = userById(data.users, log.userId);
-                    return (
-                      <div className="log-row" key={log.id}>
-                        <div>
-                          <strong>{user?.name || "Unknown bidder"}</strong>
-                          <span className="muted">{shortDate(log.workDate)} - {log.appliedJobs} applied - {log.interviewsScheduled} interviews</span>
-                        </div>
-                        {log.sheetLink ? <a href={log.sheetLink} target="_blank" rel="noreferrer">Sheet</a> : null}
-                      </div>
-                    );
-                  })}
-                  {!selectedClientWorkLogs.length ? <div className="empty-state compact">No visible work history yet.</div> : null}
-                </div>
-              </section>
-
-              <section className="panel nested-panel">
-                <div className="panel-header">
-                  <div>
-                    <h2>Payment History</h2>
-                    <p>Recent payment records tied to assigned bidders.</p>
-                  </div>
-                </div>
-                <div className="payment-method-list">
-                  {selectedClientPayments.map((payment) => {
-                    const user = userById(data.users, payment.userId);
-                    return (
-                      <div className="payment-row" key={payment.id}>
-                        <div>
-                          <strong>{money(payment.amount)} - {paymentStatusLabel(payment.status)}</strong>
-                          <span className="muted">{user?.name || "Unknown bidder"} - {shortDate(payment.scheduledDate)}</span>
-                        </div>
-                        {payment.paymentLink ? <a href={payment.paymentLink} target="_blank" rel="noreferrer">Receipt</a> : null}
-                      </div>
-                    );
-                  })}
-                  {!selectedClientPayments.length ? <div className="empty-state compact">No visible payment history yet.</div> : null}
-                </div>
-              </section>
-            </div>
+              </div>
+              <CollaborationSummaryList user={selectedClient} data={data} />
+            </section>
         </ModalFrame>
       ) : null}
       {selectedBidProfile ? (
@@ -3921,12 +4197,6 @@ function BiddersDirectoryView({
     return { label: `Currently working (${activeContracts.length})`, className: "pending" };
   }
 
-  const selectedBidderWorkLogs = selectedBidder
-    ? data.workLogs.filter((log) => log.userId === selectedBidder.id).slice(0, 8)
-    : [];
-  const selectedBidderPayments = selectedBidder
-    ? data.payments.filter((payment) => payment.userId === selectedBidder.id).slice(0, 8)
-    : [];
   const selectedBidderContracts = selectedBidder
     ? contractsForBidder(selectedBidder)
     : [];
@@ -4072,89 +4342,14 @@ function BiddersDirectoryView({
               </article>
             </div>
 
-            <div className="two-column">
-              <section className="panel nested-panel">
-                <div className="panel-header">
-                  <div>
-                    <h2>Work History</h2>
-                    <p>Recent bidder work logs visible to this client.</p>
-                  </div>
-                </div>
-                <div className="payment-method-list">
-                  {selectedBidderWorkLogs.map((log) => (
-                    <div className="log-row" key={log.id}>
-                      <div>
-                        <strong>{shortDate(log.workDate)}</strong>
-                        <span className="muted">{log.appliedJobs} applied - {log.interviewsScheduled} interviews</span>
-                      </div>
-                      {log.sheetLink ? <a href={log.sheetLink} target="_blank" rel="noreferrer">Sheet</a> : null}
-                    </div>
-                  ))}
-                  {!selectedBidderWorkLogs.length ? <div className="empty-state compact">No visible work history yet.</div> : null}
-                </div>
-              </section>
-
-              <section className="panel nested-panel">
-                <div className="panel-header">
-                  <div>
-                    <h2>Payment History</h2>
-                    <p>Recent payments released to this bidder.</p>
-                  </div>
-                </div>
-                <div className="payment-method-list">
-                  {selectedBidderPayments.map((payment) => (
-                    <div className="payment-row" key={payment.id}>
-                      <div>
-                        <strong>{money(payment.amount)} - {paymentStatusLabel(payment.status)}</strong>
-                        <span className="muted">{shortDate(payment.scheduledDate)}</span>
-                      </div>
-                      {payment.paymentLink ? <a href={payment.paymentLink} target="_blank" rel="noreferrer">Receipt</a> : null}
-                    </div>
-                  ))}
-                  {!selectedBidderPayments.length ? <div className="empty-state compact">No visible payment history yet.</div> : null}
-                </div>
-              </section>
-            </div>
             <section className="panel nested-panel">
               <div className="panel-header">
                 <div>
-                  <h2>Past Contract History</h2>
-                  <p>Completed or rejected contracts connected to this bidder.</p>
+                  <h2>Worked With</h2>
+                  <p>Only collaboration totals, pay rate, and contract timeline are shown.</p>
                 </div>
               </div>
-              {selectedBidderPastContracts.length ? (
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Contract ID</th>
-                        <th>Contract</th>
-                        <th>Client</th>
-                        <th>Status</th>
-                        <th>Started</th>
-                        <th>Updated</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedBidderPastContracts.map((contract) => {
-                        const client = userById(data.users, contract.clientId);
-                        return (
-                          <tr key={contract.id}>
-                            <td><span className="table-subtext">{contract.id}</span></td>
-                            <td>{contract.title}</td>
-                            <td>{client?.name || "Client"}</td>
-                            <td><span className={`badge ${contractStatusClass(contract.status)}`}>{contractStatusLabel(contract.status)}</span></td>
-                            <td>{shortDate(contract.startDate)}</td>
-                            <td>{dateTime(contract.updatedAt)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="empty-state compact">No past contracts yet.</div>
-              )}
+              <CollaborationSummaryList user={selectedBidder} data={data} />
             </section>
         </ModalFrame>
       ) : null}
@@ -4171,9 +4366,145 @@ function CreditBalanceStrip({ balances }: { balances: { moneyCreditBalance: numb
         Money credit
       </span>
       <span>
-        <strong>{money(postCreditBalance)}</strong>
+        <strong>{postCreditCount(postCreditBalance)}</strong>
         Post credit
       </span>
+    </div>
+  );
+}
+
+type ContractTermDraft = {
+  paymentStyle: ContractPaymentStyle;
+  fixedBudget: string;
+  hourlyRate: string;
+  regularSalary: string;
+  ratePerApplication: string;
+  bonusPerInterview: string;
+};
+
+function ContractPaymentFields({
+  draft,
+  onChange,
+}: {
+  draft: ContractTermDraft;
+  onChange: (updates: Partial<ContractTermDraft>) => void;
+}) {
+  return (
+    <>
+      <label className="field">
+        <span>Payment style</span>
+        <select value={draft.paymentStyle} onChange={(event) => onChange({ paymentStyle: event.target.value as ContractPaymentStyle })}>
+          {contractPaymentStyles.map((style) => (
+            <option key={style.value} value={style.value}>{style.label}</option>
+          ))}
+        </select>
+      </label>
+      {draft.paymentStyle === "fixed" ? (
+        <label className="field">
+          <span>Fixed budget</span>
+          <input type="number" min="0" step="0.01" value={draft.fixedBudget} onChange={(event) => onChange({ fixedBudget: event.target.value })} />
+        </label>
+      ) : null}
+      {draft.paymentStyle === "hourly" ? (
+        <label className="field">
+          <span>Hourly rate</span>
+          <input type="number" min="0" step="0.01" value={draft.hourlyRate} onChange={(event) => onChange({ hourlyRate: event.target.value })} />
+        </label>
+      ) : null}
+      {draft.paymentStyle === "regular" ? (
+        <label className="field">
+          <span>Monthly salary</span>
+          <input type="number" min="0" step="0.01" value={draft.regularSalary} onChange={(event) => onChange({ regularSalary: event.target.value })} />
+        </label>
+      ) : null}
+      {["per_bid", "per_bid_bonus"].includes(draft.paymentStyle) ? (
+        <label className="field">
+          <span>Price per bid</span>
+          <input type="number" min="0" step="0.01" value={draft.ratePerApplication} onChange={(event) => onChange({ ratePerApplication: event.target.value })} />
+        </label>
+      ) : null}
+      {draft.paymentStyle === "per_bid_bonus" ? (
+        <label className="field">
+          <span>Bonus per interview</span>
+          <input type="number" min="0" step="0.01" value={draft.bonusPerInterview} onChange={(event) => onChange({ bonusPerInterview: event.target.value })} />
+        </label>
+      ) : null}
+    </>
+  );
+}
+
+function collaborationSummariesForUser(user: PortalUser, data: PortalData) {
+  return (data.contracts || [])
+    .filter((contract) => contract.clientId === user.id || contract.workerId === user.id)
+    .map((contract) => {
+      const otherUserId = contract.clientId === user.id ? contract.workerId : contract.clientId;
+      const otherUser = userById(data.users, otherUserId);
+      const released = (data.payments || [])
+        .filter(
+          (payment) =>
+            isCreditSpentPayment(payment) &&
+            payment.clientId === contract.clientId &&
+            payment.userId === contract.workerId
+        )
+        .reduce((total, payment) => total + payment.amount, 0);
+
+      return { contract, otherUser, released };
+    })
+    .sort((left, right) => right.contract.updatedAt.localeCompare(left.contract.updatedAt));
+}
+
+function CollaborationSummaryList({
+  user,
+  data,
+  emptyMessage = "No collaboration history yet.",
+}: {
+  user: PortalUser;
+  data: PortalData;
+  emptyMessage?: string;
+}) {
+  const rows = collaborationSummariesForUser(user, data);
+  const moneyLabel = isClientRole(user.role) ? "Paid" : "Earned";
+
+  if (!rows.length) {
+    return <div className="empty-state compact">{emptyMessage}</div>;
+  }
+
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Worked with</th>
+            <th>{moneyLabel}</th>
+            <th>Pay rate</th>
+            <th>Contract</th>
+            <th>Timeline</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ contract, otherUser, released }) => (
+            <tr key={contract.id}>
+              <td>
+                <strong>{otherUser?.name || "Member"}</strong>
+                <span className="table-subtext">{roleLabel(otherUser?.role || "bidder")}</span>
+              </td>
+              <td>{money(released)}</td>
+              <td>
+                <strong>{contractPayTerms(contract)}</strong>
+                <span className="table-subtext">{contractPaymentStyleLabel(contract.paymentStyle)}</span>
+              </td>
+              <td>
+                {contract.title}
+                <span className="table-subtext">Contract ID: {contract.id}</span>
+              </td>
+              <td>
+                {contractTimelineLabel(contract)}
+                <span className={`badge ${contractStatusClass(contract.status)}`}>{contractStatusLabel(contract.status)}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -4193,7 +4524,7 @@ function PostsView({
   const isSuperAdmin = isSuperAdminRole(currentUser.role);
   const balances = userCreditBalances(currentUser, data);
   const canPublish = currentUser.role === "bidder" || isClientRole(currentUser.role);
-  const canAffordPost = balances.postCreditBalance + balances.moneyCreditBalance >= 1;
+  const canAffordPost = balances.postCreditBalance >= postCreditCost || balances.moneyCreditBalance >= postCreditMoneyPrice;
   const [query, setQuery] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedPost, setSelectedPost] = useState<PortalPost | null>(null);
@@ -4286,12 +4617,17 @@ function PostsView({
       targetUserId: author.id,
       title: post.title,
       criteria: post.criteria,
+      paymentStyle: post.bonusPerInterview ? "per_bid_bonus" : "per_bid",
+      fixedBudget: 0,
+      hourlyRate: 0,
+      regularSalary: 0,
       ratePerApplication: post.preferredRate || author.ratePerApplication || 0,
       bonusPerInterview: post.bonusPerInterview || author.bonusPerInterview || 0,
       paymentFrequency: post.paymentFrequency || "weekly",
       paymentWeekday: post.paymentWeekday || "friday",
       nextPaymentDate: contractNextPaymentDateDefault(post.paymentFrequency || "weekly", post.paymentWeekday || "friday", today()),
       startDate: today(),
+      endDate: "",
       sourcePostId: post.id,
     });
     if (nextData) {
@@ -4329,10 +4665,10 @@ function PostsView({
         <div className="panel-header">
           <div>
             <h2>Post Credit</h2>
-            <p>Posts cost $1. Post credit is used first; money credit can cover the post if post credit is empty.</p>
+            <p>Posts cost 1 post credit. If post credit is empty, money credit can cover it at $0.10 per post credit.</p>
           </div>
           <div className="actions">
-            <span className="badge approved">$1 per post</span>
+            <span className="badge approved">1 credit per post</span>
             {canPublish ? (
               <button
                 className="primary-button compact-button"
@@ -4426,7 +4762,7 @@ function PostsView({
             </label>
             <label className="field">
               <span>Post credit cost</span>
-              <input value={money(1)} readOnly />
+              <input value={`${postCreditCount(postCreditCost)} or ${money(postCreditMoneyPrice)} money credit`} readOnly />
             </label>
             <label className="field full">
               <span>Specific criteria</span>
@@ -4742,21 +5078,71 @@ function ContractsView({
     targetUserPublicId: "",
     title: "",
     criteria: "",
+    paymentStyle: "per_bid_bonus" as ContractPaymentStyle,
+    fixedBudget: "",
+    hourlyRate: "",
+    regularSalary: "",
     ratePerApplication: "",
     bonusPerInterview: "",
     paymentFrequency: "weekly" as PaymentFrequency,
     paymentWeekday: "friday" as PaymentWeekday,
     nextPaymentDate: contractNextPaymentDateDefault("weekly", "friday", today()),
     startDate: today(),
+    endDate: "",
   });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedContract, setSelectedContract] = useState<ContractRecord | null>(null);
   const [editingContract, setEditingContract] = useState<ContractRecord | null>(null);
   const [paydayContract, setPaydayContract] = useState<ContractRecord | null>(null);
   const [paydayDate, setPaydayDate] = useState("");
+  const [contractQuery, setContractQuery] = useState("");
+  const [contractStatusFilter, setContractStatusFilter] = useState<"all" | ContractStatus>("all");
+  const [contractClientFilter, setContractClientFilter] = useState("");
+  const [contractBidderFilter, setContractBidderFilter] = useState("");
   const contracts = isSuperAdminRole(currentUser.role)
     ? data.contracts || []
     : (data.contracts || []).filter((contract) => contract.clientId === currentUser.id || contract.workerId === currentUser.id);
+  const contractClientOptions = data.users
+    .filter((user) => contracts.some((contract) => contract.clientId === user.id))
+    .sort((left, right) => userDisplayName(left).localeCompare(userDisplayName(right)));
+  const contractBidderOptions = data.users
+    .filter((user) => contracts.some((contract) => contract.workerId === user.id))
+    .sort((left, right) => userDisplayName(left).localeCompare(userDisplayName(right)));
+  const normalizedContractQuery = contractQuery.trim().toLowerCase();
+  const filteredContracts = contracts.filter((contract) => {
+    const client = userById(data.users, contract.clientId);
+    const worker = userById(data.users, contract.workerId);
+    const queryMatches = !normalizedContractQuery || [
+      contract.id,
+      contract.title,
+      contract.criteria,
+      contractStatusLabel(contract.status),
+      contractPaymentStyleLabel(contract.paymentStyle),
+      contractPayTerms(contract),
+      paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday),
+      client?.name,
+      client?.email,
+      displayUserId(client),
+      worker?.name,
+      worker?.email,
+      displayUserId(worker),
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(normalizedContractQuery));
+
+    return (
+      queryMatches &&
+      (contractStatusFilter === "all" || contract.status === contractStatusFilter) &&
+      (!contractClientFilter || contract.clientId === contractClientFilter) &&
+      (!contractBidderFilter || contract.workerId === contractBidderFilter)
+    );
+  });
+  const hasContractFilters = Boolean(
+    contractQuery ||
+    contractStatusFilter !== "all" ||
+    contractClientFilter ||
+    contractBidderFilter
+  );
   const targetLabel = isClientRole(currentUser.role) ? "Bidder" : "Client";
   const matchedTarget = targets.find((target) => userIdMatches(target, draft.targetUserPublicId));
 
@@ -4768,12 +5154,17 @@ function ContractsView({
       targetUserId: matchedTarget?.id || "",
       title: draft.title,
       criteria: draft.criteria,
+      paymentStyle: draft.paymentStyle,
+      fixedBudget: Number(draft.fixedBudget),
+      hourlyRate: Number(draft.hourlyRate),
+      regularSalary: Number(draft.regularSalary),
       ratePerApplication: Number(draft.ratePerApplication),
       bonusPerInterview: Number(draft.bonusPerInterview),
       paymentFrequency: draft.paymentFrequency,
       paymentWeekday: draft.paymentWeekday,
       nextPaymentDate: draft.nextPaymentDate,
       startDate: draft.startDate,
+      endDate: draft.endDate,
     });
     if (nextData) {
       setDraft({
@@ -4781,9 +5172,14 @@ function ContractsView({
         targetUserPublicId: "",
         title: "",
         criteria: "",
+        paymentStyle: "per_bid_bonus",
+        fixedBudget: "",
+        hourlyRate: "",
+        regularSalary: "",
         ratePerApplication: "",
         bonusPerInterview: "",
         nextPaymentDate: contractNextPaymentDateDefault(draft.paymentFrequency, draft.paymentWeekday, draft.startDate),
+        endDate: "",
       });
       setShowCreateModal(false);
     }
@@ -4904,7 +5300,62 @@ function ContractsView({
             <h2>Contract Management</h2>
             <p>Requested, active, rejected, and ended contracts between clients and bidders.</p>
           </div>
-          <span className="badge">{contracts.length} contracts</span>
+          <span className="badge">{filteredContracts.length} of {contracts.length} contracts</span>
+        </div>
+        <div className="filter-bar">
+          <label className="field">
+            <span>Search contracts</span>
+            <input value={contractQuery} onChange={(event) => setContractQuery(event.target.value)} placeholder="Contract ID, title, client, bidder" />
+          </label>
+          <label className="field">
+            <span>Client</span>
+            <select value={contractClientFilter} onChange={(event) => setContractClientFilter(event.target.value)}>
+              <option value="">All clients</option>
+              {contractClientOptions.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name} - {displayUserId(client)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Bidder</span>
+            <select value={contractBidderFilter} onChange={(event) => setContractBidderFilter(event.target.value)}>
+              <option value="">All bidders</option>
+              {contractBidderOptions.map((bidder) => (
+                <option key={bidder.id} value={bidder.id}>
+                  {bidder.name} - {displayUserId(bidder)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Status</span>
+            <select value={contractStatusFilter} onChange={(event) => setContractStatusFilter(event.target.value as "all" | ContractStatus)}>
+              <option value="all">All statuses</option>
+              <option value="requested">Requested</option>
+              <option value="active">Active</option>
+              <option value="rejected">Rejected</option>
+              <option value="ended">Ended</option>
+            </select>
+          </label>
+          <button
+            className="ghost-button compact-button"
+            type="button"
+            disabled={!hasContractFilters}
+            onClick={() => {
+              setContractQuery("");
+              setContractStatusFilter("all");
+              setContractClientFilter("");
+              setContractBidderFilter("");
+            }}
+          >
+            Clear filters
+          </button>
+        </div>
+        <div className="table-toolbar">
+          <span>Search by contract ID, client, bidder, title, criteria, or payment terms.</span>
+          <span>{filteredContracts.length} shown</span>
         </div>
         <div className="table-wrap">
           <table>
@@ -4915,13 +5366,13 @@ function ContractsView({
                 <th>Client</th>
                 <th>Bidder</th>
                 <th>Status</th>
-                <th>Rate</th>
+                <th>Payment terms</th>
                 <th>Schedule</th>
-                <th>Next payday</th>
+                <th>Timeline</th>
               </tr>
             </thead>
             <tbody>
-              {contracts.map((contract) => {
+              {filteredContracts.map((contract) => {
                 const client = userById(data.users, contract.clientId);
                 const worker = userById(data.users, contract.workerId);
                 return (
@@ -4945,11 +5396,14 @@ function ContractsView({
                     <td>{worker?.name || "Bidder"}</td>
                     <td><span className={`badge ${contractStatusClass(contract.status)}`}>{contractStatusLabel(contract.status)}</span></td>
                     <td>
-                      {money(contract.ratePerApplication || 0)}
-                      <span className="table-subtext">Bonus {money(contract.bonusPerInterview || 0)}</span>
+                      <strong>{contractPayTerms(contract)}</strong>
+                      <span className="table-subtext">{contractPaymentStyleLabel(contract.paymentStyle)}</span>
                     </td>
-                    <td>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday) || "Not set"}</td>
-                    <td>{shortDate(contract.nextPaymentDate)}</td>
+                    <td>
+                      {paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday) || "Not set"}
+                      <span className="table-subtext">Next {shortDate(contract.nextPaymentDate)}</span>
+                    </td>
+                    <td>{contractTimelineLabel(contract)}</td>
                   </tr>
                 );
               })}
@@ -4957,6 +5411,7 @@ function ContractsView({
           </table>
         </div>
         {!contracts.length ? <div className="empty-state">No contracts yet.</div> : null}
+        {contracts.length && !filteredContracts.length ? <div className="empty-state">No contracts match these filters.</div> : null}
       </section>
       {selectedContract ? (
         <ContractDetailModal
@@ -5004,14 +5459,7 @@ function ContractsView({
               <span>Contract title</span>
               <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Weekly bidder support" required />
             </label>
-            <label className="field">
-              <span>Rate per applied job</span>
-              <input type="number" min="0" step="0.01" value={draft.ratePerApplication} onChange={(event) => setDraft({ ...draft, ratePerApplication: event.target.value })} />
-            </label>
-            <label className="field">
-              <span>Interview bonus</span>
-              <input type="number" min="0" step="0.01" value={draft.bonusPerInterview} onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })} />
-            </label>
+            <ContractPaymentFields draft={draft} onChange={(updates) => setDraft({ ...draft, ...updates })} />
             <label className="field">
               <span>Frequency</span>
               <select value={draft.paymentFrequency} onChange={(event) => updateContractScheduleDraft({ paymentFrequency: event.target.value as PaymentFrequency })}>
@@ -5035,6 +5483,10 @@ function ContractsView({
             <label className="field">
               <span>Start date</span>
               <input type="date" value={draft.startDate} onChange={(event) => updateContractScheduleDraft({ startDate: event.target.value })} />
+            </label>
+            <label className="field">
+              <span>End date</span>
+              <input type="date" value={draft.endDate} onChange={(event) => setDraft({ ...draft, endDate: event.target.value })} />
             </label>
             <label className="field full">
               <span>Specific criteria</span>
@@ -5131,11 +5583,11 @@ function ContractDetailModal({
           </div>
         </div>
         <div className="mini-metrics">
-          <span><strong>{money(contract.ratePerApplication || 0)}</strong> rate</span>
-          <span><strong>{money(contract.bonusPerInterview || 0)}</strong> bonus</span>
+          <span><strong>{contractPaymentStyleLabel(contract.paymentStyle)}</strong> style</span>
+          <span><strong>{contractPayTerms(contract)}</strong> pay terms</span>
           <span><strong>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday) || "Not set"}</strong> schedule</span>
           <span><strong>{shortDate(contract.nextPaymentDate)}</strong> next payday</span>
-          <span><strong>{shortDate(contract.startDate)}</strong> start</span>
+          <span><strong>{contractTimelineLabel(contract)}</strong> timeline</span>
         </div>
         <section className="detail-section">
           <h3>Criteria</h3>
@@ -5205,12 +5657,17 @@ function ContractEditModal({
   const [draft, setDraft] = useState({
     title: contract.title,
     criteria: contract.criteria,
+    paymentStyle: normalizeContractPaymentStyle(contract.paymentStyle),
+    fixedBudget: String(contract.fixedBudget || 0),
+    hourlyRate: String(contract.hourlyRate || 0),
+    regularSalary: String(contract.regularSalary || 0),
     ratePerApplication: String(contract.ratePerApplication || 0),
     bonusPerInterview: String(contract.bonusPerInterview || 0),
     paymentFrequency: (contract.paymentFrequency || "weekly") as PaymentFrequency,
     paymentWeekday: (contract.paymentWeekday || "friday") as PaymentWeekday,
     nextPaymentDate: contract.nextPaymentDate || contractNextPaymentDateDefault(contract.paymentFrequency, contract.paymentWeekday, contract.startDate),
     startDate: contract.startDate || today(),
+    endDate: contract.endDate || "",
   });
 
   function updateSchedule(updates: Partial<typeof draft>) {
@@ -5227,30 +5684,28 @@ function ContractEditModal({
       contractId: contract.id,
       title: draft.title,
       criteria: draft.criteria,
+      paymentStyle: draft.paymentStyle,
+      fixedBudget: Number(draft.fixedBudget),
+      hourlyRate: Number(draft.hourlyRate),
+      regularSalary: Number(draft.regularSalary),
       ratePerApplication: Number(draft.ratePerApplication),
       bonusPerInterview: Number(draft.bonusPerInterview),
       paymentFrequency: draft.paymentFrequency,
       paymentWeekday: draft.paymentWeekday,
       nextPaymentDate: draft.nextPaymentDate,
       startDate: draft.startDate,
+      endDate: draft.endDate,
     });
   }
 
   return (
-    <ModalFrame title="Edit Contract" subtitle="Update criteria, rates, schedule, and next payday." onClose={onClose}>
+    <ModalFrame title="Edit Contract" subtitle="Update criteria, payment terms, schedule, and contract timeline." onClose={onClose}>
       <form className="form-grid" onSubmit={submit}>
         <label className="field">
           <span>Contract title</span>
           <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} required />
         </label>
-        <label className="field">
-          <span>Rate per applied job</span>
-          <input type="number" min="0" step="0.01" value={draft.ratePerApplication} onChange={(event) => setDraft({ ...draft, ratePerApplication: event.target.value })} />
-        </label>
-        <label className="field">
-          <span>Interview bonus</span>
-          <input type="number" min="0" step="0.01" value={draft.bonusPerInterview} onChange={(event) => setDraft({ ...draft, bonusPerInterview: event.target.value })} />
-        </label>
+        <ContractPaymentFields draft={draft} onChange={(updates) => setDraft({ ...draft, ...updates })} />
         <label className="field">
           <span>Frequency</span>
           <select value={draft.paymentFrequency} onChange={(event) => updateSchedule({ paymentFrequency: event.target.value as PaymentFrequency })}>
@@ -5274,6 +5729,10 @@ function ContractEditModal({
         <label className="field">
           <span>Start date</span>
           <input type="date" value={draft.startDate} onChange={(event) => updateSchedule({ startDate: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>End date</span>
+          <input type="date" value={draft.endDate} onChange={(event) => setDraft({ ...draft, endDate: event.target.value })} />
         </label>
         <label className="field full">
           <span>Specific criteria</span>
@@ -5705,9 +6164,33 @@ function PeopleView({
   const [editingUser, setEditingUser] = useState<PortalUser | null>(null);
   const [creatingUser, setCreatingUser] = useState(false);
   const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"all" | Role>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | UserStatus>("all");
+  const [assignmentFilter, setAssignmentFilter] = useState<"all" | "assigned" | "unassigned">("all");
   const canManageRoles = data.currentUser.role === "super_admin";
   const adminUsers = data.users.filter((user) => isClientRole(user.role) && user.status === "approved");
-  const visibleUsers = (canManageRoles ? data.users : data.users.filter(isWorkerUser)).filter((user) => userMatchesSearch(user, query));
+  const statusRank: Record<UserStatus, number> = { pending: 0, approved: 1, paused: 2 };
+  const visibleUsers = (canManageRoles ? data.users : data.users.filter(isWorkerUser))
+    .filter((user) => userMatchesSearch(user, query))
+    .filter((user) => roleFilter === "all" || user.role === roleFilter)
+    .filter((user) => statusFilter === "all" || user.status === statusFilter)
+    .filter((user) => {
+      if (assignmentFilter === "all") {
+        return true;
+      }
+      if (!isWorkerUser(user)) {
+        return assignmentFilter === "unassigned";
+      }
+      return assignmentFilter === "assigned" ? Boolean(user.assignedAdminId) : !user.assignedAdminId;
+    })
+    .sort((left, right) => {
+      const statusDelta = statusRank[left.status] - statusRank[right.status];
+      if (statusDelta) {
+        return statusDelta;
+      }
+      return userDisplayName(left).localeCompare(userDisplayName(right));
+    });
+  const hasPeopleFilters = Boolean(query || roleFilter !== "all" || statusFilter !== "all" || assignmentFilter !== "all");
 
   async function updateUser(user: PortalUser, changes: Partial<Pick<PortalUser, "name" | "role" | "status" | "assignedAdminId">>) {
     await onSave("updateUser", {
@@ -5747,6 +6230,49 @@ function PeopleView({
           <span>Search people</span>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, email, user ID" />
         </label>
+        <label className="field">
+          <span>Role filter</span>
+          <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as "all" | Role)}>
+            <option value="all">All roles</option>
+            {managedRoleOptions.map((role) => (
+              <option key={role.value} value={role.value}>{role.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Status filter</span>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | UserStatus)}>
+            <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="paused">Paused</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Assignment</span>
+          <select value={assignmentFilter} onChange={(event) => setAssignmentFilter(event.target.value as "all" | "assigned" | "unassigned")}>
+            <option value="all">All users</option>
+            <option value="assigned">Assigned bidders</option>
+            <option value="unassigned">Free users</option>
+          </select>
+        </label>
+        <button
+          className="ghost-button compact-button"
+          type="button"
+          disabled={!hasPeopleFilters}
+          onClick={() => {
+            setQuery("");
+            setRoleFilter("all");
+            setStatusFilter("all");
+            setAssignmentFilter("all");
+          }}
+        >
+          Clear filters
+        </button>
+      </div>
+      <div className="table-toolbar">
+        <span>{visibleUsers.length} of {canManageRoles ? data.users.length : data.users.filter(isWorkerUser).length} users shown</span>
+        <span>{data.users.filter((user) => user.status === "pending").length} pending approval</span>
       </div>
 
       <div className="table-wrap">
@@ -6303,13 +6829,56 @@ function BidderDashboard({ data }: { data: PortalData }) {
   const user = data.currentUser;
   const allLogs = workLogsForUser(user, data.workLogs);
   const userPayments = paymentsForUser(user, data.payments);
+  const balances = userCreditBalances(user, data);
   const filteredLogs = filterWorkLogsByDate(allLogs, dateRange);
+  const filteredEarningPayments = filterPaymentsByDate(userPayments.filter(isCreditSpentPayment), dateRange);
   const unpaidFilteredLogs = filteredLogs.filter((log) => !isWorkLogPaid(log, userPayments));
   const summary = workSummary(user, filteredLogs);
   const openEstimate = estimateForUser(user, unpaidFilteredLogs);
+  const pendingWithdrawal = userPayments
+    .filter((payment) => isWithdrawalPayment(payment) && payment.status === "processing")
+    .reduce((total, payment) => total + payment.amount, 0);
+  const earningsByDateClient = Array.from(
+    filteredEarningPayments.reduce((map, payment) => {
+      const date = payment.scheduledDate || payment.updatedAt?.slice(0, 10) || payment.createdAt?.slice(0, 10) || today();
+      const clientName = userById(data.users, payment.clientId || "")?.name || "Client";
+      const key = `${date}-${payment.clientId || "client"}`;
+      const existing = map.get(key) || { id: key, date, clientName, amount: 0 };
+      map.set(key, { ...existing, amount: existing.amount + payment.amount });
+      return map;
+    }, new Map<string, { id: string; date: string; clientName: string; amount: number }>())
+      .values()
+  ).sort((left, right) => right.date.localeCompare(left.date) || right.amount - left.amount);
 
   return (
     <div className="dashboard-stack">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Wallet Balance</h2>
+            <p>Your current money credit, post credit, and pending withdrawal.</p>
+          </div>
+        </div>
+        <div className="metric-grid">
+          <div className="metric">
+            <span>Money balance</span>
+            <strong>{money(balances.moneyCreditBalance)}</strong>
+          </div>
+          <div className="metric">
+            <span>Post credit</span>
+            <strong>{postCreditCount(balances.postCreditBalance)}</strong>
+          </div>
+          <div className="metric">
+            <span>Released earnings</span>
+            <strong>{money(filteredEarningPayments.reduce((total, payment) => total + payment.amount, 0))}</strong>
+          </div>
+          <div className="metric">
+            <span>Pending withdrawal</span>
+            <strong>{money(pendingWithdrawal)}</strong>
+          </div>
+        </div>
+      </section>
+
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -6336,6 +6905,16 @@ function BidderDashboard({ data }: { data: PortalData }) {
             <strong>{money(openEstimate)}</strong>
           </div>
         </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Earnings Chart</h2>
+            <p>Released money grouped by date and client.</p>
+          </div>
+        </div>
+        <BidderEarningsChart rows={earningsByDateClient} />
       </section>
 
       <section className="panel">
@@ -7175,6 +7754,73 @@ function WithdrawalRequestModal({
   );
 }
 
+function ConvertPostCreditModal({
+  balances,
+  busy,
+  onClose,
+  onSave,
+}: {
+  balances: { moneyCreditBalance: number; postCreditBalance: number };
+  busy: boolean;
+  onClose: () => void;
+  onSave: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const maxCredits = Math.floor((balances.moneyCreditBalance || 0) / postCreditMoneyPrice);
+  const [postCreditAmount, setPostCreditAmount] = useState(maxCredits > 0 ? String(Math.min(10, maxCredits)) : "");
+  const creditAmount = Math.max(0, Math.floor(Number(postCreditAmount) || 0));
+  const moneyCost = Math.round(creditAmount * postCreditMoneyPrice * 100) / 100;
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSave({ postCreditAmount: creditAmount });
+  }
+
+  return (
+    <ModalFrame title="Convert to Post Credit" subtitle="$0.10 money credit converts to 1 post credit." onClose={onClose}>
+      <form className="form-grid" onSubmit={submit}>
+        <div className="metric-grid full" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+          <div className="metric">
+            <span>Money credit</span>
+            <strong>{money(balances.moneyCreditBalance)}</strong>
+          </div>
+          <div className="metric">
+            <span>Post credit</span>
+            <strong>{postCreditCount(balances.postCreditBalance)}</strong>
+          </div>
+        </div>
+        <label className="field">
+          <span>Post credits to add</span>
+          <input
+            type="number"
+            min="1"
+            max={maxCredits || undefined}
+            step="1"
+            value={postCreditAmount}
+            onChange={(event) => setPostCreditAmount(event.target.value)}
+            placeholder="10"
+            required
+          />
+        </label>
+        <label className="field">
+          <span>Money credit cost</span>
+          <input value={money(moneyCost)} readOnly />
+        </label>
+        <div className="status-strip compact full">
+          Price: {money(postCreditMoneyPrice)} = 1 post credit. You can convert up to {postCreditCount(maxCredits)} now.
+        </div>
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy || creditAmount <= 0 || moneyCost > balances.moneyCreditBalance}>
+            Convert credit
+          </button>
+          <button className="ghost-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}
+
 function UserPayments({
   data,
   busy,
@@ -7188,6 +7834,7 @@ function UserPayments({
   const methods = data.paymentMethods.filter((method) => method.userId === user.id);
   const [editingMethod, setEditingMethod] = useState<PaymentMethod | null>(null);
   const [showWithdrawalModal, setShowWithdrawalModal] = useState(false);
+  const [showConvertModal, setShowConvertModal] = useState(false);
   const earned = estimateForUser(user, data.workLogs);
   const paid = paidForUser(user.id, data.payments);
   const scheduled = scheduledForUser(user.id, data.payments);
@@ -7200,6 +7847,13 @@ function UserPayments({
     const nextData = await onAction("requestWithdrawal", payload);
     if (nextData) {
       setShowWithdrawalModal(false);
+    }
+  }
+
+  async function convertPostCredit(payload: Record<string, unknown>) {
+    const nextData = await onAction("convertMoneyToPostCredit", payload);
+    if (nextData) {
+      setShowConvertModal(false);
     }
   }
 
@@ -7238,7 +7892,17 @@ function UserPayments({
             <h2>Next Payment</h2>
             <p>{user.paymentSchedule || "Schedule not set yet."}</p>
           </div>
-          <span className="badge pending">{shortDate(user.nextPaymentDate)}</span>
+          <div className="actions">
+            <span className="badge pending">{shortDate(user.nextPaymentDate)}</span>
+            <button
+              className="ghost-button compact-button"
+              type="button"
+              disabled={busy || balances.moneyCreditBalance < postCreditMoneyPrice}
+              onClick={() => setShowConvertModal(true)}
+            >
+              Convert to post credit
+            </button>
+          </div>
         </div>
         <div className="metric-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
           <div className="metric">
@@ -7260,6 +7924,10 @@ function UserPayments({
           <div className="metric">
             <span>Money credit</span>
             <strong>{money(balances.moneyCreditBalance)}</strong>
+          </div>
+          <div className="metric">
+            <span>Post credit</span>
+            <strong>{postCreditCount(balances.postCreditBalance)}</strong>
           </div>
           <div className="metric">
             <span>Pending withdrawal</span>
@@ -7285,6 +7953,14 @@ function UserPayments({
           busy={busy}
           onClose={() => setShowWithdrawalModal(false)}
           onSave={requestWithdrawal}
+        />
+      ) : null}
+      {showConvertModal ? (
+        <ConvertPostCreditModal
+          balances={balances}
+          busy={busy}
+          onClose={() => setShowConvertModal(false)}
+          onSave={convertPostCredit}
         />
       ) : null}
     </div>
@@ -7409,7 +8085,7 @@ function CreditBalanceTable({
                 <td><span className="table-subtext">{displayUserId(user)}</span></td>
                 <td><span className={`badge ${user.status}`}>{statusLabel(user.status)}</span></td>
                 <td>{money(balances.moneyCreditBalance)}</td>
-                <td>{money(balances.postCreditBalance)}</td>
+                <td>{postCreditCount(balances.postCreditBalance)}</td>
               </tr>
             );
           })}
@@ -7466,7 +8142,7 @@ function CreditAdjustmentModal({
           </div>
           <div className="metric">
             <span>Post credit</span>
-            <strong>{money(balances.postCreditBalance)}</strong>
+            <strong>{postCreditCount(balances.postCreditBalance)}</strong>
           </div>
         </div>
         <label className="field">
@@ -7484,8 +8160,8 @@ function CreditAdjustmentModal({
           </select>
         </label>
         <label className="field">
-          <span>Amount</span>
-          <input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} required />
+          <span>{draft.creditType === "post" ? "Credit count" : "Amount"}</span>
+          <input type="number" min="0" step={draft.creditType === "post" ? "1" : "0.01"} value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} required />
         </label>
         <label className="field">
           <span>Reference link</span>
@@ -7621,6 +8297,7 @@ function AdminPayments({
   });
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
   const [showReleaseModal, setShowReleaseModal] = useState(false);
+  const [showConvertModal, setShowConvertModal] = useState(false);
 
   const selectedUser = payableUsers.find((user) => user.id === draft.userId);
   const selectedReleaseUser = payableUsers.find((user) => user.id === releaseDraft.userId);
@@ -7630,8 +8307,11 @@ function AdminPayments({
   const depositClientId = isSuperAdminRole(data.currentUser.role) ? depositDraft.clientId : data.currentUser.id;
   const paymentClient = paymentClientId ? userById(data.users, paymentClientId) : undefined;
   const depositClient = depositClientId ? userById(data.users, depositClientId) : undefined;
-  const creditBalance = paymentClient ? userCreditBalances(paymentClient, data).moneyCreditBalance : 0;
-  const releaseCreditBalance = depositClient ? userCreditBalances(depositClient, data).moneyCreditBalance : 0;
+  const paymentClientBalances = paymentClient ? userCreditBalances(paymentClient, data) : null;
+  const depositClientBalances = depositClient ? userCreditBalances(depositClient, data) : null;
+  const creditBalance = paymentClientBalances?.moneyCreditBalance || 0;
+  const releaseCreditBalance = depositClientBalances?.moneyCreditBalance || 0;
+  const releasePostCreditBalance = depositClientBalances?.postCreditBalance || 0;
   const depositAmount = Number(depositDraft.amount) || 0;
   const depositFee = Math.round(depositAmount * 0.05 * 100) / 100;
   const depositCredit = Math.max(0, Math.round((depositAmount - depositFee) * 100) / 100);
@@ -7768,6 +8448,13 @@ function AdminPayments({
     }
   }
 
+  async function convertPostCredit(payload: Record<string, unknown>) {
+    const nextData = await onAction("convertMoneyToPostCredit", payload);
+    if (nextData) {
+      setShowConvertModal(false);
+    }
+  }
+
   function handleUserChange(userId: string) {
     const nextUser = payableUsers.find((user) => user.id === userId);
     setDraft({ ...draft, userId, scheduledDate: nextUser?.nextPaymentDate || draft.scheduledDate || today() });
@@ -7881,11 +8568,25 @@ function AdminPayments({
               <h2>Credit Wallet</h2>
               <p>Deposit through Cryptomus. A 5% platform fee is deducted before credits are added.</p>
             </div>
+            {!isSuperAdminRole(data.currentUser.role) ? (
+              <button
+                className="ghost-button compact-button"
+                type="button"
+                disabled={busy || releaseCreditBalance < postCreditMoneyPrice}
+                onClick={() => setShowConvertModal(true)}
+              >
+                Convert to post credit
+              </button>
+            ) : null}
           </div>
-          <div className="metric-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+          <div className="metric-grid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
             <div className="metric">
-              <span>Credit balance</span>
+              <span>Money credit</span>
               <strong>{money(releaseCreditBalance)}</strong>
+            </div>
+            <div className="metric">
+              <span>Post credit</span>
+              <strong>{postCreditCount(releasePostCreditBalance)}</strong>
             </div>
             <div className="metric">
               <span>Total deposited</span>
@@ -8040,6 +8741,15 @@ function AdminPayments({
         </div>
         <EscrowTable escrows={data.escrows || []} users={data.users} />
       </section>
+
+      {showConvertModal && depositClientBalances ? (
+        <ConvertPostCreditModal
+          balances={depositClientBalances}
+          busy={busy}
+          onClose={() => setShowConvertModal(false)}
+          onSave={convertPostCredit}
+        />
+      ) : null}
 
       {showReleaseModal ? (
         <ModalFrame title="Release Payment" subtitle="Move client credits into the bidder money-credit wallet." onClose={() => setShowReleaseModal(false)}>
@@ -8899,10 +9609,11 @@ function ChatContractCard({
       <div className="mini-metrics compact-metrics">
         <span><strong>{client?.name || "Client"}</strong> client</span>
         <span><strong>{bidder?.name || "Bidder"}</strong> bidder</span>
-        <span><strong>{money(contract.ratePerApplication)}</strong> per apply</span>
-        <span><strong>{money(contract.bonusPerInterview)}</strong> interview bonus</span>
+        <span><strong>{contractPayTerms(contract)}</strong> pay terms</span>
+        <span><strong>{contractPaymentStyleLabel(contract.paymentStyle)}</strong> style</span>
         <span><strong>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday)}</strong> schedule</span>
         <span><strong>{shortDate(contract.nextPaymentDate)}</strong> next payday</span>
+        <span><strong>{contractTimelineLabel(contract)}</strong> timeline</span>
       </div>
       {canRespond ? (
         <div className="actions">

@@ -40,6 +40,11 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(globals, /\.bid-profile-grid\s*\{[\s\S]*grid-template-columns: repeat\(auto-fill, minmax\(280px, 420px\)\);/);
   assert.match(globals, /\.bid-profile-card\s*\{/);
   assert.match(portalApp, /Email and password sign-in/);
+  assert.match(portalApp, /PublicHomePage/);
+  assert.match(portalApp, /Bidder Portal developed by Digniware LLC/);
+  assert.match(portalApp, /digniware\.com/);
+  assert.match(portalApp, /publicPortal/);
+  assert.match(portalApp, /Public Posts/);
   assert.match(portalApp, /Password/);
   assert.match(portalApp, /Remember me for 5 days/);
   assert.match(portalApp, /Sign up/);
@@ -67,6 +72,10 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Posts/);
   assert.match(portalApp, /Contracts/);
   assert.match(portalApp, /Post Credit/);
+  assert.match(portalApp, /postCreditCount/);
+  assert.match(portalApp, /postCreditMoneyPrice/);
+  assert.match(portalApp, /Convert to post credit/);
+  assert.match(portalApp, /Post credits to add/);
   assert.match(portalApp, /Create Post/);
   assert.match(portalApp, /Publish post/);
   assert.match(portalApp, /Edit Bid Profile/);
@@ -78,10 +87,22 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Veteran status/);
   assert.match(portalApp, /Start Contract/);
   assert.match(portalApp, /Contract Management/);
+  assert.match(portalApp, /contractPaymentStyles/);
+  assert.match(portalApp, /Payment style/);
+  assert.match(portalApp, /Fixed budget/);
+  assert.match(portalApp, /Hourly rate/);
+  assert.match(portalApp, /Monthly salary/);
+  assert.match(portalApp, /End date/);
+  assert.match(portalApp, /contractPayTerms/);
+  assert.match(portalApp, /contractTimelineLabel/);
+  assert.match(portalApp, /Worked With/);
+  assert.match(portalApp, /CollaborationSummaryList/);
+  assert.match(portalApp, /Wallet Balance/);
+  assert.match(portalApp, /Earnings Chart/);
+  assert.match(portalApp, /BidderEarningsChart/);
   assert.match(portalApp, /Contract ID/);
   assert.match(portalApp, /ContractDetailModal/);
   assert.match(portalApp, /Contract Details/);
-  assert.match(portalApp, /Past Contract History/);
   assert.match(portalApp, /Edit Contract/);
   assert.match(portalApp, /Save contract/);
   assert.match(portalApp, /Next payday/);
@@ -92,7 +113,6 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Dispute Details/);
   assert.match(portalApp, /Connected client credit/);
   assert.match(portalApp, /Currently working/);
-  assert.match(portalApp, /Client Work History/);
   assert.match(portalApp, /Message client/);
   assert.match(portalApp, /Allow clients and bidders to contact me directly/);
   assert.match(portalApp, /Search bidders/);
@@ -174,10 +194,11 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Escrow History/);
   assert.match(portalApp, /Credit Wallet/);
   assert.match(portalApp, /Create Cryptomus invoice/);
-  assert.match(portalApp, /Credit balance/);
+  assert.match(portalApp, /Money credit/);
   assert.match(portalApp, /Open invoice/);
   assert.match(portalApp, /Notification center/);
   assert.match(portalApp, /notification-menu-wrap/);
+  assert.match(portalApp, /openNotification/);
   assert.match(portalApp, /onClose/);
   assert.match(portalApp, /clientScopedWorkLogs/);
   assert.match(portalApp, /Only work, contracts, and payments connected to your client account are counted/);
@@ -189,6 +210,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Charge credit/);
   assert.match(portalApp, /Add Person/);
   assert.match(portalApp, /Add person/);
+  assert.match(portalApp, /Role filter/);
+  assert.match(portalApp, /Status filter/);
+  assert.match(portalApp, /Clear filters/);
   assert.match(portalApp, /Mark email verified/);
   assert.match(portalApp, /Edit Payment/);
   assert.match(portalApp, /Edit User/);
@@ -199,9 +223,14 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /PostTable/);
   assert.match(portalApp, /Edit Post/);
   assert.match(portalApp, /Save post/);
-  assert.match(portalApp, /Post credit is used first/);
+  assert.match(portalApp, /Posts cost 1 post credit/);
+  assert.match(portalApp, /1 credit per post/);
   assert.match(portalApp, /money credit can cover/);
   assert.match(portalApp, /Client posts are visible to bidders/);
+  assert.match(portalApp, /Search contracts/);
+  assert.match(portalApp, /All clients/);
+  assert.match(portalApp, /All bidders/);
+  assert.match(portalApp, /No contracts match these filters/);
   assert.match(portalApp, /Delete chat/);
   assert.match(portalApp, /addDisputeUpdate/);
   assert.match(portalApp, /Add details or screenshots/);
@@ -213,7 +242,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /addSupportMessage/);
   assert.match(portalApp, /supportMessages/);
   assert.match(portalApp, /supportContacts/);
-  assert.doesNotMatch(portalApp, /Attach Bid Profiles|Remove from bidder|Select member|Contract Disputes|data\.workLogs\.slice\(0, 5\)/);
+  assert.doesNotMatch(portalApp, /Attach Bid Profiles|Remove from bidder|Select member|Contract Disputes|Past Contract History|Client Work History|data\.workLogs\.slice\(0, 5\)/);
   assert.doesNotMatch(globals, /\.contract-grid|\.contract-card\s*\{/);
   assert.doesNotMatch(portalApp, /Enable notifications|Notifications on|Admin time /);
   assert.doesNotMatch(portalApp, /Roles ready|Work logging|No Stripe|set payment rates/);
@@ -243,6 +272,8 @@ test("declares the requested frontend records", async () => {
     "targetUserPublicId",
     "Save email",
     "Save password",
+    "Bidder Portal developed by Digniware LLC",
+    "Public Posts",
     "Client Search",
     "Bidder Search",
     "Posts",
@@ -266,7 +297,6 @@ test("declares the requested frontend records", async () => {
     "Contract Management",
     "Contract ID",
     "Contract Details",
-    "Past Contract History",
     "Edit Contract",
     "Save contract",
     "Next payday",
