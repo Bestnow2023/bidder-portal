@@ -271,7 +271,7 @@ export default function HelpCenterApp({ view }: { view: HelpView }) {
   const audience = roleAudience(currentUser);
 
   return (
-    <main className="help-shell">
+    <main className={`help-shell ${view === "support" ? "support-shell" : ""}`}>
       <header className="help-topbar">
         <a className="help-brand" href="/help">
           <Image className="help-logo" src="/digniware-logo-light.png" alt="Digniware" width={52} height={52} />
@@ -294,8 +294,8 @@ export default function HelpCenterApp({ view }: { view: HelpView }) {
               </span>
             </>
           ) : (
-            <a className="ghost-button compact-button" href={mainPortalUrl} target="_blank" rel="noreferrer">
-              Open Portal
+            <a className="primary-button compact-button" href={`${mainPortalUrl}/#portal-access`} target="_blank" rel="noreferrer">
+              Sign in
             </a>
           )}
         </div>
@@ -344,6 +344,9 @@ function HelpDashboard({
           </p>
           <div className="help-actions">
             <a className="primary-button compact-button" href="/support">Open Support</a>
+            {!currentUser ? (
+              <a className="ghost-button compact-button" href={`${mainPortalUrl}/#portal-access`} target="_blank" rel="noreferrer">Sign in</a>
+            ) : null}
             <a className="ghost-button compact-button" href="https://digniware.com" target="_blank" rel="noreferrer">Digniware.com</a>
           </div>
         </div>
@@ -514,7 +517,7 @@ function SupportCenter({
         <h1>Support Center</h1>
         <p>Open Help from the main portal to start support chat with your signed-in account.</p>
         <div className="help-actions">
-          <a className="primary-button compact-button" href={mainPortalUrl} target="_blank" rel="noreferrer">Open Portal</a>
+          <a className="primary-button compact-button" href={`${mainPortalUrl}/#portal-access`} target="_blank" rel="noreferrer">Sign in to portal</a>
           <button className="ghost-button compact-button" type="button" onClick={onReconnect} disabled={busy}>Reconnect session</button>
         </div>
       </section>
@@ -522,7 +525,7 @@ function SupportCenter({
   }
 
   return (
-    <section className="support-workspace">
+    <section className={`support-workspace ${isSuperAdmin ? "" : "single"}`}>
       {isSuperAdmin ? (
         <aside className="support-sidebar">
           <h2>Support chats</h2>
@@ -546,9 +549,12 @@ function SupportCenter({
 
       <div className="support-chat">
         <div className="support-chat-header">
-          <div>
-            <h1>Support Center</h1>
-            <p>{isSuperAdmin ? "Reply to user support requests." : "Chat with super admin support."}</p>
+          <div className="support-chat-title">
+            {selectedContact ? <Avatar user={selectedContact} /> : <span className="help-avatar">SA</span>}
+            <span>
+              <strong>{isSuperAdmin ? userDisplayName(selectedContact) : "Super Admin Support"}</strong>
+              <small>{isSuperAdmin ? selectedContact?.email || "Select a support chat" : "Support Center"}</small>
+            </span>
           </div>
           <span className="badge">{activeMessages.length} messages</span>
         </div>

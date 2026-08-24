@@ -26,6 +26,7 @@ test("renders a help-only portal", async () => {
   assert.match(app, /Help Center/);
   assert.match(app, /Help<\/a>/);
   assert.match(app, /Support<\/a>/);
+  assert.match(app, /Sign in/);
   assert.match(app, /mainPortalUrl/);
   assert.match(app, /refreshPortal/);
   assert.match(app, /addSupportMessage/);
@@ -45,6 +46,8 @@ test("renders a help-only portal", async () => {
   assert.match(globals, /\.help-topbar/);
   assert.match(globals, /\.help-nav/);
   assert.match(globals, /\.support-workspace/);
+  assert.match(globals, /\.support-workspace\.single/);
+  assert.match(globals, /\.support-chat-title/);
   assert.match(globals, /\.support-message-list/);
 
   assert.match(envExample, /NEXT_PUBLIC_API_BASE_URL/);

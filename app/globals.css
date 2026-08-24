@@ -27,6 +27,12 @@
   padding: 18px 0 44px;
 }
 
+.help-shell.support-shell {
+  width: min(100% - 24px, 1680px);
+  gap: 14px;
+  padding-bottom: 18px;
+}
+
 .help-topbar {
   position: sticky;
   top: 12px;
@@ -288,11 +294,18 @@
 .support-workspace {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
-  min-height: calc(100vh - 140px);
+  height: calc(100vh - 124px);
+  min-height: 620px;
   overflow: hidden;
 }
 
+.support-workspace.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .support-sidebar {
+  min-height: 0;
+  overflow: auto;
   border-right: 1px solid rgba(215, 228, 224, 0.92);
   background: rgba(248, 252, 250, 0.75);
   padding: 18px;
@@ -338,12 +351,39 @@
   justify-content: space-between;
   gap: 16px;
   border-bottom: 1px solid rgba(215, 228, 224, 0.92);
-  padding: 20px 24px;
+  padding: 14px 18px;
+}
+
+.support-chat-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.support-chat-title span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.support-chat-title strong {
+  color: var(--foreground);
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.support-chat-title small {
+  overflow: hidden;
+  color: var(--muted);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .support-message-list {
-  min-height: 420px;
-  max-height: calc(100vh - 300px);
+  min-height: 0;
+  max-height: none;
   overflow: auto;
   display: grid;
   align-content: start;
@@ -397,8 +437,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
+  align-items: end;
   border-top: 1px solid rgba(215, 228, 224, 0.92);
-  background: #fff;
+  background: rgba(255, 255, 255, 0.96);
   padding: 16px;
 }
 
