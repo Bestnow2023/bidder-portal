@@ -177,7 +177,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Credit Management/);
   assert.match(portalApp, /Billing Management/);
   assert.match(portalApp, /Billing/);
-  assert.match(portalApp, /Search by name, email, or user ID/);
+  assert.match(portalApp, /Search credit users/);
   assert.match(portalApp, /CreditAdjustmentModal/);
   assert.match(portalApp, /Client Analytics/);
   assert.match(portalApp, /Performance Chart/);
@@ -208,6 +208,13 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Mark Payment Completed/);
   assert.match(portalApp, /Charge client credit/);
   assert.match(portalApp, /Charge credit/);
+  assert.match(portalApp, /Search credit users/);
+  assert.match(portalApp, /All user types/);
+  assert.match(portalApp, /Clients only/);
+  assert.match(portalApp, /Bidders only/);
+  assert.match(portalApp, /Has money credit/);
+  assert.match(portalApp, /Has post credit/);
+  assert.match(portalApp, /credit users shown/);
   assert.match(portalApp, /Add Person/);
   assert.match(portalApp, /Add person/);
   assert.match(portalApp, /Role filter/);
@@ -328,7 +335,7 @@ test("declares the requested frontend records", async () => {
     "Credit Management",
     "Billing Management",
     "Credit Adjustment",
-    "Search by name, email, or user ID",
+    "Search credit users",
     "Client Credit Balances",
     "Bidder Credit Balances",
     "Save credit adjustment",

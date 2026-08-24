@@ -7979,9 +7979,36 @@ function SuperAdminCreditManagementView({
   const creditClientUsers = data.users.filter((user) => isClientRole(user.role));
   const creditBidderUsers = data.users.filter((user) => user.role === "bidder");
   const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"all" | "client" | "bidder">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | UserStatus>("all");
+  const [balanceFilter, setBalanceFilter] = useState<"all" | "money" | "post" | "empty">("all");
   const [selectedCreditUser, setSelectedCreditUser] = useState<PortalUser | null>(null);
-  const filteredClientUsers = creditClientUsers.filter((user) => userMatchesSearch(user, query));
-  const filteredBidderUsers = creditBidderUsers.filter((user) => userMatchesSearch(user, query));
+  const creditUsers = [...creditClientUsers, ...creditBidderUsers];
+
+  function creditUserMatchesFilters(user: PortalUser) {
+    const balances = userCreditBalances(user, data);
+    const roleMatches =
+      roleFilter === "all" ||
+      (roleFilter === "client" && isClientRole(user.role)) ||
+      (roleFilter === "bidder" && user.role === "bidder");
+    const balanceMatches =
+      balanceFilter === "all" ||
+      (balanceFilter === "money" && balances.moneyCreditBalance > 0) ||
+      (balanceFilter === "post" && balances.postCreditBalance > 0) ||
+      (balanceFilter === "empty" && balances.moneyCreditBalance <= 0 && balances.postCreditBalance <= 0);
+
+    return (
+      userMatchesSearch(user, query) &&
+      roleMatches &&
+      (statusFilter === "all" || user.status === statusFilter) &&
+      balanceMatches
+    );
+  }
+
+  const filteredClientUsers = creditClientUsers.filter(creditUserMatchesFilters);
+  const filteredBidderUsers = creditBidderUsers.filter(creditUserMatchesFilters);
+  const filteredCreditUserCount = filteredClientUsers.length + filteredBidderUsers.length;
+  const hasCreditFilters = Boolean(query || roleFilter !== "all" || statusFilter !== "all" || balanceFilter !== "all");
 
   return (
     <div className="dashboard-stack">
@@ -7992,12 +8019,58 @@ function SuperAdminCreditManagementView({
             <p>Select a client or bidder to add or deduct money credit and post credit.</p>
           </div>
         </div>
-        <label className="field">
-          <span>Search by name, email, or user ID</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, email, user ID" />
-        </label>
+        <div className="filter-bar">
+          <label className="field">
+            <span>Search credit users</span>
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, email, user ID" />
+          </label>
+          <label className="field">
+            <span>User type</span>
+            <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as "all" | "client" | "bidder")}>
+              <option value="all">All user types</option>
+              <option value="client">Clients only</option>
+              <option value="bidder">Bidders only</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Status</span>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | UserStatus)}>
+              <option value="all">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="paused">Paused</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Credit balance</span>
+            <select value={balanceFilter} onChange={(event) => setBalanceFilter(event.target.value as "all" | "money" | "post" | "empty")}>
+              <option value="all">Any balance</option>
+              <option value="money">Has money credit</option>
+              <option value="post">Has post credit</option>
+              <option value="empty">No credit</option>
+            </select>
+          </label>
+          <button
+            className="ghost-button compact-button"
+            type="button"
+            disabled={!hasCreditFilters}
+            onClick={() => {
+              setQuery("");
+              setRoleFilter("all");
+              setStatusFilter("all");
+              setBalanceFilter("all");
+            }}
+          >
+            Clear filters
+          </button>
+        </div>
+        <div className="table-toolbar">
+          <span>{filteredCreditUserCount} of {creditUsers.length} credit users shown</span>
+          <span>Search by name, email, user ID, type, status, or balance.</span>
+        </div>
       </section>
 
+      {roleFilter !== "bidder" ? (
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -8012,7 +8085,9 @@ function SuperAdminCreditManagementView({
           onSelect={setSelectedCreditUser}
         />
       </section>
+      ) : null}
 
+      {roleFilter !== "client" ? (
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -8027,6 +8102,7 @@ function SuperAdminCreditManagementView({
           onSelect={setSelectedCreditUser}
         />
       </section>
+      ) : null}
 
       {selectedCreditUser ? (
         <CreditAdjustmentModal
