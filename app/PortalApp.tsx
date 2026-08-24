@@ -108,6 +108,32 @@ const jobTitleOptions = [
   "Data Engineer",
   "Project Manager",
 ];
+const raceOptions = [
+  "",
+  "Asian",
+  "Black or African American",
+  "Hispanic or Latino",
+  "Native American or Alaska Native",
+  "Native Hawaiian or Pacific Islander",
+  "White",
+  "Two or more races",
+  "Prefer not to answer",
+  "Other",
+];
+const veteranStatusOptions = [
+  "",
+  "Not a veteran",
+  "Protected veteran",
+  "Veteran",
+  "Prefer not to answer",
+];
+const disabilityStatusOptions = [
+  "",
+  "No disability",
+  "Has disability",
+  "History of disability",
+  "Prefer not to answer",
+];
 const languageLevelOptions = ["English - native", "English - fluent", "English - conversational", "Spanish - fluent", "French - fluent"];
 const timeZoneOptions = [
   "America/New_York",
@@ -257,6 +283,48 @@ function dateTimeInZone(value: string, timeZone: string) {
   }
 }
 
+function dateKeyInZone(value: string, timeZone: string) {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      timeZone,
+    }).format(new Date(value));
+  } catch {
+    return new Date(value).toISOString().slice(0, 10);
+  }
+}
+
+function messageTimeInZone(value: string, timeZone: string) {
+  if (!value) {
+    return "";
+  }
+
+  try {
+    const createdAt = new Date(value);
+    const todayKey = dateKeyInZone(new Date().toISOString(), timeZone);
+    const messageKey = dateKeyInZone(value, timeZone);
+    const timeOptions = {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone,
+    } satisfies Intl.DateTimeFormatOptions;
+
+    if (todayKey === messageKey) {
+      return new Intl.DateTimeFormat("en-US", timeOptions).format(createdAt);
+    }
+
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      ...timeOptions,
+    }).format(createdAt);
+  } catch {
+    return dateTime(value);
+  }
+}
+
 function timeZoneDisplay(timeZone?: string, value = new Date().toISOString()) {
   if (!timeZone) {
     return "Not set";
@@ -267,10 +335,6 @@ function timeZoneDisplay(timeZone?: string, value = new Date().toISOString()) {
   } catch {
     return timeZone;
   }
-}
-
-function memberTimeLabel(user?: PortalUser | null) {
-  return user ? `${userDisplayName(user)} time` : "Member time";
 }
 
 function browserTimeZone() {
@@ -2063,19 +2127,21 @@ export default function PortalApp() {
         </div>
       </header>
 
-      <section className="content">
-        <header className="topbar">
-          <div>
-            <h1>{viewTitle(safeView, currentUser)}</h1>
-            {viewSubtitle(safeView, canViewManaged, isSuperAdmin) ? (
-              <p>{viewSubtitle(safeView, canViewManaged, isSuperAdmin)}</p>
-            ) : null}
-          </div>
-          <div className="badge-row">
-            <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
-            <span className={`badge ${currentUser.status}`}>{statusLabel(currentUser.status)}</span>
-          </div>
-        </header>
+      <section className={`content ${safeView === "chat" ? "chat-content" : ""}`}>
+        {safeView !== "chat" ? (
+          <header className="topbar">
+            <div>
+              <h1>{viewTitle(safeView, currentUser)}</h1>
+              {viewSubtitle(safeView, canViewManaged, isSuperAdmin) ? (
+                <p>{viewSubtitle(safeView, canViewManaged, isSuperAdmin)}</p>
+              ) : null}
+            </div>
+            <div className="badge-row">
+              <span className={`badge ${currentUser.role}`}>{roleLabel(currentUser.role)}</span>
+              <span className={`badge ${currentUser.status}`}>{statusLabel(currentUser.status)}</span>
+            </div>
+          </header>
+        ) : null}
 
         {error ? <div className="error" style={{ marginBottom: 16 }}>{error}</div> : null}
         {mustCompleteProfile ? (
@@ -2928,17 +2994,191 @@ function extraFieldsInput(fields: BidProfileRecord["extraFields"] = []) {
   return fields.map((field) => `${field.label}: ${field.value}`).join("\n");
 }
 
+function splitLegalName(value = "") {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) {
+    return { firstName: "", middleName: "", lastName: "" };
+  }
+  if (parts.length === 1) {
+    return { firstName: parts[0], middleName: "", lastName: "" };
+  }
+
+  return {
+    firstName: parts[0],
+    middleName: parts.slice(1, -1).join(" "),
+    lastName: parts[parts.length - 1],
+  };
+}
+
+function bidProfileFullName(profile: BidProfileRecord) {
+  return [profile.firstName, profile.middleName, profile.lastName].filter(Boolean).join(" ") || profile.fullLegalName;
+}
+
+function bidProfileIdentityLines(profile: BidProfileRecord) {
+  return [
+    { label: "First name", value: profile.firstName },
+    { label: "Middle name", value: profile.middleName },
+    { label: "Last name", value: profile.lastName },
+    { label: "Full legal name", value: bidProfileFullName(profile) },
+    { label: "Email", value: profile.contactEmail },
+    { label: "Phone", value: profile.phone },
+    { label: "DOB", value: profile.dateOfBirth ? shortDate(profile.dateOfBirth) : "" },
+    { label: "Last 4 SSN", value: profile.lastFourSsn },
+  ];
+}
+
+function bidProfileJobLines(profile: BidProfileRecord) {
+  return [
+    { label: "Target salary", value: profile.targetSalary },
+    { label: "Visa status", value: profile.visaStatus },
+    { label: "Resume", value: profile.resumeUrl },
+    { label: "LinkedIn", value: profile.linkedinUrl },
+    { label: "Portfolio", value: profile.portfolioUrl },
+  ];
+}
+
+function bidProfileComplianceLines(profile: BidProfileRecord) {
+  return [
+    { label: "Race", value: profile.race },
+    { label: "Veteran status", value: profile.veteranStatus },
+    { label: "Disability", value: profile.disabilityStatus },
+  ];
+}
+
+function BidProfileDetailGrid({ rows }: { rows: { label: string; value?: string }[] }) {
+  return (
+    <div className="profile-detail-list">
+      {rows.map((row) => (
+        <span key={row.label}>
+          <strong>{row.label}</strong>
+          {row.value || "Not set"}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function BidProfileCard({
+  profile,
+  assignedNames = [],
+  actions,
+  onOpen,
+}: {
+  profile: BidProfileRecord;
+  assignedNames?: string[];
+  actions?: ActionMenuItem[];
+  onOpen: () => void;
+}) {
+  return (
+    <article
+      className="profile-card bid-profile-card selectable-card"
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          onOpen();
+        }
+      }}
+    >
+      <div className="person-title">
+        <div>
+          <h3>{profile.profileName}</h3>
+          <span className="table-subtext">{bidProfileFullName(profile)} - {profile.contactEmail}</span>
+          <span className="table-subtext">
+            {assignedNames.length ? `Shared with ${assignedNames.join(", ")}` : "Not shared with bidders"}
+          </span>
+        </div>
+        {actions?.length ? (
+          <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+            <ActionMenu items={actions} />
+          </span>
+        ) : null}
+      </div>
+      <div className="badge-row">
+        {profile.jobTitles.slice(0, 3).map((title) => (
+          <span className="badge" key={title}>{title}</span>
+        ))}
+        {profile.jobTitles.length > 3 ? <span className="badge">+{profile.jobTitles.length - 3}</span> : null}
+      </div>
+      <p>{profile.resumeUrl || profile.linkedinUrl || profile.portfolioUrl || profile.notes || "Open to view bidding details."}</p>
+    </article>
+  );
+}
+
+function BidProfileDetailModal({
+  profile,
+  assignedNames = [],
+  onClose,
+}: {
+  profile: BidProfileRecord;
+  assignedNames?: string[];
+  onClose: () => void;
+}) {
+  return (
+    <ModalFrame title={profile.profileName} subtitle="Client bid profile for job bidding." className="client-detail-modal" onClose={onClose}>
+      <div className="detail-stack">
+        <div className="status-strip compact">
+          {assignedNames.length
+            ? `Shared with ${assignedNames.join(", ")}`
+            : "This profile is not shared with bidders yet."}
+        </div>
+        <section className="detail-section">
+          <h3>Identity</h3>
+          <BidProfileDetailGrid rows={bidProfileIdentityLines(profile)} />
+        </section>
+        <section className="detail-section">
+          <h3>Job bidding</h3>
+          <div className="badge-row">
+            {profile.jobTitles.map((title) => (
+              <span className="badge" key={title}>{title}</span>
+            ))}
+            {!profile.jobTitles.length ? <span className="muted">No job titles added.</span> : null}
+          </div>
+          <BidProfileDetailGrid rows={bidProfileJobLines(profile)} />
+        </section>
+        <section className="detail-section">
+          <h3>Optional EEO details</h3>
+          <BidProfileDetailGrid rows={bidProfileComplianceLines(profile)} />
+        </section>
+        {profile.extraFields?.length ? (
+          <section className="detail-section">
+            <h3>Additional fields</h3>
+            <BidProfileDetailGrid rows={profile.extraFields} />
+          </section>
+        ) : null}
+        <section className="detail-section">
+          <h3>Notes</h3>
+          <p>{profile.notes || "No notes added."}</p>
+        </section>
+      </div>
+    </ModalFrame>
+  );
+}
+
 function bidProfileDraft(profile: BidProfileRecord | null, user: PortalUser) {
+  const derivedName = splitLegalName(profile?.fullLegalName || user.name || "");
   return {
     bidProfileId: profile?.id || "",
     profileName: profile?.profileName || "",
-    fullLegalName: profile?.fullLegalName || user.name || "",
+    firstName: profile?.firstName || derivedName.firstName,
+    middleName: profile?.middleName || derivedName.middleName,
+    lastName: profile?.lastName || derivedName.lastName,
     contactEmail: profile?.contactEmail || user.email || "",
     phone: profile?.phone || "",
+    dateOfBirth: profile?.dateOfBirth || "",
+    lastFourSsn: profile?.lastFourSsn || "",
     targetSalary: profile?.targetSalary || "",
     visaStatus: profile?.visaStatus || "",
     jobTitles: (profile?.jobTitles || []).join(", "),
+    resumeUrl: profile?.resumeUrl || "",
+    linkedinUrl: profile?.linkedinUrl || "",
+    portfolioUrl: profile?.portfolioUrl || "",
+    race: profile?.race || "",
+    veteranStatus: profile?.veteranStatus || "",
+    disabilityStatus: profile?.disabilityStatus || "",
     assignedBidderIds: profile?.assignedBidderIds || [],
+    notifyAssignedBidders: false,
     extraFieldsText: extraFieldsInput(profile?.extraFields || []),
     notes: profile?.notes || "",
   };
@@ -2959,6 +3199,7 @@ function ClientBidProfilesManager({
     .filter((candidate) => candidate.role === "bidder" && candidate.status === "approved" && candidate.assignedAdminId === user.id)
     .sort((left, right) => left.name.localeCompare(right.name));
   const [editingProfile, setEditingProfile] = useState<BidProfileRecord | null>(null);
+  const [selectedProfile, setSelectedProfile] = useState<BidProfileRecord | null>(null);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [draft, setDraft] = useState(() => bidProfileDraft(null, user));
 
@@ -2986,13 +3227,25 @@ function ClientBidProfilesManager({
       clientId: user.id,
       bidProfileId: draft.bidProfileId,
       profileName: draft.profileName,
-      fullLegalName: draft.fullLegalName,
+      firstName: draft.firstName,
+      middleName: draft.middleName,
+      lastName: draft.lastName,
+      fullLegalName: [draft.firstName, draft.middleName, draft.lastName].filter(Boolean).join(" "),
       contactEmail: draft.contactEmail,
       phone: draft.phone,
+      dateOfBirth: draft.dateOfBirth,
+      lastFourSsn: draft.lastFourSsn,
       targetSalary: draft.targetSalary,
       visaStatus: draft.visaStatus,
       jobTitles: parseListInput(draft.jobTitles),
+      resumeUrl: draft.resumeUrl,
+      linkedinUrl: draft.linkedinUrl,
+      portfolioUrl: draft.portfolioUrl,
+      race: draft.race,
+      veteranStatus: draft.veteranStatus,
+      disabilityStatus: draft.disabilityStatus,
       assignedBidderIds: draft.assignedBidderIds,
+      notifyAssignedBidders: draft.notifyAssignedBidders,
       extraFields: parseExtraFieldsInput(draft.extraFieldsText),
       notes: draft.notes,
     });
@@ -3033,7 +3286,7 @@ function ClientBidProfilesManager({
       <div className="panel-header">
         <div>
           <h2>Bid Profiles</h2>
-          <p>Create reusable client bid profiles for bidders to use when applying.</p>
+          <p>Create reusable client bid profiles. Shared bidders get notified and can view them from contract details.</p>
         </div>
         <div className="actions">
           <span className="badge bidder">{profiles.length} profiles</span>
@@ -3044,15 +3297,23 @@ function ClientBidProfilesManager({
       </div>
 
       {profileModalOpen ? (
-        <ModalFrame title={editingProfile ? "Edit Bid Profile" : "Add Bid Profile"} subtitle="Attach this profile to assigned bidders." onClose={resetDraft}>
+        <ModalFrame title={editingProfile ? "Edit Bid Profile" : "Add Bid Profile"} subtitle="Share this profile with assigned bidders." className="client-detail-modal" onClose={resetDraft}>
       <form className="form-grid" onSubmit={submit}>
         <label className="field">
           <span>Profile name *</span>
           <input value={draft.profileName} onChange={(event) => setDraft({ ...draft, profileName: event.target.value })} placeholder="React frontend profile" required />
         </label>
         <label className="field">
-          <span>Full legal name *</span>
-          <input value={draft.fullLegalName} onChange={(event) => setDraft({ ...draft, fullLegalName: event.target.value })} required />
+          <span>First name *</span>
+          <input value={draft.firstName} onChange={(event) => setDraft({ ...draft, firstName: event.target.value })} required />
+        </label>
+        <label className="field">
+          <span>Middle name</span>
+          <input value={draft.middleName} onChange={(event) => setDraft({ ...draft, middleName: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Last name *</span>
+          <input value={draft.lastName} onChange={(event) => setDraft({ ...draft, lastName: event.target.value })} required />
         </label>
         <label className="field">
           <span>Email *</span>
@@ -3061,6 +3322,20 @@ function ClientBidProfilesManager({
         <label className="field">
           <span>Phone</span>
           <input value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>DOB</span>
+          <input type="date" value={draft.dateOfBirth} onChange={(event) => setDraft({ ...draft, dateOfBirth: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Last 4 SSN</span>
+          <input
+            value={draft.lastFourSsn}
+            onChange={(event) => setDraft({ ...draft, lastFourSsn: event.target.value.replace(/\D/g, "").slice(0, 4) })}
+            inputMode="numeric"
+            maxLength={4}
+            placeholder="1234"
+          />
         </label>
         <label className="field">
           <span>Target salary</span>
@@ -3074,8 +3349,44 @@ function ClientBidProfilesManager({
           <span>Job titles *</span>
           <input value={draft.jobTitles} onChange={(event) => setDraft({ ...draft, jobTitles: event.target.value })} placeholder={jobTitleOptions.slice(0, 4).join(", ")} required />
         </label>
+        <label className="field">
+          <span>Resume link</span>
+          <input value={draft.resumeUrl} onChange={(event) => setDraft({ ...draft, resumeUrl: event.target.value })} placeholder="https://..." />
+        </label>
+        <label className="field">
+          <span>LinkedIn</span>
+          <input value={draft.linkedinUrl} onChange={(event) => setDraft({ ...draft, linkedinUrl: event.target.value })} placeholder="https://linkedin.com/in/..." />
+        </label>
+        <label className="field">
+          <span>Portfolio</span>
+          <input value={draft.portfolioUrl} onChange={(event) => setDraft({ ...draft, portfolioUrl: event.target.value })} placeholder="https://..." />
+        </label>
+        <label className="field">
+          <span>Race</span>
+          <select value={draft.race} onChange={(event) => setDraft({ ...draft, race: event.target.value })}>
+            {raceOptions.map((option) => (
+              <option key={option || "blank"} value={option}>{option || "Not set"}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Veteran status</span>
+          <select value={draft.veteranStatus} onChange={(event) => setDraft({ ...draft, veteranStatus: event.target.value })}>
+            {veteranStatusOptions.map((option) => (
+              <option key={option || "blank"} value={option}>{option || "Not set"}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Disability</span>
+          <select value={draft.disabilityStatus} onChange={(event) => setDraft({ ...draft, disabilityStatus: event.target.value })}>
+            {disabilityStatusOptions.map((option) => (
+              <option key={option || "blank"} value={option}>{option || "Not set"}</option>
+            ))}
+          </select>
+        </label>
         <div className="field full">
-          <span>Attach to bidders</span>
+          <span>Share with bidders</span>
           {attachableBidders.length ? (
             <div className="checkbox-grid compact-checkbox-grid">
               {attachableBidders.map((bidder) => (
@@ -3093,6 +3404,16 @@ function ClientBidProfilesManager({
             <span className="muted">No assigned bidders are available yet.</span>
           )}
         </div>
+        {editingProfile ? (
+          <label className="check-field full">
+            <input
+              type="checkbox"
+              checked={draft.notifyAssignedBidders}
+              onChange={(event) => setDraft({ ...draft, notifyAssignedBidders: event.target.checked })}
+            />
+            <span>Notify shared bidders about this profile update</span>
+          </label>
+        ) : null}
         <label className="field full">
           <span>Additional fields</span>
           <textarea value={draft.extraFieldsText} onChange={(event) => setDraft({ ...draft, extraFieldsText: event.target.value })} placeholder="Portfolio: https://example.com" />
@@ -3119,32 +3440,28 @@ function ClientBidProfilesManager({
         {profiles.map((profile) => {
           const assignedNames = attachedBidderNames(profile);
           return (
-          <article className="profile-card bid-profile-card" key={profile.id}>
-            <div className="person-title">
-              <div>
-                <h3>{profile.profileName}</h3>
-                <span className="table-subtext">{profile.fullLegalName} - {profile.contactEmail}</span>
-                <span className="table-subtext">{assignedNames.length ? `Attached to ${assignedNames.join(", ")}` : "Not attached to bidders"}</span>
-              </div>
-              <ActionMenu
-                items={[
-                  { label: "Edit", onClick: () => editProfile(profile) },
-                  { label: "Delete", danger: true, onClick: () => void deleteProfile(profile) },
-                ]}
-              />
-            </div>
-            <div className="badge-row">
-              {profile.jobTitles.slice(0, 4).map((title) => (
-                <span className="badge" key={title}>{title}</span>
-              ))}
-              {profile.jobTitles.length > 4 ? <span className="badge">+{profile.jobTitles.length - 4}</span> : null}
-            </div>
-            <p>{profile.notes || "No notes added."}</p>
-          </article>
+          <BidProfileCard
+            key={profile.id}
+            profile={profile}
+            assignedNames={assignedNames}
+            onOpen={() => setSelectedProfile(profile)}
+            actions={[
+              { label: "View details", onClick: () => setSelectedProfile(profile) },
+              { label: "Edit", onClick: () => editProfile(profile) },
+              { label: "Delete", danger: true, onClick: () => void deleteProfile(profile) },
+            ]}
+          />
           );
         })}
         {!profiles.length ? <div className="empty-state">No bid profiles yet.</div> : null}
       </div>
+      {selectedProfile ? (
+        <BidProfileDetailModal
+          profile={selectedProfile}
+          assignedNames={attachedBidderNames(selectedProfile)}
+          onClose={() => setSelectedProfile(null)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -3157,6 +3474,7 @@ function ClientDirectoryView({
   onMessageClient: (clientId: string) => void;
 }) {
   const [selectedClient, setSelectedClient] = useState<PortalUser | null>(null);
+  const [selectedBidProfile, setSelectedBidProfile] = useState<BidProfileRecord | null>(null);
   const [filters, setFilters] = useState({
     query: "",
     joinedAfter: "",
@@ -3402,16 +3720,14 @@ function ClientDirectoryView({
                 </div>
                 <div className="bid-profile-grid">
                   {selectedClientBidProfiles.map((profile) => (
-                    <article className="profile-card" key={profile.id}>
-                      <h3>{profile.profileName}</h3>
-                      <p>{profile.fullLegalName} - {profile.contactEmail}</p>
-                      <div className="badge-row">
-                        {profile.jobTitles.map((title) => (
-                          <span className="badge" key={title}>{title}</span>
-                        ))}
-                      </div>
-                      {profile.notes ? <p>{profile.notes}</p> : null}
-                    </article>
+                    <BidProfileCard
+                      key={profile.id}
+                      profile={profile}
+                      assignedNames={(profile.assignedBidderIds || [])
+                        .map((bidderId) => userById(data.users, bidderId)?.name || "")
+                        .filter(Boolean)}
+                      onOpen={() => setSelectedBidProfile(profile)}
+                    />
                   ))}
                 </div>
               </section>
@@ -3467,6 +3783,15 @@ function ClientDirectoryView({
               </section>
             </div>
         </ModalFrame>
+      ) : null}
+      {selectedBidProfile ? (
+        <BidProfileDetailModal
+          profile={selectedBidProfile}
+          assignedNames={(selectedBidProfile.assignedBidderIds || [])
+            .map((bidderId) => userById(data.users, bidderId)?.name || "")
+            .filter(Boolean)}
+          onClose={() => setSelectedBidProfile(null)}
+        />
       ) : null}
     </section>
   );
@@ -4686,6 +5011,8 @@ function ContractDetailModal({
   onClose: () => void;
 }) {
   const connectedClientBalances = currentUser.id === worker?.id ? client?.creditBalances : null;
+  const [selectedBidProfile, setSelectedBidProfile] = useState<BidProfileRecord | null>(null);
+  const assignedProfileNames = worker?.name ? [worker.name] : [];
 
   return (
     <ModalFrame title="Contract Details" subtitle={contract.title} onClose={onClose}>
@@ -4727,16 +5054,12 @@ function ContractDetailModal({
             <h3>Assigned Bid Profile</h3>
             <div className="bid-profile-mini-list">
               {assignedBidProfiles.map((profile) => (
-                <article className="mini-contract-row" key={profile.id}>
-                  <strong>{profile.profileName}</strong>
-                  <span>{profile.fullLegalName} - {profile.contactEmail}</span>
-                  <span>{profile.phone || "No phone"} - {profile.targetSalary || "No target salary"} - {profile.visaStatus || "No visa status"}</span>
-                  <span>{profile.jobTitles.join(", ") || "No job titles"}</span>
-                  {profile.extraFields?.length ? (
-                    <span>{profile.extraFields.map((field) => `${field.label}: ${field.value}`).join(" - ")}</span>
-                  ) : null}
-                  {profile.notes ? <span>{profile.notes}</span> : null}
-                </article>
+                <BidProfileCard
+                  key={profile.id}
+                  profile={profile}
+                  assignedNames={assignedProfileNames}
+                  onOpen={() => setSelectedBidProfile(profile)}
+                />
               ))}
             </div>
           </section>
@@ -4765,6 +5088,13 @@ function ContractDetailModal({
           )) : <span className="muted">No actions available.</span>}
         </div>
       </div>
+      {selectedBidProfile ? (
+        <BidProfileDetailModal
+          profile={selectedBidProfile}
+          assignedNames={assignedProfileNames}
+          onClose={() => setSelectedBidProfile(null)}
+        />
+      ) : null}
     </ModalFrame>
   );
 }
@@ -8264,8 +8594,6 @@ function SupportCenter({
           {activeMessages.map((message) => {
             const isMine = message.userId === currentUser.id;
             const author = userById([currentUser, ...data.users, ...supportContacts], message.userId);
-            const counterpartForTime = isMine ? selectedSupportUser : author;
-            const counterpartTimeZone = counterpartForTime?.profileTimeZone || message.authorTimeZone || adminTimeZone;
             return (
               <div className={`message-row ${isMine ? "mine" : ""}`} key={message.id}>
                 <div className={`message ${isMine ? "mine" : ""} ${message.deletedAt ? "deleted" : ""}`}>
@@ -8278,8 +8606,7 @@ function SupportCenter({
                   {message.deletedAt ? <p className="muted">Message deleted</p> : <p>{message.body}</p>}
                   <ChatAttachments attachments={message.attachments || []} />
                   <div className="message-footer">
-                    <span>Your time {dateTimeInZone(message.createdAt, browserTimeZone())}</span>
-                    <span>{memberTimeLabel(counterpartForTime)} {dateTimeInZone(message.createdAt, counterpartTimeZone)}</span>
+                    <span className="message-time">{messageTimeInZone(message.createdAt, browserTimeZone())}</span>
                   </div>
                 </div>
               </div>
@@ -8789,60 +9116,14 @@ function ChatView({
 
   return (
     <section className="panel chat-panel">
-      <div className="chat-toolbar">
-        <div className="telegram-chat-title">
-          {activeRecipient ? (
-            <button
-              className="telegram-avatar profile-avatar-button"
-              type="button"
-              aria-label={`Show ${userDisplayName(activeRecipient)} profile`}
-              aria-expanded={profilePanelOpen}
-              onClick={() => setProfilePanelOpen((open) => !open)}
-            >
-              {activeConversation?.avatar || "IN"}
-            </button>
-          ) : (
-            <div className="telegram-avatar">{activeConversation?.avatar || "IN"}</div>
-          )}
-          {activeRecipient ? (
-            <button
-              className="chat-title-button"
-              type="button"
-              aria-label={`Show ${userDisplayName(activeRecipient)} profile`}
-              onClick={() => setProfilePanelOpen((open) => !open)}
-            >
-              <h2>{activeConversation?.title || "Inbox"}</h2>
-              <p>{activeConversation ? `${activeConversation.subtitle} - ${activeMessages.length} messages` : ""}</p>
-            </button>
-          ) : (
-            <div>
-              <h2>{activeConversation?.title || "Inbox"}</h2>
-              <p>
-                {activeConversation
-                  ? `${activeConversation.subtitle} - ${activeMessages.length} messages`
-                  : "Choose an approved member to start a conversation."}
-              </p>
-            </div>
-          )}
-        </div>
-        <div className="actions">
-          {isSuperAdminRole(currentUser.role) && activeConversation ? (
-            <ActionMenu
-              items={[
-                {
-                  label: "Delete chat",
-                  danger: true,
-                  disabled: busy,
-                  onClick: () => void deleteConversationById(activeConversationId),
-                },
-              ]}
-            />
-          ) : null}
-        </div>
-      </div>
-
       <div className={`inbox-layout ${profilePanelOpen && activeRecipient ? "profile-open" : ""}`}>
         <div className="conversation-list" aria-label="Inbox conversations">
+          <div className="conversation-list-header">
+            <div>
+              <h2>Inbox</h2>
+              <p>{conversations.length} chats</p>
+            </div>
+          </div>
           {conversations.map((conversation) => (
             <div
               className={`conversation-entry ${activeConversation?.id === conversation.id ? "active" : ""}`}
@@ -8879,7 +9160,60 @@ function ChatView({
           ) : null}
         </div>
 
-        <div className="messages">
+        <div className="chat-main-pane">
+          <div className="chat-toolbar">
+            <div className="telegram-chat-title">
+              {activeRecipient ? (
+                <button
+                  className="telegram-avatar profile-avatar-button"
+                  type="button"
+                  aria-label={`Show ${userDisplayName(activeRecipient)} profile`}
+                  aria-expanded={profilePanelOpen}
+                  onClick={() => setProfilePanelOpen((open) => !open)}
+                >
+                  {activeConversation?.avatar || "IN"}
+                </button>
+              ) : (
+                <div className="telegram-avatar">{activeConversation?.avatar || "IN"}</div>
+              )}
+              {activeRecipient ? (
+                <button
+                  className="chat-title-button"
+                  type="button"
+                  aria-label={`Show ${userDisplayName(activeRecipient)} profile`}
+                  onClick={() => setProfilePanelOpen((open) => !open)}
+                >
+                  <h2>{activeConversation?.title || "Inbox"}</h2>
+                  <p>{activeConversation ? `${activeConversation.subtitle} - ${activeMessages.length} messages` : ""}</p>
+                </button>
+              ) : (
+                <div>
+                  <h2>{activeConversation?.title || "Inbox"}</h2>
+                  <p>
+                    {activeConversation
+                      ? `${activeConversation.subtitle} - ${activeMessages.length} messages`
+                      : "Choose an approved member to start a conversation."}
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="actions">
+              {isSuperAdminRole(currentUser.role) && activeConversation ? (
+                <ActionMenu
+                  items={[
+                    {
+                      label: "Delete chat",
+                      danger: true,
+                      disabled: busy,
+                      onClick: () => void deleteConversationById(activeConversationId),
+                    },
+                  ]}
+                />
+              ) : null}
+            </div>
+          </div>
+
+          <div className="messages">
           {activeConversation?.monitored && activeParticipants.length ? (
             <div className="chat-context-card">
               <div className="person-title">
@@ -8910,14 +9244,6 @@ function ChatView({
             const messageAttachments = message.attachments || [];
             const menuItems: ActionMenuItem[] = [];
             const authorUser = membersById.get(message.userId);
-            const counterpartForTime =
-              activeRecipient ||
-              (message.userId === currentUser.id ? membersById.get(message.recipientId || "") : authorUser) ||
-              null;
-            const counterpartTimeZone =
-              counterpartForTime?.profileTimeZone ||
-              (message.userId !== currentUser.id ? message.authorTimeZone : "") ||
-              userTimeZone;
 
             if (canEdit) {
               menuItems.push({ label: "Edit", onClick: () => startEditing(message) });
@@ -8973,8 +9299,7 @@ function ChatView({
                   )}
 
                   <div className="message-footer">
-                    <span>Your time {dateTimeInZone(message.createdAt, userTimeZone)}</span>
-                    <span>{memberTimeLabel(counterpartForTime)} {dateTimeInZone(message.createdAt, counterpartTimeZone)}</span>
+                    <span className="message-time">{messageTimeInZone(message.createdAt, userTimeZone)}</span>
                     {isMine ? (
                       <span
                         className={`message-check ${message.readAt ? "read" : "sent"}`}
@@ -9055,6 +9380,7 @@ function ChatView({
               </span>
             </div>
           )}
+        </div>
         </div>
 
         {profilePanelOpen && activeRecipient ? (

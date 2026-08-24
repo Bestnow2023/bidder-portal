@@ -66,7 +66,12 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Create Post/);
   assert.match(portalApp, /Publish post/);
   assert.match(portalApp, /Edit Bid Profile/);
-  assert.match(portalApp, /Attach to bidders/);
+  assert.match(portalApp, /Share with bidders/);
+  assert.match(portalApp, /BidProfileDetailModal/);
+  assert.match(portalApp, /First name/);
+  assert.match(portalApp, /Last 4 SSN/);
+  assert.match(portalApp, /Resume link/);
+  assert.match(portalApp, /Veteran status/);
   assert.match(portalApp, /Start Contract/);
   assert.match(portalApp, /Contract Management/);
   assert.match(portalApp, /Contract ID/);
@@ -121,8 +126,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Accept contract/);
   assert.match(portalApp, /profilePanelOpen/);
   assert.match(portalApp, /chat-side-panel/);
-  assert.match(portalApp, /Your time/);
-  assert.match(portalApp, /memberTimeLabel/);
+  assert.match(portalApp, /messageTimeInZone/);
+  assert.match(portalApp, /message-time/);
   assert.match(portalApp, /Sent/);
   assert.match(portalApp, /Read/);
   assert.match(portalApp, /markChatConversationRead/);
@@ -238,7 +243,15 @@ test("declares the requested frontend records", async () => {
     "Post Credit",
     "Create Post",
     "Edit Bid Profile",
-    "Attach to bidders",
+    "Share with bidders",
+    "Client bid profile for job bidding.",
+    "Notify shared bidders about this profile update",
+    "Optional EEO details",
+    "Last 4 SSN",
+    "Resume link",
+    "LinkedIn",
+    "Veteran status",
+    "Disability",
     "Available Posts",
     "My Posts",
     "Contracts",
@@ -328,8 +341,8 @@ test("declares the requested frontend records", async () => {
     "Save post",
     "Add details or screenshots",
     "Assigned Bid Profile",
-    "Your time ",
-    "Member time",
+    "messageTimeInZone",
+    "message-time",
     "Mark Payment Completed",
     "Accept contract",
     "Sent",
@@ -453,9 +466,11 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /chat-side-panel/);
   assert.match(portalApp, /profilePanelOpen/);
   assert.match(portalApp, /timeZoneDisplay/);
-  assert.match(portalApp, /memberTimeLabel/);
+  assert.match(portalApp, /messageTimeInZone/);
   assert.match(portalApp, /requestedPostId/);
   assert.match(portalApp, /conversation-list/);
+  assert.match(portalApp, /conversation-list-header/);
+  assert.match(portalApp, /chat-main-pane/);
   assert.match(portalApp, /conversation-entry/);
   assert.match(portalApp, /conversation-badge/);
   assert.match(portalApp, /readReceipts/);
@@ -501,10 +516,12 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /sidebar-logo/);
   assert.match(portalApp, /telegram-chat-title/);
   assert.match(portalApp, /composer-shell/);
+  assert.match(portalApp, /chat-content/);
   assert.match(portalApp, /message-row/);
   assert.match(portalApp, /message-check/);
   assert.match(portalApp, /chat-title-button/);
-  assert.match(globals, /data:image\/svg\+xml/);
+  assert.match(globals, /\.chat-panel\.panel/);
+  assert.match(globals, /\.content\.chat-content/);
   assert.match(globals, /\.analytics-bars/);
   assert.match(globals, /\.dispute-update-row/);
   assert.match(portalApp, /verificationPendingEmail/);
@@ -516,7 +533,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /Cancel/);
   assert.match(portalApp, /audio controls/);
   assert.match(portalApp, /img src/);
-  assert.doesNotMatch(portalApp, /Group Chat|Bidder Group|group messages|Client time |Enable notifications|Notifications on|Admin time /);
+  assert.doesNotMatch(portalApp, /Group Chat|Bidder Group|group messages|Client time |Your time|Member time|Enable notifications|Notifications on|Admin time /);
   assert.doesNotMatch(portalApp, /Visible Profiles|ProfileCardGrid/);
   assert.match(envExample, /NEXT_PUBLIC_API_BASE_URL/);
   assert.match(envExample, /NEXT_PUBLIC_PORTAL_MODE/);
