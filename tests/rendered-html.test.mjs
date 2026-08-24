@@ -317,8 +317,12 @@ test("declares the requested frontend records", async () => {
     "Contract Management",
     "Contract ID",
     "Contract Details",
+    "End Contract",
+    "End Summary",
     "Edit Contract",
     "Save contract",
+    "How did the work go?",
+    "Keep contract active",
     "Next payday",
     "Set Next Payday",
     "Save next payday",
@@ -485,6 +489,11 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /assignedBidderIds/);
   assert.match(portalApp, /profileModalOpen/);
   assert.match(portalApp, /contractNextPaymentDateDefault/);
+  assert.match(portalApp, /contractHasReleasedPayment/);
+  assert.match(portalApp, /ContractEndModal/);
+  assert.match(portalApp, /endFeedback/);
+  assert.match(portalApp, /endReason/);
+  assert.match(portalApp, /paidBeforeEnding/);
   assert.match(portalApp, /ContractEditModal/);
   assert.match(portalApp, /canEditContract/);
   assert.match(portalApp, /canSetContractPayday/);

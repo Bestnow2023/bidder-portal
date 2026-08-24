@@ -4454,6 +4454,16 @@ function collaborationSummariesForUser(user: PortalUser, data: PortalData) {
     .sort((left, right) => right.contract.updatedAt.localeCompare(left.contract.updatedAt));
 }
 
+function contractHasReleasedPayment(contract: ContractRecord, payments: PaymentRecord[]) {
+  return payments.some(
+    (payment) =>
+      isCreditSpentPayment(payment) &&
+      payment.clientId === contract.clientId &&
+      payment.userId === contract.workerId &&
+      payment.amount > 0,
+  );
+}
+
 function CollaborationSummaryList({
   user,
   data,
@@ -5331,6 +5341,7 @@ function ContractsView({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedContract, setSelectedContract] = useState<ContractRecord | null>(null);
   const [editingContract, setEditingContract] = useState<ContractRecord | null>(null);
+  const [endingContract, setEndingContract] = useState<ContractRecord | null>(null);
   const [paydayContract, setPaydayContract] = useState<ContractRecord | null>(null);
   const [paydayDate, setPaydayDate] = useState("");
   const [contractQuery, setContractQuery] = useState("");
@@ -5455,11 +5466,19 @@ function ContractsView({
     return canSetContractPayday(contract);
   }
 
-  async function updateContract(contract: ContractRecord, status: "active" | "rejected" | "ended") {
-    const nextData = await onAction("updateContractStatus", { contractId: contract.id, status });
+  async function updateContract(contract: ContractRecord, status: "active" | "rejected" | "ended", payload: Record<string, unknown> = {}) {
+    const nextData = await onAction("updateContractStatus", { contractId: contract.id, status, ...payload });
     if (nextData) {
       setSelectedContract(null);
+      if (status === "ended") {
+        setEndingContract(null);
+      }
     }
+  }
+
+  function openEndContractModal(contract: ContractRecord) {
+    setSelectedContract(null);
+    setEndingContract(contract);
   }
 
   function contractActionItems(contract: ContractRecord): ActionMenuItem[] {
@@ -5489,7 +5508,7 @@ function ContractsView({
         ? [{ label: "Reject", disabled: busy, onClick: () => void updateContract(contract, "rejected") }]
         : []),
       ...(canEndContract(contract)
-        ? [{ label: "End contract", disabled: busy, onClick: () => void updateContract(contract, "ended") }]
+        ? [{ label: "End contract", disabled: busy, onClick: () => openEndContractModal(contract) }]
         : []),
     ];
   }
@@ -5657,12 +5676,24 @@ function ContractsView({
           client={userById(data.users, selectedContract.clientId)}
           worker={userById(data.users, selectedContract.workerId)}
           requester={userById(data.users, selectedContract.requestedByUserId)}
+          endedBy={userById(data.users, selectedContract.endedByUserId || "") || (currentUser.id === selectedContract.endedByUserId ? currentUser : null)}
           currentUser={currentUser}
           assignedBidProfiles={(data.bidProfiles || []).filter(
             (profile) => profile.clientId === selectedContract.clientId && (profile.assignedBidderIds || []).includes(selectedContract.workerId)
           )}
           actions={contractActionItems(selectedContract)}
           onClose={() => setSelectedContract(null)}
+        />
+      ) : null}
+      {endingContract ? (
+        <ContractEndModal
+          contract={endingContract}
+          client={userById(data.users, endingContract.clientId)}
+          worker={userById(data.users, endingContract.workerId)}
+          paidBeforeEnding={contractHasReleasedPayment(endingContract, data.payments || [])}
+          busy={busy}
+          onClose={() => setEndingContract(null)}
+          onSubmit={(payload) => updateContract(endingContract, "ended", payload)}
         />
       ) : null}
       {showCreateModal ? (
@@ -5773,11 +5804,103 @@ function ContractsView({
   );
 }
 
+function ContractEndModal({
+  contract,
+  client,
+  worker,
+  paidBeforeEnding,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  contract: ContractRecord;
+  client?: PortalUser | null;
+  worker?: PortalUser | null;
+  paidBeforeEnding: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState({
+    endType: "completed",
+    endFeedback: "",
+    endReason: "",
+  });
+  const requiredNote = paidBeforeEnding ? draft.endFeedback.trim() : draft.endReason.trim();
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await onSubmit({
+      endType: draft.endType,
+      endFeedback: paidBeforeEnding ? draft.endFeedback : "",
+      endReason: paidBeforeEnding ? "" : draft.endReason,
+    });
+  }
+
+  return (
+    <ModalFrame
+      title="End Contract"
+      subtitle={`${contract.title} between ${client?.name || "Client"} and ${worker?.name || "Bidder"}`}
+      onClose={onClose}
+    >
+      <form className="form-grid" onSubmit={submit}>
+        <div className="status-strip compact full">
+          {paidBeforeEnding
+            ? "A payment was released for this contract pair. Add a short work-feedback note before ending."
+            : "No released payment was found for this contract pair. Select the end result and add the reason."}
+        </div>
+        <label className="field">
+          <span>End result</span>
+          <select value={draft.endType} onChange={(event) => setDraft({ ...draft, endType: event.target.value })}>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Payment state</span>
+          <input value={paidBeforeEnding ? "Paid before ending" : "Not paid before ending"} readOnly />
+        </label>
+        {paidBeforeEnding ? (
+          <label className="field full">
+            <span>How did the work go?</span>
+            <textarea
+              value={draft.endFeedback}
+              onChange={(event) => setDraft({ ...draft, endFeedback: event.target.value })}
+              placeholder="Summarize how the work went. This is saved on the contract only."
+              required
+            />
+          </label>
+        ) : (
+          <label className="field full">
+            <span>Reason</span>
+            <textarea
+              value={draft.endReason}
+              onChange={(event) => setDraft({ ...draft, endReason: event.target.value })}
+              placeholder="Explain why this unpaid contract is being completed or cancelled."
+              required
+            />
+          </label>
+        )}
+        <p className="muted full">This note does not rate the bidder or client and does not change profile stars.</p>
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy || !requiredNote}>
+            End contract
+          </button>
+          <button className="ghost-button" type="button" onClick={onClose}>
+            Keep contract active
+          </button>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}
+
 function ContractDetailModal({
   contract,
   client,
   worker,
   requester,
+  endedBy,
   currentUser,
   assignedBidProfiles,
   actions,
@@ -5787,6 +5910,7 @@ function ContractDetailModal({
   client?: PortalUser | null;
   worker?: PortalUser | null;
   requester?: PortalUser | null;
+  endedBy?: PortalUser | null;
   currentUser: PortalUser;
   assignedBidProfiles: BidProfileRecord[];
   actions: ActionMenuItem[];
@@ -5831,6 +5955,19 @@ function ContractDetailModal({
           <h3>Criteria</h3>
           <p>{contract.criteria || "No criteria added."}</p>
         </section>
+        {contract.status === "ended" ? (
+          <section className="detail-section">
+            <h3>End Summary</h3>
+            <div className="mini-metrics">
+              <span><strong>{titleCase(contract.endType || "completed")}</strong> result</span>
+              <span><strong>{contract.paidBeforeEnding ? "Paid" : "Not paid"}</strong> payment state</span>
+              <span><strong>{endedBy?.name || "Unknown"}</strong> ended by</span>
+            </div>
+            {contract.endFeedback ? <p><strong>Work feedback:</strong> {contract.endFeedback}</p> : null}
+            {contract.endReason ? <p><strong>Reason:</strong> {contract.endReason}</p> : null}
+            <p className="muted">End notes are saved on this contract only and do not affect bidder or client ratings.</p>
+          </section>
+        ) : null}
         {assignedBidProfiles.length ? (
           <section className="detail-section">
             <h3>Assigned Bid Profile</h3>
@@ -10050,6 +10187,15 @@ function ChatContractCard({
         <span><strong>{shortDate(contract.nextPaymentDate)}</strong> next payday</span>
         <span><strong>{contractTimelineLabel(contract)}</strong> timeline</span>
       </div>
+      {contract.status === "ended" ? (
+        <div className="status-strip compact">
+          <strong>{titleCase(contract.endType || "completed")}</strong>
+          {" - "}
+          {contract.paidBeforeEnding ? "Paid before ending" : "Not paid before ending"}
+          {contract.endFeedback ? ` - ${contract.endFeedback}` : ""}
+          {contract.endReason ? ` - ${contract.endReason}` : ""}
+        </div>
+      ) : null}
       {canRespond ? (
         <div className="actions">
           <button className="primary-button compact-button" type="button" disabled={busy} onClick={() => void updateStatus("active")}>
