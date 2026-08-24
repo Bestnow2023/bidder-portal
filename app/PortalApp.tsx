@@ -298,6 +298,18 @@ function MemberAvatar({ user, size = "md" }: { user?: PortalUser | null; size?: 
   );
 }
 
+function TableMemberCell({ user, subtitle }: { user: PortalUser; subtitle?: string }) {
+  return (
+    <div className="table-member">
+      <MemberAvatar user={user} size="sm" />
+      <span>
+        <strong>{userDisplayName(user)}</strong>
+        <span className="table-subtext">{subtitle || user.email}</span>
+      </span>
+    </div>
+  );
+}
+
 function payoutMethodLabel(method: PaymentMethod) {
   const methodParts = method.method.split(/\s+/).filter(Boolean);
   const currency = method.currency || methodParts[0] || method.method;
@@ -4077,8 +4089,7 @@ function ClientDirectoryView({
               return (
                 <tr className="clickable-row" key={client.id} onClick={() => setSelectedClient(client)}>
                   <td>
-                    <strong>{client.name}</strong>
-                    <span className="table-subtext">{client.profileTitle || client.email}</span>
+                    <TableMemberCell user={client} subtitle={client.profileTitle || client.email} />
                   </td>
                   <td>{shortDate(client.createdAt.slice(0, 10))}</td>
                   <td>{money(stats?.moneyPaid || 0)}</td>
@@ -4304,8 +4315,7 @@ function BiddersDirectoryView({
               return (
                 <tr className="clickable-row" key={bidder.id} onClick={() => setSelectedBidder(bidder)}>
                   <td>
-                    <strong>{bidder.name}</strong>
-                    <span className="table-subtext">{bidder.email}</span>
+                    <TableMemberCell user={bidder} subtitle={bidder.email} />
                   </td>
                   <td><span className={`badge ${status.className}`}>{status.label}</span></td>
                   <td>{bidder.bidderStats?.totalApplied || 0}</td>
@@ -6221,6 +6231,7 @@ function DisputesView({
   const [resolutionDraft, setResolutionDraft] = useState({
     status: "reviewing" as DisputeStatus,
     resolution: "",
+    winnerUserId: "",
   });
   const [disputeQuery, setDisputeQuery] = useState("");
   const [disputeClientFilter, setDisputeClientFilter] = useState("");
@@ -6249,6 +6260,7 @@ function DisputesView({
       dispute.body,
       dispute.status,
       dispute.resolution,
+      userById(data.users, dispute.winnerUserId || "")?.name,
       client?.name,
       client?.email,
       displayUserId(client),
@@ -6288,7 +6300,11 @@ function DisputesView({
   function startResolve(dispute: DisputeRecord) {
     setSelectedDispute(null);
     setEditingDispute(dispute);
-    setResolutionDraft({ status: dispute.status === "open" ? "reviewing" : dispute.status, resolution: dispute.resolution || "" });
+    setResolutionDraft({
+      status: dispute.status === "open" ? "reviewing" : dispute.status,
+      resolution: dispute.resolution || "",
+      winnerUserId: dispute.winnerUserId || "",
+    });
   }
 
   async function submitResolution(event: FormEvent) {
@@ -6301,6 +6317,7 @@ function DisputesView({
       disputeId: editingDispute.id,
       status: resolutionDraft.status,
       resolution: resolutionDraft.resolution,
+      winnerUserId: resolutionDraft.winnerUserId,
     });
     if (nextData) {
       setEditingDispute(null);
@@ -6417,6 +6434,7 @@ function DisputesView({
                 <th>Contract</th>
                 <th>Payment</th>
                 <th>Status</th>
+                <th>Winner</th>
                 <th>Updated</th>
               </tr>
             </thead>
@@ -6424,6 +6442,7 @@ function DisputesView({
               {filteredDisputes.map((dispute) => {
                 const client = userById(data.users, dispute.clientId);
                 const target = userById(data.users, dispute.targetUserId);
+                const winner = userById(data.users, dispute.winnerUserId || "");
                 const contract = data.contracts.find((item) => item.id === dispute.contractId);
                 const payment = data.payments.find((item) => item.id === dispute.paymentId);
                 return (
@@ -6447,6 +6466,7 @@ function DisputesView({
                     <td>{contract?.title || "-"}</td>
                     <td>{payment ? `${money(payment.amount)} - ${shortDate(payment.scheduledDate)}` : "-"}</td>
                     <td><span className={`badge ${disputeStatusClass(dispute.status)}`}>{titleCase(dispute.status)}</span></td>
+                    <td>{winner?.name || "-"}</td>
                     <td>{dateTime(dispute.updatedAt)}</td>
                   </tr>
                 );
@@ -6463,6 +6483,7 @@ function DisputesView({
           dispute={selectedDispute}
           client={userById(data.users, selectedDispute.clientId)}
           target={userById(data.users, selectedDispute.targetUserId)}
+          winner={userById(data.users, selectedDispute.winnerUserId || "")}
           contract={data.contracts.find((item) => item.id === selectedDispute.contractId)}
           payment={data.payments.find((item) => item.id === selectedDispute.paymentId)}
           busy={busy}
@@ -6530,11 +6551,36 @@ function DisputesView({
           <form className="form-grid" onSubmit={submitResolution}>
             <label className="field">
               <span>Status</span>
-              <select value={resolutionDraft.status} onChange={(event) => setResolutionDraft({ ...resolutionDraft, status: event.target.value as DisputeStatus })}>
+              <select
+                value={resolutionDraft.status}
+                onChange={(event) => {
+                  const status = event.target.value as DisputeStatus;
+                  setResolutionDraft({
+                    ...resolutionDraft,
+                    status,
+                    winnerUserId: status === "resolved" ? resolutionDraft.winnerUserId : "",
+                  });
+                }}
+              >
                 <option value="open">Open</option>
                 <option value="reviewing">Reviewing</option>
                 <option value="resolved">Resolved</option>
                 <option value="closed">Closed</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Winner</span>
+              <select
+                value={resolutionDraft.winnerUserId}
+                disabled={resolutionDraft.status !== "resolved"}
+                required={resolutionDraft.status === "resolved"}
+                onChange={(event) => setResolutionDraft({ ...resolutionDraft, winnerUserId: event.target.value })}
+              >
+                <option value="">{resolutionDraft.status === "resolved" ? "Select winner" : "Only required when resolved"}</option>
+                <option value={editingDispute.clientId}>Client - {userById(data.users, editingDispute.clientId)?.name || "Client"}</option>
+                {editingDispute.targetUserId ? (
+                  <option value={editingDispute.targetUserId}>Bidder - {userById(data.users, editingDispute.targetUserId)?.name || "Bidder"}</option>
+                ) : null}
               </select>
             </label>
             <label className="field full">
@@ -6542,7 +6588,7 @@ function DisputesView({
               <textarea value={resolutionDraft.resolution} onChange={(event) => setResolutionDraft({ ...resolutionDraft, resolution: event.target.value })} />
             </label>
             <div className="actions full">
-              <button className="primary-button" type="submit" disabled={busy}>
+              <button className="primary-button" type="submit" disabled={busy || (resolutionDraft.status === "resolved" && !resolutionDraft.winnerUserId)}>
                 Save resolution
               </button>
             </div>
@@ -6557,6 +6603,7 @@ function DisputeDetailModal({
   dispute,
   client,
   target,
+  winner,
   contract,
   payment,
   busy,
@@ -6568,6 +6615,7 @@ function DisputeDetailModal({
   dispute: DisputeRecord;
   client?: PortalUser | null;
   target?: PortalUser | null;
+  winner?: PortalUser | null;
   contract?: ContractRecord | null;
   payment?: PaymentRecord | null;
   busy: boolean;
@@ -6635,6 +6683,10 @@ function DisputeDetailModal({
             <strong>{titleCase(dispute.status)}</strong>
           </div>
           <div className="metric">
+            <span>Winner</span>
+            <strong>{winner?.name || (dispute.status === "resolved" ? "Not selected" : "-")}</strong>
+          </div>
+          <div className="metric">
             <span>Updated</span>
             <strong>{dateTime(dispute.updatedAt)}</strong>
           </div>
@@ -6694,6 +6746,7 @@ function DisputeDetailModal({
         )}
         <section className="detail-section">
           <h3>Resolution</h3>
+          {dispute.status === "resolved" ? <p><strong>Winner:</strong> {winner?.name || "Not selected"}</p> : null}
           <p>{dispute.resolution || "No resolution note yet."}</p>
         </section>
         <div className="actions">
@@ -6856,8 +6909,7 @@ function PeopleView({
             {visibleUsers.map((user) => (
               <tr key={user.id}>
                 <td>
-                  <strong>{user.name}</strong>
-                  <span className="table-subtext">{user.email}</span>
+                  <TableMemberCell user={user} subtitle={user.email} />
                 </td>
                 <td><span className="table-subtext">{displayUserId(user)}</span></td>
                 <td><span className={`badge ${user.role}`}>{roleLabel(user.role)}</span></td>

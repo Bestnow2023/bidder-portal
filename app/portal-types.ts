@@ -167,6 +167,7 @@ export type DisputeRecord = {
   body: string;
   status: DisputeStatus;
   resolution: string;
+  winnerUserId?: string;
   updates?: DisputeUpdate[];
   createdAt: string;
   updatedAt: string;

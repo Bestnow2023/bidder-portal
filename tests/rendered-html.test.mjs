@@ -255,6 +255,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Search disputes/);
   assert.match(portalApp, /No disputes match these filters/);
   assert.match(portalApp, /disputes shown/);
+  assert.match(portalApp, /winnerUserId/);
+  assert.match(portalApp, /Select winner/);
+  assert.match(portalApp, /TableMemberCell/);
   assert.match(portalApp, /Delete chat/);
   assert.match(portalApp, /addDisputeUpdate/);
   assert.match(portalApp, /Add details or screenshots/);

@@ -1012,6 +1012,19 @@ button:disabled {
   overflow-x: auto;
 }
 
+.table-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.table-member > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
