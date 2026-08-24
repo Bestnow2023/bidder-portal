@@ -223,6 +223,45 @@ function money(value: number) {
   }).format(value || 0);
 }
 
+function ratingForUser(user?: PortalUser | null) {
+  if (!user) {
+    return 0;
+  }
+
+  if (isClientRole(user.role)) {
+    return Number(user.clientStats?.bidderRating ?? user.clientRating ?? 0) || 0;
+  }
+
+  return Number(user.bidderRating ?? user.clientRating ?? 0) || 0;
+}
+
+function RatingStars({ value }: { value: number }) {
+  const normalized = Math.max(0, Math.min(5, Number(value) || 0));
+  return (
+    <span className="rating-stars" aria-label={`${normalized.toFixed(1)} out of 5`}>
+      <span className="star-track" aria-hidden="true">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <span key={index}>{index + 1 <= Math.round(normalized) ? "\u2605" : "\u2606"}</span>
+        ))}
+      </span>
+      <strong>{normalized.toFixed(1)}</strong>
+    </span>
+  );
+}
+
+function MemberAvatar({ user, size = "md" }: { user?: PortalUser | null; size?: "sm" | "md" | "lg" }) {
+  return (
+    <span className={`member-avatar ${size}`}>
+      {user?.profileImageDataUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={user.profileImageDataUrl} alt={userDisplayName(user)} />
+      ) : (
+        <span>{initialsForName(userDisplayName(user))}</span>
+      )}
+    </span>
+  );
+}
+
 function payoutMethodLabel(method: PaymentMethod) {
   const methodParts = method.method.split(/\s+/).filter(Boolean);
   const currency = method.currency || methodParts[0] || method.method;
@@ -1389,6 +1428,7 @@ export default function PortalApp() {
   });
   const [loginName, setLoginName] = useState("");
   const [loginPassword, setLoginPassword] = useState(isLiveMode ? "" : demoPassword);
+  const [rememberMe, setRememberMe] = useState(false);
   const [signupRole, setSignupRole] = useState<Role>("bidder");
   const [resetToken, setResetToken] = useState("");
   const [authNotice, setAuthNotice] = useState("");
@@ -1816,7 +1856,11 @@ export default function PortalApp() {
       return;
     }
 
-    await postAction(authMode, { name: loginName, role: authMode === "signUp" ? signupRole : undefined });
+    await postAction(authMode, {
+      name: loginName,
+      role: authMode === "signUp" ? signupRole : undefined,
+      rememberMe: authMode === "signIn" ? rememberMe : undefined,
+    });
   }
 
   function switchAuthMode(nextAuthMode: AuthMode) {
@@ -1970,16 +2014,26 @@ export default function PortalApp() {
                   required
                 />
               </label>
+              {authMode === "signIn" ? (
+                <label className="check-field full">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(event) => setRememberMe(event.target.checked)}
+                  />
+                  <span>Remember me for 5 days</span>
+                </label>
+              ) : null}
               {authMode === "signUp" || !isLiveMode ? (
                 <label className="field full">
-                <span>Name</span>
-                <input
-                  value={loginName}
-                  onChange={(event) => setLoginName(event.target.value)}
-                  placeholder={authMode === "signUp" ? "Your name" : "Optional display name"}
-                  required={authMode === "signUp"}
-                />
-              </label>
+                  <span>Name</span>
+                  <input
+                    value={loginName}
+                    onChange={(event) => setLoginName(event.target.value)}
+                    placeholder={authMode === "signUp" ? "Your name" : "Optional display name"}
+                    required={authMode === "signUp"}
+                  />
+                </label>
               ) : null}
               {authMode === "signUp" ? (
                 <label className="field full">
@@ -2658,6 +2712,7 @@ function ProfileView({
     country: user.country || user.profileLocation || "",
     profileTitle: user.profileTitle || "",
     profileBio: user.profileBio || "",
+    profileImageDataUrl: user.profileImageDataUrl || "",
     profileSkills: profileSkillsText(user),
     profileLanguages: profileLanguagesText(user),
     profileLocation: user.profileLocation || "",
@@ -2692,6 +2747,23 @@ function ProfileView({
           : [...current.clientPreferences, preference],
       };
     });
+  }
+
+  async function handleProfileImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setAccountError("");
+    try {
+      const profileImageDataUrl = await resizeProfileImage(file);
+      setDraft((current) => ({ ...current, profileImageDataUrl }));
+    } catch (imageError) {
+      setAccountError(imageError instanceof Error ? imageError.message : "Profile image could not be saved.");
+    } finally {
+      event.target.value = "";
+    }
   }
 
   async function submit(event: FormEvent) {
@@ -2754,6 +2826,24 @@ function ProfileView({
         </div>
 
         <form className="form-grid" onSubmit={submit}>
+          <div className="profile-image-field full">
+            <MemberAvatar user={{ ...user, profileImageDataUrl: draft.profileImageDataUrl }} size="lg" />
+            <div>
+              <strong>Profile image</strong>
+              <p>Shown beside your inbox messages and profile cards. The image is resized before saving.</p>
+              <div className="actions compact-actions">
+                <label className="ghost-button compact-button">
+                  Upload image
+                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleProfileImageChange} hidden />
+                </label>
+                {draft.profileImageDataUrl ? (
+                  <button className="ghost-button compact-button" type="button" onClick={() => setDraft({ ...draft, profileImageDataUrl: "" })}>
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
           <label className="field">
             <span>Name *</span>
             <input
@@ -3615,7 +3705,7 @@ function ClientDirectoryView({
                   </td>
                   <td>{shortDate(client.createdAt.slice(0, 10))}</td>
                   <td>{money(stats?.moneyPaid || 0)}</td>
-                  <td>{(stats?.bidderRating || 0).toFixed(1)}</td>
+                  <td><RatingStars value={ratingForUser(client)} /></td>
                   <td>{money(stats?.averageBidRate || 0)}</td>
                   <td>{money(stats?.averageBonusGiven || 0)}</td>
                   <td>
@@ -3678,7 +3768,7 @@ function ClientDirectoryView({
                 <h3>Client Signals</h3>
                 <div className="mini-metrics">
                   <span><strong>{money(selectedClient.clientStats?.moneyPaid || 0)}</strong> paid</span>
-                  <span><strong>{(selectedClient.clientStats?.bidderRating || 0).toFixed(1)}</strong> rating</span>
+                  <span><RatingStars value={ratingForUser(selectedClient)} /> rating</span>
                   <span><strong>{money(selectedClient.clientStats?.averageBidRate || 0)}</strong> avg bid</span>
                   <span><strong>{money(selectedClient.clientStats?.averageBonusGiven || 0)}</strong> avg bonus</span>
                 </div>
@@ -3695,7 +3785,7 @@ function ClientDirectoryView({
               <article className="profile-card">
                 <h3>Reviews</h3>
                 <div className="mini-metrics">
-                  <span><strong>{(selectedClient.clientStats?.bidderRating || 0).toFixed(1)}</strong> bidder rating</span>
+                  <span><RatingStars value={ratingForUser(selectedClient)} /> bidder rating</span>
                   <span><strong>{selectedClient.clientStats?.assignedBidderCount || 0}</strong> hired bidders</span>
                 </div>
                 <p>No written reviews yet.</p>
@@ -3955,6 +4045,7 @@ function BiddersDirectoryView({
 
               <article className="profile-card">
                 <h3>Reviews</h3>
+                <RatingStars value={ratingForUser(selectedBidder)} />
                 <p>No written reviews yet.</p>
               </article>
               <article className="profile-card">
@@ -4504,6 +4595,7 @@ function PostReviewModal({
         <article className="profile-card">
           <h3>Author</h3>
           <strong>{author?.name || "Unknown member"}</strong>
+          {author ? <RatingStars value={ratingForUser(author)} /> : null}
           <p>{author?.profileTitle || author?.email || "No profile details available."}</p>
           <div className="actions">
             {author && author.allowDirectMessages !== false ? (
@@ -8404,17 +8496,46 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
-function ChatAttachmentView({ attachment }: { attachment: ChatAttachmentDraft }) {
+async function resizeProfileImage(file: File) {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Choose a PNG, JPG, or WebP image.");
+  }
+
+  const dataUrl = await readFileAsDataUrl(file);
+  return new Promise<string>((resolve, reject) => {
+    const image = new window.Image();
+    image.onload = () => {
+      const maxSize = 160;
+      const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+      const width = Math.max(1, Math.round(image.width * scale));
+      const height = Math.max(1, Math.round(image.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        reject(new Error("Profile image could not be resized."));
+        return;
+      }
+      context.drawImage(image, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/webp", 0.78));
+    };
+    image.onerror = () => reject(new Error("Profile image could not be loaded."));
+    image.src = dataUrl;
+  });
+}
+
+function ChatAttachmentView({ attachment, onPreview }: { attachment: ChatAttachmentDraft; onPreview?: (attachment: ChatAttachmentDraft) => void }) {
   const isImage = attachment.type.startsWith("image/");
   const isAudio = attachment.type.startsWith("audio/");
 
   return (
     <div className={`chat-attachment ${isImage ? "image" : ""}`}>
       {isImage ? (
-        <a href={attachment.dataUrl} target="_blank" rel="noreferrer">
+        <button className="attachment-image-button" type="button" onClick={() => onPreview?.(attachment)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={attachment.dataUrl} alt={attachment.name} />
-        </a>
+        </button>
       ) : isAudio ? (
         <audio controls preload="metadata" src={attachment.dataUrl} />
       ) : (
@@ -8428,19 +8549,32 @@ function ChatAttachmentView({ attachment }: { attachment: ChatAttachmentDraft })
 }
 
 function ChatAttachments({ attachments }: { attachments: ChatAttachmentDraft[] }) {
+  const [previewImage, setPreviewImage] = useState<ChatAttachmentDraft | null>(null);
+
   if (!attachments.length) {
     return null;
   }
 
   return (
-    <div className="chat-attachments">
-      {attachments.map((attachment, index) => (
-        <ChatAttachmentView
-          key={attachment.id || `${attachment.name}-${attachment.size}-${index}`}
-          attachment={attachment}
-        />
-      ))}
-    </div>
+    <>
+      <div className="chat-attachments">
+        {attachments.map((attachment, index) => (
+          <ChatAttachmentView
+            key={attachment.id || `${attachment.name}-${attachment.size}-${index}`}
+            attachment={attachment}
+            onPreview={setPreviewImage}
+          />
+        ))}
+      </div>
+      {previewImage ? (
+        <ModalFrame title={previewImage.name || "Image preview"} onClose={() => setPreviewImage(null)}>
+          <div className="image-preview-modal">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={previewImage.dataUrl} alt={previewImage.name || "Uploaded image"} />
+          </div>
+        </ModalFrame>
+      ) : null}
+    </>
   );
 }
 
@@ -8566,7 +8700,7 @@ function SupportCenter({
                 type="button"
                 onClick={() => setSelectedUserId(conversation.contact.id)}
               >
-                <span className="conversation-avatar">{initialsForName(conversation.contact.name)}</span>
+                <MemberAvatar user={conversation.contact} size="md" />
                 <span>
                   <strong>{userDisplayName(conversation.contact)}</strong>
                   <small>{conversation.preview}</small>
@@ -8593,10 +8727,12 @@ function SupportCenter({
 
           {activeMessages.map((message) => {
             const isMine = message.userId === currentUser.id;
+            const author = userById([currentUser, ...data.users, ...supportContacts], message.userId);
             const messageAttachments = message.attachments || [];
             const isCompactTextMessage = !message.deletedAt && Boolean(message.body) && !messageAttachments.length;
             return (
               <div className={`message-row ${isMine ? "mine" : ""}`} key={message.id}>
+                {!isMine ? <MemberAvatar user={author} size="sm" /> : null}
                 <div className={`message ${isMine ? "mine" : ""} ${message.deletedAt ? "deleted" : ""} ${isCompactTextMessage ? "compact-text-message" : ""}`}>
                   {message.deletedAt ? <p className="muted">Message deleted</p> : <p>{message.body}</p>}
                   <ChatAttachments attachments={messageAttachments} />
@@ -8604,6 +8740,7 @@ function SupportCenter({
                     <span className="message-time">{messageTimeInZone(message.createdAt, browserTimeZone())}</span>
                   </div>
                 </div>
+                {isMine ? <MemberAvatar user={currentUser} size="sm" /> : null}
               </div>
             );
           })}
@@ -9119,37 +9256,40 @@ function ChatView({
               <p>{conversations.length} chats</p>
             </div>
           </div>
-          {conversations.map((conversation) => (
-            <div
-              className={`conversation-entry ${activeConversation?.id === conversation.id ? "active" : ""}`}
-              key={conversation.id}
-            >
-              <button
-                type="button"
-                className="conversation-button"
-                onClick={() => selectConversation(conversation.id)}
+          {conversations.map((conversation) => {
+            const conversationUser = conversation.recipientId ? membersById.get(conversation.recipientId) : null;
+            return (
+              <div
+                className={`conversation-entry ${activeConversation?.id === conversation.id ? "active" : ""}`}
+                key={conversation.id}
               >
-                <span className="conversation-avatar">{conversation.avatar}</span>
-                <span>
-                  <strong>{conversation.title}</strong>
-                  <small>{conversation.preview}</small>
-                </span>
-                {conversation.unreadCount ? <span className="conversation-badge">{conversation.unreadCount}</span> : null}
-              </button>
-              {isSuperAdminRole(currentUser.role) ? (
-                <ActionMenu
-                  items={[
-                    {
-                      label: "Delete chat",
-                      danger: true,
-                      disabled: busy,
-                      onClick: () => void deleteConversationById(conversation.conversationId),
-                    },
-                  ]}
-                />
-              ) : null}
-            </div>
-          ))}
+                <button
+                  type="button"
+                  className="conversation-button"
+                  onClick={() => selectConversation(conversation.id)}
+                >
+                  {conversationUser ? <MemberAvatar user={conversationUser} size="md" /> : <span className="conversation-avatar">{conversation.avatar}</span>}
+                  <span>
+                    <strong>{conversation.title}</strong>
+                    <small>{conversation.preview}</small>
+                  </span>
+                  {conversation.unreadCount ? <span className="conversation-badge">{conversation.unreadCount}</span> : null}
+                </button>
+                {isSuperAdminRole(currentUser.role) ? (
+                  <ActionMenu
+                    items={[
+                      {
+                        label: "Delete chat",
+                        danger: true,
+                        disabled: busy,
+                        onClick: () => void deleteConversationById(conversation.conversationId),
+                      },
+                    ]}
+                  />
+                ) : null}
+              </div>
+            );
+          })}
           {!conversations.length ? (
             <div className="empty-state compact">No inbox contacts yet.</div>
           ) : null}
@@ -9166,7 +9306,7 @@ function ChatView({
                   aria-expanded={profilePanelOpen}
                   onClick={() => setProfilePanelOpen((open) => !open)}
                 >
-                  {activeConversation?.avatar || "IN"}
+                  <MemberAvatar user={activeRecipient} size="md" />
                 </button>
               ) : (
                 <div className="telegram-avatar">{activeConversation?.avatar || "IN"}</div>
@@ -9238,6 +9378,7 @@ function ChatView({
             const isEditing = editingMessageId === message.id;
             const messageAttachments = message.attachments || [];
             const menuItems: ActionMenuItem[] = [];
+            const authorUser = membersById.get(message.userId);
             const isCompactTextMessage = !deleted && !isEditing && Boolean(message.body) && !relatedContract && !messageAttachments.length;
 
             if (canEdit) {
@@ -9249,6 +9390,7 @@ function ChatView({
 
             return (
               <div className={`message-row ${isMine ? "mine" : ""}`} key={message.id}>
+                {!isMine ? <MemberAvatar user={authorUser} size="sm" /> : null}
                 <div className={`message ${isMine ? "mine" : ""} ${deleted ? "deleted" : ""} ${isCompactTextMessage ? "compact-text-message" : ""}`}>
                   {deleted ? (
                     <p className="muted">Message deleted</p>
@@ -9301,6 +9443,7 @@ function ChatView({
                     {menuItems.length ? <ActionMenu items={menuItems} /> : null}
                   </div>
                 </div>
+                {isMine ? <MemberAvatar user={currentUser} size="sm" /> : null}
               </div>
             );
           })}

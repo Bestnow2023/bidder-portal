@@ -26,6 +26,7 @@ export type PortalUser = {
   assignedAdminId?: string;
   profileTitle?: string;
   profileBio?: string;
+  profileImageDataUrl?: string;
   profileSkills?: string[];
   profileLocation?: string;
   profileTimeZone?: string;
@@ -36,6 +37,7 @@ export type PortalUser = {
   profileCompletedAt?: string;
   allowDirectMessages?: boolean;
   clientRating?: number;
+  bidderRating?: number;
   creditBalances?: CreditBalances;
   clientStats?: {
     assignedBidderCount: number;
@@ -106,9 +108,13 @@ export type PortalPost = {
   postCreditUsed: number;
   giftCreditUsed?: number;
   moneyCreditUsed: number;
+  repostCount?: number;
+  repostedAt?: string;
+  boostedAt?: string;
   createdAt: string;
   updatedAt: string;
   closedAt?: string;
+  closedByUserId?: string;
 };
 
 export type BidProfileRecord = {
@@ -259,6 +265,11 @@ export type PortalNotification = {
   clientId?: string;
   relatedDepositId?: string;
   relatedWorkLogId?: string;
+  relatedPostId?: string;
+  relatedContractId?: string;
+  relatedDisputeId?: string;
+  relatedPaymentId?: string;
+  relatedMessageId?: string;
   actorUserId?: string;
   amount?: number;
   creditAmount?: number;

@@ -41,6 +41,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(globals, /\.bid-profile-card\s*\{/);
   assert.match(portalApp, /Email and password sign-in/);
   assert.match(portalApp, /Password/);
+  assert.match(portalApp, /Remember me for 5 days/);
   assert.match(portalApp, /Sign up/);
   assert.match(portalApp, /Requested role/);
   assert.match(portalApp, /Super Admin/);
@@ -49,6 +50,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Dashboard/);
   assert.match(portalApp, /Settings/);
   assert.match(portalApp, /Profile Settings/);
+  assert.match(portalApp, /Profile image/);
+  assert.match(portalApp, /profileImageDataUrl/);
+  assert.match(portalApp, /resizeProfileImage/);
   assert.match(portalApp, /Security/);
   assert.match(portalApp, /Profile settings/);
   assert.match(portalApp, /User ID:/);
@@ -521,8 +525,15 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /composer-shell/);
   assert.match(portalApp, /chat-content/);
   assert.match(portalApp, /message-row/);
+  assert.match(portalApp, /MemberAvatar/);
   assert.match(portalApp, /message-check/);
   assert.match(portalApp, /chat-title-button/);
+  assert.match(portalApp, /attachment-image-button/);
+  assert.match(portalApp, /image-preview-modal/);
+  assert.match(portalApp, /RatingStars/);
+  assert.match(globals, /\.member-avatar/);
+  assert.match(globals, /\.profile-image-field/);
+  assert.match(globals, /\.rating-stars/);
   assert.match(globals, /\.chat-panel\.panel/);
   assert.match(globals, /\.content\.chat-content/);
   assert.match(globals, /\.analytics-bars/);
