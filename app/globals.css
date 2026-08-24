@@ -2205,6 +2205,7 @@ td > strong {
 }
 
 .status-strip {
+  position: relative;
   border-left: 4px solid var(--amber);
   border-radius: 8px;
   background: #fffaf0;
@@ -2231,6 +2232,41 @@ td > strong {
 .status-strip p {
   margin: 0;
   color: #695034;
+}
+
+.dismissible-notice {
+  padding-right: 46px;
+}
+
+.dismissible-notice-content {
+  min-width: 0;
+}
+
+.notice-dismiss-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 26px;
+  min-height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(105, 80, 52, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #695034;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.notice-dismiss-button:hover,
+.notice-dismiss-button:focus-visible {
+  border-color: rgba(105, 80, 52, 0.36);
+  background: #ffffff;
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(166, 95, 22, 0.12);
 }
 
 .modal-backdrop {
@@ -2296,6 +2332,10 @@ td > strong {
   background: #eef5ff;
   padding: 14px;
   color: #29446c;
+}
+
+.developer-note.dismissible-notice {
+  padding-right: 46px;
 }
 
 @media (max-width: 1050px) {

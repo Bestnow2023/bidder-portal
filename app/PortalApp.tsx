@@ -100,6 +100,7 @@ const portalMode = process.env.NEXT_PUBLIC_PORTAL_MODE?.toLowerCase() === "live"
 const isLiveMode = portalMode === "live";
 const adminTimeZone = process.env.NEXT_PUBLIC_ADMIN_TIME_ZONE || "America/New_York";
 const helpBaseUrl = (process.env.NEXT_PUBLIC_HELP_BASE_URL || "https://help-bp.digniware.com").replace(/\/$/, "");
+const dismissedNoticeStorageKey = "bidderPortalDismissedInfoNotices";
 const chatPollIntervalMs = 15000;
 const chatAttachmentLimit = 3;
 const maxChatAttachmentBytes = 2 * 1024 * 1024;
@@ -295,6 +296,55 @@ function MemberAvatar({ user, size = "md" }: { user?: PortalUser | null; size?: 
         <span>{initialsForName(userDisplayName(user))}</span>
       )}
     </span>
+  );
+}
+
+function dismissedNoticeIds() {
+  if (typeof window === "undefined") {
+    return new Set<string>();
+  }
+
+  try {
+    const storedIds = JSON.parse(window.localStorage.getItem(dismissedNoticeStorageKey) || "[]");
+    return new Set(Array.isArray(storedIds) ? storedIds.filter((item): item is string => typeof item === "string") : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function DismissibleNotice({
+  id,
+  className = "",
+  children,
+}: {
+  id: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  const [dismissed, setDismissed] = useState(() => dismissedNoticeIds().has(id));
+
+  function dismiss() {
+    try {
+      const nextIds = dismissedNoticeIds();
+      nextIds.add(id);
+      window.localStorage.setItem(dismissedNoticeStorageKey, JSON.stringify(Array.from(nextIds)));
+    } catch {
+      // Still close the notice for this page view if storage is unavailable.
+    }
+    setDismissed(true);
+  }
+
+  if (dismissed) {
+    return null;
+  }
+
+  return (
+    <div className={`status-strip dismissible-notice ${className}`}>
+      <button className="notice-dismiss-button" type="button" aria-label="Dismiss notice" onClick={dismiss}>
+        x
+      </button>
+      <div className="dismissible-notice-content">{children}</div>
+    </div>
   );
 }
 
@@ -3603,11 +3653,11 @@ function BidProfileDetailModal({
   return (
     <ModalFrame title={profile.profileName} subtitle="Client bid profile for job bidding." className="client-detail-modal" onClose={onClose}>
       <div className="detail-stack">
-        <div className="status-strip compact">
+        <DismissibleNotice id="bid-profile-sharing-info" className="compact">
           {assignedNames.length
             ? `Shared with ${assignedNames.join(", ")}`
             : "This profile is not shared with bidders yet."}
-        </div>
+        </DismissibleNotice>
         <section className="detail-section">
           <h3>Identity</h3>
           <BidProfileDetailGrid rows={bidProfileIdentityLines(profile)} />
@@ -5914,11 +5964,11 @@ function ContractEndModal({
       onClose={onClose}
     >
       <form className="form-grid" onSubmit={submit}>
-        <div className="status-strip compact full">
+        <DismissibleNotice id={`contract-end-${paidBeforeEnding ? "paid" : "unpaid"}-guidance`} className="compact full">
           {paidBeforeEnding
             ? "A payment was released for this contract pair. Add a short work-feedback note before ending."
             : "No released payment was found for this contract pair. Select the end result and add the reason."}
-        </div>
+        </DismissibleNotice>
         <label className="field">
           <span>End result</span>
           <select value={draft.endType} onChange={(event) => setDraft({ ...draft, endType: event.target.value })}>
@@ -7576,9 +7626,9 @@ function WorkView({
 
   if (data.currentUser.role === "developer") {
     return (
-      <div className="developer-note">
+      <DismissibleNotice id="developer-work-log-planned" className="compact developer-note">
         Developer work logging is planned for the next phase. Payment details and chat remain available.
-      </div>
+      </DismissibleNotice>
     );
   }
 
@@ -8429,9 +8479,9 @@ function ConvertPostCreditModal({
           <span>Money credit cost</span>
           <input value={money(moneyCost)} readOnly />
         </label>
-        <div className="status-strip compact full">
+        <DismissibleNotice id="post-credit-conversion-price-info" className="compact full">
           Price: {money(postCreditMoneyPrice)} = 1 post credit. You can convert up to {postCreditCount(maxCredits)} now.
-        </div>
+        </DismissibleNotice>
         <div className="actions full">
           <button className="primary-button" type="submit" disabled={busy || creditAmount <= 0 || moneyCost > balances.moneyCreditBalance}>
             Convert credit
@@ -9454,9 +9504,9 @@ function AdminPayments({
       {showReleaseModal ? (
         <ModalFrame title="Release Payment" subtitle="Move client credits into the bidder money-credit wallet." onClose={() => setShowReleaseModal(false)}>
           <form className="form-grid" onSubmit={submitReleasePayment}>
-            <div className="status-strip compact full">
+            <DismissibleNotice id="release-payment-credit-transfer-info" className="compact full">
               This deducts client money credit and adds the same amount to the bidder. The bidder can request a withdrawal later.
-            </div>
+            </DismissibleNotice>
             <label className="field full">
               <span>Bidder</span>
               <select value={releaseDraft.userId} onChange={(event) => handleReleaseUserChange(event.target.value)} required>

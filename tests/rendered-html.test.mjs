@@ -39,6 +39,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /digniware-logo-light\.png/);
   assert.match(globals, /\.bid-profile-grid\s*\{[\s\S]*grid-template-columns: repeat\(auto-fill, minmax\(280px, 420px\)\);/);
   assert.match(globals, /\.bid-profile-card\s*\{/);
+  assert.match(globals, /\.dismissible-notice/);
+  assert.match(globals, /\.notice-dismiss-button/);
   assert.match(portalApp, /Email and password sign-in/);
   assert.match(portalApp, /PublicHomePage/);
   assert.match(portalApp, /Bidder Portal developed by Digniware LLC/);
@@ -74,6 +76,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Post Credit/);
   assert.match(portalApp, /postCreditCount/);
   assert.match(portalApp, /postCreditMoneyPrice/);
+  assert.match(portalApp, /DismissibleNotice/);
+  assert.match(portalApp, /bidderPortalDismissedInfoNotices/);
+  assert.match(portalApp, /release-payment-credit-transfer-info/);
   assert.match(portalApp, /Convert to post credit/);
   assert.match(portalApp, /Post credits to add/);
   assert.match(portalApp, /Create Post/);
