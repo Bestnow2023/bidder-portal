@@ -611,6 +611,9 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /chat-title-button/);
   assert.match(portalApp, /attachment-image-button/);
   assert.match(portalApp, /image-preview-modal/);
+  assert.match(portalApp, /AttachmentPreviewModal/);
+  assert.match(portalApp, /handleComposerPaste/);
+  assert.match(portalApp, /prepareChatAttachment/);
   assert.match(portalApp, /RatingStars/);
   assert.match(globals, /\.member-avatar/);
   assert.match(globals, /\.profile-image-field/);
@@ -619,6 +622,8 @@ test("declares the requested frontend records", async () => {
   assert.match(globals, /\.content\.chat-content/);
   assert.match(globals, /\.analytics-bars/);
   assert.match(globals, /\.dispute-update-row/);
+  assert.match(globals, /\.attachment-preview-modal-grid/);
+  assert.match(globals, /\.text-file-preview/);
   assert.match(portalApp, /verificationPendingEmail/);
   assert.match(portalApp, /verificationSuccessEmail/);
   assert.match(portalApp, /paymentFrequency/);

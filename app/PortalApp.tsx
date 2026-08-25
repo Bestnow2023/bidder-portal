@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { createPortal } from "react-dom";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import type { ChangeEvent, ClipboardEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -9946,6 +9946,39 @@ function DepositList({ deposits, users }: { deposits: DepositRecord[]; users: Po
 }
 
 type ChatAttachmentDraft = Omit<ChatAttachment, "id"> & { id?: string };
+type AttachmentPreviewKind = "image" | "text" | "document" | "file";
+
+type AttachmentPreviewItem = {
+  attachment: ChatAttachmentDraft;
+  kind: AttachmentPreviewKind;
+  textPreview?: string;
+};
+
+type PendingAttachmentPreview = {
+  attachments: ChatAttachmentDraft[];
+  previews: AttachmentPreviewItem[];
+  body: string;
+  source: "clipboard" | "file";
+};
+
+const textPreviewBytes = 12000;
+const textPreviewExtensions = new Set([
+  "txt",
+  "md",
+  "csv",
+  "json",
+  "log",
+  "xml",
+  "html",
+  "css",
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "yml",
+  "yaml",
+]);
+const documentPreviewExtensions = new Set(["pdf", "doc", "docx", "rtf", "odt"]);
 
 function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -9954,6 +9987,81 @@ function readFileAsDataUrl(file: File) {
     reader.onerror = () => reject(new Error("File could not be read."));
     reader.readAsDataURL(file);
   });
+}
+
+function fileExtension(name: string) {
+  const parts = name.split(".");
+  return parts.length > 1 ? parts.pop()?.toLowerCase() || "" : "";
+}
+
+function extensionForMimeType(type: string) {
+  if (type === "image/png") return "png";
+  if (type === "image/jpeg") return "jpg";
+  if (type === "image/webp") return "webp";
+  if (type === "image/gif") return "gif";
+  if (type === "application/pdf") return "pdf";
+  if (type.startsWith("text/")) return "txt";
+  return "";
+}
+
+function fileNameForAttachment(file: File, source: "clipboard" | "file", index: number) {
+  if (file.name && file.name !== "blob") {
+    return file.name;
+  }
+
+  const extension = extensionForMimeType(file.type);
+  const baseName = source === "clipboard" ? "clipboard-attachment" : "attachment";
+  return `${baseName}-${index + 1}${extension ? `.${extension}` : ""}`;
+}
+
+function previewKindForFile(file: File): AttachmentPreviewKind {
+  const type = file.type.toLowerCase();
+  const extension = fileExtension(file.name);
+
+  if (type.startsWith("image/")) {
+    return "image";
+  }
+  if (type.startsWith("text/") || type.includes("json") || textPreviewExtensions.has(extension)) {
+    return "text";
+  }
+  if (
+    type === "application/pdf" ||
+    type.includes("msword") ||
+    type.includes("wordprocessingml") ||
+    type.includes("opendocument") ||
+    type === "application/rtf" ||
+    documentPreviewExtensions.has(extension)
+  ) {
+    return "document";
+  }
+
+  return "file";
+}
+
+function readFileAsTextPreview(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    const previewBlob = file.size > textPreviewBytes ? file.slice(0, textPreviewBytes) : file;
+    reader.onload = () => {
+      const suffix = file.size > textPreviewBytes ? "\n\n... Preview truncated." : "";
+      resolve(`${String(reader.result || "")}${suffix}`);
+    };
+    reader.onerror = () => reject(new Error("Text preview could not be loaded."));
+    reader.readAsText(previewBlob);
+  });
+}
+
+async function prepareChatAttachment(file: File, source: "clipboard" | "file", index: number): Promise<AttachmentPreviewItem> {
+  const kind = previewKindForFile(file);
+  const attachment = {
+    name: fileNameForAttachment(file, source, index),
+    type: file.type || "application/octet-stream",
+    size: file.size,
+    dataUrl: await readFileAsDataUrl(file),
+  };
+  const textPreview = kind === "text" ? await readFileAsTextPreview(file) : undefined;
+
+  return { attachment, kind, textPreview };
 }
 
 async function resizeProfileImage(file: File) {
@@ -10035,6 +10143,93 @@ function ChatAttachments({ attachments }: { attachments: ChatAttachmentDraft[] }
         </ModalFrame>
       ) : null}
     </>
+  );
+}
+
+function AttachmentPreviewModal({
+  pending,
+  busy,
+  canSend,
+  onBodyChange,
+  onSend,
+  onAttach,
+  onClose,
+}: {
+  pending: PendingAttachmentPreview;
+  busy: boolean;
+  canSend: boolean;
+  onBodyChange: (body: string) => void;
+  onSend: () => void;
+  onAttach: () => void;
+  onClose: () => void;
+}) {
+  const title = pending.attachments.length === 1 ? pending.attachments[0].name : `${pending.attachments.length} attachments`;
+
+  return (
+    <ModalFrame title={title} onClose={onClose}>
+      <div className="attachment-preview-modal-grid">
+        <div className="attachment-preview-stack">
+          {pending.previews.map(({ attachment, kind, textPreview }, index) => {
+            const isPdf = attachment.type === "application/pdf" || attachment.name.toLowerCase().endsWith(".pdf");
+
+            return (
+              <article className={`attachment-preview-panel ${kind}`} key={`${attachment.name}-${attachment.size}-${index}`}>
+                <div className="attachment-preview-heading">
+                  <strong>{attachment.name}</strong>
+                  <span>{formatBytes(attachment.size)}</span>
+                </div>
+
+                {kind === "image" ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={attachment.dataUrl} alt={attachment.name} />
+                  </>
+                ) : kind === "text" ? (
+                  <pre className="text-file-preview">{textPreview || "Text preview unavailable."}</pre>
+                ) : kind === "document" && isPdf ? (
+                  <iframe className="document-file-preview" title={attachment.name} src={attachment.dataUrl} />
+                ) : kind === "document" ? (
+                  <div className="document-preview-card">
+                    <strong>Document ready</strong>
+                    <span>{attachment.name}</span>
+                    <a href={attachment.dataUrl} target="_blank" rel="noreferrer">
+                      Open file
+                    </a>
+                  </div>
+                ) : (
+                  <div className="document-preview-card">
+                    <strong>File attached</strong>
+                    <span>{attachment.name}</span>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+
+        <label className="attachment-preview-caption">
+          <span>Message</span>
+          <textarea
+            value={pending.body}
+            onChange={(event) => onBodyChange(event.target.value)}
+            placeholder="Add a message"
+            autoFocus
+          />
+        </label>
+
+        <div className="modal-actions">
+          <button className="ghost-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="ghost-button" type="button" onClick={onAttach}>
+            Add to message
+          </button>
+          <button className="primary-button" type="button" disabled={busy || !canSend} onClick={onSend}>
+            Send
+          </button>
+        </div>
+      </div>
+    </ModalFrame>
   );
 }
 
@@ -10403,6 +10598,7 @@ function ChatView({
 }) {
   const [body, setBody] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachmentDraft[]>([]);
+  const [pendingAttachmentPreview, setPendingAttachmentPreview] = useState<PendingAttachmentPreview | null>(null);
   const [chatError, setChatError] = useState("");
   const [editingMessageId, setEditingMessageId] = useState("");
   const [editBody, setEditBody] = useState("");
@@ -10524,13 +10720,13 @@ function ChatView({
     }
     return post.authorId === currentUser.id || post.authorId === activeConversation?.recipientId;
   });
-  const canSubmit =
+  const activeCanSendMessage =
     canSend &&
     Boolean(activeConversation) &&
     !activeConversation.monitored &&
     activeConversation.recipientAllowsContact &&
-    Boolean(activeConversation.recipientId) &&
-    Boolean(body.trim() || attachments.length);
+    Boolean(activeConversation.recipientId);
+  const canSubmit = activeCanSendMessage && Boolean(body.trim() || attachments.length);
   const latestIncomingMessage = [...activeMessages]
     .reverse()
     .find((message) => message.userId !== currentUser.id && !message.deletedAt);
@@ -10589,29 +10785,35 @@ function ChatView({
     setProfilePanelOpen(false);
     setEditingMessageId("");
     setEditBody("");
+    setPendingAttachmentPreview(null);
     setChatError("");
   }
 
-  async function sendMessage() {
-    if (!canSubmit || busy) {
+  async function sendMessageWithContent(messageBody: string, messageAttachments: ChatAttachmentDraft[]) {
+    if (!activeCanSendMessage || busy || (!messageBody.trim() && !messageAttachments.length)) {
       return;
     }
 
     const nextData = await onSend("addChatMessage", {
       recipientId: activeConversation?.recipientId || "",
-      body,
-      attachments,
+      body: messageBody,
+      attachments: messageAttachments,
       relatedPostId: activeRelatedPost?.id || "",
       authorTimeZone: userTimeZone,
     });
     if (nextData) {
       setBody("");
       setAttachments([]);
+      setPendingAttachmentPreview(null);
       setChatError("");
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
     }
+  }
+
+  async function sendMessage() {
+    await sendMessageWithContent(body, attachments);
   }
 
   async function submit(event: FormEvent) {
@@ -10626,8 +10828,7 @@ function ChatView({
     }
   }
 
-  async function handleFileSelection(event: ChangeEvent<HTMLInputElement>) {
-    const selectedFiles = Array.from(event.target.files || []);
+  async function handleAttachmentFiles(selectedFiles: File[], source: "clipboard" | "file") {
     if (!selectedFiles.length) {
       return;
     }
@@ -10635,32 +10836,68 @@ function ChatView({
     const remainingSlots = chatAttachmentLimit - attachments.length;
     const acceptedFiles = selectedFiles.slice(0, Math.max(0, remainingSlots));
     const skippedCount = selectedFiles.length - acceptedFiles.length;
-    const nextAttachments: ChatAttachmentDraft[] = [];
+    const nextPreviewItems: AttachmentPreviewItem[] = [];
     let nextError = skippedCount > 0 ? `Only ${chatAttachmentLimit} files can be attached to one message.` : "";
 
-    for (const file of acceptedFiles) {
+    for (const [index, file] of acceptedFiles.entries()) {
       if (file.size > maxChatAttachmentBytes) {
         nextError = "Each chat file must be 2 MB or smaller.";
         continue;
       }
 
       try {
-        nextAttachments.push({
-          name: file.name,
-          type: file.type || "application/octet-stream",
-          size: file.size,
-          dataUrl: await readFileAsDataUrl(file),
-        });
+        nextPreviewItems.push(await prepareChatAttachment(file, source, index));
       } catch (fileError) {
         nextError = fileError instanceof Error ? fileError.message : "File could not be read.";
       }
     }
 
-    if (nextAttachments.length) {
-      setAttachments((current) => [...current, ...nextAttachments]);
+    if (nextPreviewItems.length) {
+      const hasPreviewableFile = nextPreviewItems.some((item) => item.kind !== "file");
+      const nextAttachments = nextPreviewItems.map((item) => item.attachment);
+
+      if (hasPreviewableFile) {
+        setPendingAttachmentPreview({
+          attachments: nextAttachments,
+          previews: nextPreviewItems,
+          body,
+          source,
+        });
+      } else {
+        setAttachments((current) => [...current, ...nextAttachments]);
+      }
     }
     setChatError(nextError);
+  }
+
+  async function handleFileSelection(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.target.files || []);
+    await handleAttachmentFiles(selectedFiles, "file");
     event.target.value = "";
+  }
+
+  function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const pastedFiles = Array.from(event.clipboardData.files || []);
+    if (!pastedFiles.length) {
+      return;
+    }
+
+    event.preventDefault();
+    void handleAttachmentFiles(pastedFiles, "clipboard");
+  }
+
+  function updatePendingAttachmentBody(messageBody: string) {
+    setPendingAttachmentPreview((current) => (current ? { ...current, body: messageBody } : current));
+  }
+
+  function addPendingAttachmentsToComposer() {
+    if (!pendingAttachmentPreview) {
+      return;
+    }
+
+    setBody(pendingAttachmentPreview.body);
+    setAttachments((current) => [...current, ...pendingAttachmentPreview.attachments]);
+    setPendingAttachmentPreview(null);
   }
 
   function removeAttachment(index: number) {
@@ -10712,6 +10949,7 @@ function ChatView({
       setSelectedConversationId("");
       setEditingMessageId("");
       setEditBody("");
+      setPendingAttachmentPreview(null);
       setChatError("");
     }
   }
@@ -10950,6 +11188,7 @@ function ChatView({
                   value={body}
                   onChange={(event) => setBody(event.target.value)}
                   onKeyDown={handleComposerKeyDown}
+                  onPaste={handleComposerPaste}
                   disabled={!canSend || !activeConversation.recipientAllowsContact}
                   required={!attachments.length}
                 />
@@ -10971,6 +11210,22 @@ function ChatView({
                 <span className="muted">This member is not accepting direct messages.</span>
               ) : null}
               {chatError ? <div className="error full">{chatError}</div> : null}
+              {pendingAttachmentPreview ? (
+                <AttachmentPreviewModal
+                  pending={pendingAttachmentPreview}
+                  busy={busy}
+                  canSend={activeCanSendMessage && Boolean(pendingAttachmentPreview.body.trim() || pendingAttachmentPreview.attachments.length)}
+                  onBodyChange={updatePendingAttachmentBody}
+                  onSend={() =>
+                    void sendMessageWithContent(pendingAttachmentPreview.body, [
+                      ...attachments,
+                      ...pendingAttachmentPreview.attachments,
+                    ])
+                  }
+                  onAttach={addPendingAttachmentsToComposer}
+                  onClose={() => setPendingAttachmentPreview(null)}
+                />
+              ) : null}
             </form>
           ) : (
             <div className="chat-composer read-only-composer">
