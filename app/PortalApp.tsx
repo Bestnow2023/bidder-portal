@@ -6895,6 +6895,239 @@ function DisputeDetailModal({
   );
 }
 
+function userProfileDetailRows(user: PortalUser) {
+  return [
+    { label: "User ID", value: displayUserId(user) },
+    { label: "Email", value: user.email },
+    { label: "Role", value: roleLabel(user.role) },
+    { label: "Status", value: statusLabel(user.status) },
+    { label: "Profile", value: isProfileComplete(user) ? "Complete" : "Incomplete" },
+    { label: "Email verification", value: user.emailVerifiedAt ? `Verified ${optionalDateTime(user.emailVerifiedAt)}` : "Not verified" },
+    { label: "Password", value: user.passwordSet ? `Set ${optionalDateTime(user.passwordUpdatedAt)}` : "Not set" },
+    { label: "Joined", value: optionalDateTime(user.createdAt) },
+  ];
+}
+
+function userProfileInfoRows(user: PortalUser) {
+  return [
+    { label: "Name", value: userDisplayName(user) },
+    { label: "Company", value: user.companyName },
+    { label: "Profile title", value: user.profileTitle },
+    { label: "Country", value: user.country || user.profileLocation },
+    { label: "Location", value: user.profileLocation },
+    { label: "Timezone", value: timeZoneDisplay(user.profileTimeZone) },
+    { label: "Direct messages", value: user.allowDirectMessages === false ? "Off" : "On" },
+    { label: "Updated", value: optionalDateTime(user.updatedAt) },
+  ];
+}
+
+function UserProfileInfoModal({
+  user,
+  data,
+  onClose,
+}: {
+  user: PortalUser;
+  data: PortalData;
+  onClose: () => void;
+}) {
+  const allUsers = data.users.some((candidate) => candidate.id === data.currentUser.id)
+    ? data.users
+    : [data.currentUser, ...data.users];
+  const contracts = (data.contracts || []).filter((contract) => contract.clientId === user.id || contract.workerId === user.id);
+  const currentContracts = contracts.filter((contract) => ["requested", "active"].includes(contract.status));
+  const pastContracts = contracts.filter((contract) => ["rejected", "ended"].includes(contract.status));
+  const posts = (data.posts || []).filter((post) => post.authorId === user.id);
+  const bidProfiles = (data.bidProfiles || []).filter((profile) => profile.clientId === user.id);
+  const workLogs = (data.workLogs || []).filter((log) => log.userId === user.id);
+  const payments = (data.payments || []).filter((payment) => payment.userId === user.id || payment.clientId === user.id);
+  const assignedClient = userById(allUsers, user.assignedAdminId || "");
+  const tags = [
+    ...(user.clientPreferences || []),
+    ...(user.profileSkills || []),
+    ...(user.profileLanguages || []),
+  ];
+  const totalApplied = workLogs.reduce((sum, log) => sum + (Number(log.appliedJobs) || 0), 0);
+  const totalInterviews = workLogs.reduce((sum, log) => sum + (Number(log.interviewsScheduled) || 0), 0);
+  const totalPaid = payments
+    .filter((payment) => ["paid", "processing"].includes(payment.status))
+    .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+
+  return (
+    <ModalFrame
+      title={userDisplayName(user)}
+      subtitle={`${roleLabel(user.role)} - ${displayUserId(user)}`}
+      className="client-detail-modal"
+      onClose={onClose}
+    >
+      <div className="detail-stack">
+        <section className="detail-section">
+          <div className="person-title">
+            <div className="table-member">
+              <MemberAvatar user={user} size="lg" />
+              <span>
+                <strong>{userDisplayName(user)}</strong>
+                <span className="table-subtext">{user.profileTitle || user.companyName || user.email}</span>
+                <span className="table-subtext">{user.email}</span>
+              </span>
+            </div>
+            <div className="badge-row">
+              <span className={`badge ${user.role}`}>{roleLabel(user.role)}</span>
+              <span className={`badge ${normalizeAccountStatus(user.status)}`}>{statusLabel(user.status)}</span>
+            </div>
+          </div>
+          {user.profileBio ? <p>{user.profileBio}</p> : <p>No profile bio added.</p>}
+          {tags.length ? (
+            <div className="badge-row">
+              {tags.map((tag) => (
+                <span className="badge" key={tag}>{tag}</span>
+              ))}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="detail-section">
+          <h3>Account</h3>
+          <BidProfileDetailGrid rows={userProfileDetailRows(user)} />
+        </section>
+
+        <section className="detail-section">
+          <h3>Profile Info</h3>
+          <BidProfileDetailGrid rows={userProfileInfoRows(user)} />
+        </section>
+
+        <section className="detail-section">
+          <h3>Portal Summary</h3>
+          <div className="mini-metrics">
+            <span><strong>{contracts.length}</strong> contracts</span>
+            <span><strong>{posts.length}</strong> posts</span>
+            <span><strong>{totalApplied}</strong> applied jobs</span>
+            <span><strong>{totalInterviews}</strong> interviews</span>
+            <span><strong>{money(totalPaid)}</strong> paid or processing</span>
+            <span><RatingStars value={ratingForUser(user)} /> rating</span>
+          </div>
+        </section>
+
+        {isWorkerUser(user) ? (
+          <section className="detail-section">
+            <h3>Bidder Details</h3>
+            <BidProfileDetailGrid
+              rows={[
+                { label: "Assigned client", value: assignedClient?.name || "Unassigned" },
+                { label: "Rate per applied job", value: money(user.ratePerApplication || 0) },
+                { label: "Interview bonus", value: money(user.bonusPerInterview || 0) },
+                { label: "Payment schedule", value: paymentScheduleLabel(user.paymentFrequency, user.paymentWeekday) || user.paymentSchedule },
+                { label: "Next payment", value: shortDate(user.nextPaymentDate) },
+                { label: "Wallet balance", value: money(user.creditBalances?.moneyCreditBalance || 0) },
+              ]}
+            />
+          </section>
+        ) : null}
+
+        {isClientRole(user.role) ? (
+          <section className="detail-section">
+            <h3>Client Details</h3>
+            <BidProfileDetailGrid
+              rows={[
+                { label: "Company", value: user.companyName },
+                { label: "Preferences", value: (user.clientPreferences || []).join(", ") },
+                { label: "Hired bidders", value: String(user.clientStats?.assignedBidderCount || 0) },
+                { label: "Money paid", value: money(user.clientStats?.moneyPaid || 0) },
+                { label: "Average bid rate", value: money(user.clientStats?.averageBidRate || 0) },
+                { label: "Average bonus", value: money(user.clientStats?.averageBonusGiven || 0) },
+              ]}
+            />
+          </section>
+        ) : null}
+
+        {user.creditBalances ? (
+          <section className="detail-section">
+            <h3>Credit Balances</h3>
+            <CreditBalanceStrip balances={user.creditBalances} />
+          </section>
+        ) : null}
+
+        <section className="detail-section">
+          <h3>Current Contracts</h3>
+          {currentContracts.length ? (
+            <div className="profile-detail-list">
+              {currentContracts.slice(0, 8).map((contract) => {
+                const otherUserId = contract.clientId === user.id ? contract.workerId : contract.clientId;
+                const otherUser = userById(allUsers, otherUserId);
+                return (
+                  <span key={contract.id}>
+                    <strong>{contract.id}</strong>
+                    {contract.title || "Contract"}
+                    <small>{otherUser?.name || "Member"} - {contractStatusLabel(contract.status)}</small>
+                    <small>{contractPayTerms(contract)} - {shortDate(contract.nextPaymentDate)}</small>
+                  </span>
+                );
+              })}
+            </div>
+          ) : (
+            <p>No current contracts.</p>
+          )}
+        </section>
+
+        <section className="detail-section">
+          <h3>Past Contracts</h3>
+          {pastContracts.length ? (
+            <div className="profile-detail-list">
+              {pastContracts.slice(0, 8).map((contract) => {
+                const otherUserId = contract.clientId === user.id ? contract.workerId : contract.clientId;
+                const otherUser = userById(allUsers, otherUserId);
+                return (
+                  <span key={contract.id}>
+                    <strong>{contract.id}</strong>
+                    {contract.title || "Contract"}
+                    <small>{otherUser?.name || "Member"} - {contractStatusLabel(contract.status)}</small>
+                    <small>{contract.endType ? titleCase(contract.endType) : shortDate(contract.endedAt || contract.updatedAt)}</small>
+                  </span>
+                );
+              })}
+            </div>
+          ) : (
+            <p>No past contracts.</p>
+          )}
+        </section>
+
+        {bidProfiles.length ? (
+          <section className="detail-section">
+            <h3>Bid Profiles</h3>
+            <div className="profile-detail-list">
+              {bidProfiles.slice(0, 8).map((profile) => (
+                <span key={profile.id}>
+                  <strong>{profile.profileName}</strong>
+                  {bidProfileFullName(profile)}
+                  <small>{profile.contactEmail}</small>
+                  <small>{profile.jobTitles.slice(0, 3).join(", ") || "No titles"}</small>
+                </span>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="detail-section">
+          <h3>Posts</h3>
+          {posts.length ? (
+            <div className="profile-detail-list">
+              {posts.slice(0, 8).map((post) => (
+                <span key={post.id}>
+                  <strong>{post.title}</strong>
+                  {postAudienceLabel(post)}
+                  <small>{titleCase(post.status)} - {postCreditCount(post.postCreditUsed || 0)}</small>
+                  <small>{shortDate(post.updatedAt || post.createdAt)}</small>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p>No posts created.</p>
+          )}
+        </section>
+      </div>
+    </ModalFrame>
+  );
+}
+
 function PeopleView({
   data,
   busy,
@@ -6904,6 +7137,7 @@ function PeopleView({
   busy: boolean;
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
+  const [selectedProfileUserId, setSelectedProfileUserId] = useState("");
   const [editingUser, setEditingUser] = useState<PortalUser | null>(null);
   const [creatingUser, setCreatingUser] = useState(false);
   const [query, setQuery] = useState("");
@@ -6939,6 +7173,12 @@ function PeopleView({
       }
       return userDisplayName(left).localeCompare(userDisplayName(right));
     });
+  const allPeopleUsers = data.users.some((user) => user.id === data.currentUser.id)
+    ? data.users
+    : [data.currentUser, ...data.users];
+  const selectedProfileUser = selectedProfileUserId
+    ? allPeopleUsers.find((user) => user.id === selectedProfileUserId) || null
+    : null;
   const hasPeopleFilters = Boolean(query || roleFilter !== "all" || statusFilter !== "all" || assignmentFilter !== "all");
 
   async function updateUser(user: PortalUser, changes: Partial<Pick<PortalUser, "name" | "role" | "status" | "assignedAdminId">>) {
@@ -6959,6 +7199,9 @@ function PeopleView({
     const nextData = await onSave("deleteUser", { targetUserId: user.id });
     if (nextData && editingUser?.id === user.id) {
       setEditingUser(null);
+    }
+    if (nextData && selectedProfileUserId === user.id) {
+      setSelectedProfileUserId("");
     }
   }
 
@@ -7041,7 +7284,7 @@ function PeopleView({
           </thead>
           <tbody>
             {visibleUsers.map((user) => (
-              <tr key={user.id}>
+              <tr className="clickable-row" key={user.id} onClick={() => setSelectedProfileUserId(user.id)}>
                 <td>
                   <TableMemberCell user={user} subtitle={user.email} />
                 </td>
@@ -7055,6 +7298,7 @@ function PeopleView({
                 <td>
                   <ActionMenu
                     items={[
+                      { label: "View profile", onClick: () => setSelectedProfileUserId(user.id) },
                       { label: "Edit", onClick: () => setEditingUser(user) },
                       {
                         label: "Move to pending review",
@@ -7132,6 +7376,14 @@ function PeopleView({
             }
             return nextData;
           }}
+        />
+      ) : null}
+
+      {selectedProfileUser ? (
+        <UserProfileInfoModal
+          user={selectedProfileUser}
+          data={data}
+          onClose={() => setSelectedProfileUserId("")}
         />
       ) : null}
     </section>

@@ -234,6 +234,11 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /credit users shown/);
   assert.match(portalApp, /Add Person/);
   assert.match(portalApp, /Add person/);
+  assert.match(portalApp, /UserProfileInfoModal/);
+  assert.match(portalApp, /View profile/);
+  assert.match(portalApp, /Portal Summary/);
+  assert.match(portalApp, /Profile Info/);
+  assert.match(portalApp, /Current Contracts/);
   assert.match(portalApp, /Role filter/);
   assert.match(portalApp, /Status filter/);
   assert.match(portalApp, /Clear filters/);
@@ -400,6 +405,11 @@ test("declares the requested frontend records", async () => {
     "Charge credit",
     "Add Person",
     "Add person",
+    "View profile",
+    "Portal Summary",
+    "Profile Info",
+    "Current Contracts",
+    "Credit Balances",
     "Mark email verified",
     "Mark read",
     "Escrow History",
