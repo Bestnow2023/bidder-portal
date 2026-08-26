@@ -101,9 +101,10 @@ const isLiveMode = portalMode === "live";
 const adminTimeZone = process.env.NEXT_PUBLIC_ADMIN_TIME_ZONE || "America/New_York";
 const helpBaseUrl = (process.env.NEXT_PUBLIC_HELP_BASE_URL || "https://help-bp.digniware.com").replace(/\/$/, "");
 const dismissedNoticeStorageKey = "bidderPortalDismissedInfoNotices";
-const chatPollIntervalMs = 15000;
+const chatPollIntervalMs = 30000;
 const chatAttachmentLimit = 3;
 const maxChatAttachmentBytes = 2 * 1024 * 1024;
+const maxChatImageDimension = 1280;
 const demoPassword = "demo1234";
 
 const demoAccounts = [
@@ -1700,7 +1701,7 @@ export default function PortalApp() {
   }, [loginEmail]);
 
   useEffect(() => {
-    if (data) {
+    if (data || sessionToken) {
       return;
     }
 
@@ -1753,7 +1754,7 @@ export default function PortalApp() {
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [data]);
+  }, [data, sessionToken]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1887,11 +1888,22 @@ export default function PortalApp() {
     }
 
     const email = data.currentUser.email;
-    const interval = window.setInterval(() => {
-      void refreshPortalData(email, sessionToken, true);
-    }, chatPollIntervalMs);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
 
-    return () => window.clearInterval(interval);
+      void refreshPortalData(email, sessionToken, true);
+    };
+    const interval = window.setInterval(refreshIfVisible, chatPollIntervalMs);
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
   }, [data?.currentUser.email, refreshPortalData, sessionToken]);
 
   useEffect(() => {
@@ -9989,6 +10001,15 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
+function dataUrlSize(dataUrl: string, fallbackSize: number) {
+  const [, payload = ""] = dataUrl.split(",");
+  if (!payload) {
+    return fallbackSize;
+  }
+
+  return Math.round((payload.length * 3) / 4);
+}
+
 function fileExtension(name: string) {
   const parts = name.split(".");
   return parts.length > 1 ? parts.pop()?.toLowerCase() || "" : "";
@@ -10051,13 +10072,47 @@ function readFileAsTextPreview(file: File) {
   });
 }
 
+async function readChatImageAsCompressedDataUrl(file: File) {
+  if (!file.type.startsWith("image/") || file.type === "image/gif") {
+    return readFileAsDataUrl(file);
+  }
+
+  const dataUrl = await readFileAsDataUrl(file);
+  return new Promise<string>((resolve) => {
+    const image = new window.Image();
+    image.onload = () => {
+      const scale = Math.min(1, maxChatImageDimension / Math.max(image.width, image.height));
+      const width = Math.max(1, Math.round(image.width * scale));
+      const height = Math.max(1, Math.round(image.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        resolve(dataUrl);
+        return;
+      }
+
+      context.drawImage(image, 0, 0, width, height);
+      const compressedDataUrl = canvas.toDataURL("image/webp", 0.82);
+      resolve(dataUrlSize(compressedDataUrl, file.size) < file.size ? compressedDataUrl : dataUrl);
+    };
+    image.onerror = () => resolve(dataUrl);
+    image.src = dataUrl;
+  });
+}
+
 async function prepareChatAttachment(file: File, source: "clipboard" | "file", index: number): Promise<AttachmentPreviewItem> {
   const kind = previewKindForFile(file);
+  const dataUrl = kind === "image" ? await readChatImageAsCompressedDataUrl(file) : await readFileAsDataUrl(file);
+  const compressedImage = kind === "image" && dataUrl.startsWith("data:image/webp");
+  const originalName = fileNameForAttachment(file, source, index);
+  const attachmentName = compressedImage ? originalName.replace(/\.[^.]+$/, "") + ".webp" : originalName;
   const attachment = {
-    name: fileNameForAttachment(file, source, index),
-    type: file.type || "application/octet-stream",
-    size: file.size,
-    dataUrl: await readFileAsDataUrl(file),
+    name: attachmentName,
+    type: compressedImage ? "image/webp" : file.type || "application/octet-stream",
+    size: compressedImage ? dataUrlSize(dataUrl, file.size) : file.size,
+    dataUrl,
   };
   const textPreview = kind === "text" ? await readFileAsTextPreview(file) : undefined;
 
