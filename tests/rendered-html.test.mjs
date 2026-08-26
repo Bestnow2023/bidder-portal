@@ -624,6 +624,8 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /AttachmentPreviewModal/);
   assert.match(portalApp, /handleComposerPaste/);
   assert.match(portalApp, /prepareChatAttachment/);
+  assert.match(portalApp, /knownAttachmentIdsForPortalData/);
+  assert.match(portalApp, /restorePortalAttachmentDataUrls/);
   assert.match(portalApp, /RatingStars/);
   assert.match(globals, /\.member-avatar/);
   assert.match(globals, /\.profile-image-field/);

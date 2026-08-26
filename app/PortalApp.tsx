@@ -516,6 +516,69 @@ function chatNotificationText(message: ChatMessage) {
   return `${message.authorName}: ${body || attachmentText || "New message"}`;
 }
 
+function collectAttachmentDataUrls(messages: ChatMessage[] = [], cache = new Map<string, string>()) {
+  messages.forEach((message) => {
+    (message.attachments || []).forEach((attachment) => {
+      if (attachment.id && attachment.dataUrl) {
+        cache.set(attachment.id, attachment.dataUrl);
+      }
+    });
+  });
+  return cache;
+}
+
+function knownAttachmentIdsForPortalData(data: PortalData | null) {
+  if (!data) {
+    return [];
+  }
+
+  const knownIds = new Set<string>();
+  [...(data.chatMessages || []), ...(data.supportMessages || [])].forEach((message) => {
+    (message.attachments || []).forEach((attachment) => {
+      if (attachment.id && attachment.dataUrl) {
+        knownIds.add(attachment.id);
+      }
+    });
+  });
+  return Array.from(knownIds).slice(-500);
+}
+
+function restoreAttachmentDataUrls(messages: ChatMessage[] = [], cache: Map<string, string>) {
+  return messages.map((message) => {
+    const attachments = message.attachments || [];
+    if (!attachments.length) {
+      return message;
+    }
+
+    return {
+      ...message,
+      attachments: attachments.map((attachment) =>
+        !attachment.dataUrl && attachment.id && cache.has(attachment.id)
+          ? { ...attachment, dataUrl: cache.get(attachment.id) || "" }
+          : attachment
+      ),
+    };
+  });
+}
+
+function restorePortalAttachmentDataUrls(nextData: PortalData, previousData: PortalData | null) {
+  if (!previousData) {
+    return nextData;
+  }
+
+  const cache = collectAttachmentDataUrls(previousData.chatMessages || []);
+  collectAttachmentDataUrls(previousData.supportMessages || [], cache);
+  if (!cache.size) {
+    return nextData;
+  }
+
+  return {
+    ...nextData,
+    chatMessages: restoreAttachmentDataUrls(nextData.chatMessages || [], cache),
+    supportMessages: restoreAttachmentDataUrls(nextData.supportMessages || [], cache),
+  };
+}
+
 function chatReadStorageKey(userId: string) {
   return `bidderPortalChatRead:${userId}`;
 }
@@ -1625,7 +1688,12 @@ export default function PortalApp() {
   const latestChatMessageIdRef = useRef("");
   const notificationRequestAttemptedRef = useRef(false);
   const lastScrollYRef = useRef(0);
+  const dataRef = useRef<PortalData | null>(null);
   const effectiveActiveView = data ? safeViewForUser(data.currentUser, activeView) : activeView;
+
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
   const handleEmailVerificationRequired = useCallback((emailValue: string, message?: string) => {
     const nextEmail = emailValue || loginEmail;
@@ -1714,11 +1782,9 @@ export default function PortalApp() {
       }
 
       try {
-        const response = await fetch(portalApiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "publicPortal" }),
-        });
+        const publicPortalUrl = new URL(portalApiUrl);
+        publicPortalUrl.searchParams.set("action", "publicPortal");
+        const response = await fetch(publicPortalUrl.toString(), { method: "GET" });
         const contentType = response.headers.get("content-type") || "";
         if (!contentType.includes("application/json")) {
           throw new Error(`Portal API returned ${contentType || "non-JSON"} from ${portalApiUrl}. Check NEXT_PUBLIC_API_BASE_URL.`);
@@ -1846,7 +1912,12 @@ export default function PortalApp() {
       const response = await fetch(portalApiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "refreshPortal", email, sessionToken: token }),
+        body: JSON.stringify({
+          action: "refreshPortal",
+          email,
+          sessionToken: token,
+          knownAttachmentIds: silent ? knownAttachmentIdsForPortalData(dataRef.current) : [],
+        }),
       });
       const contentType = response.headers.get("content-type") || "";
       if (!contentType.includes("application/json")) {
@@ -1858,7 +1929,8 @@ export default function PortalApp() {
         throw new Error(nextData.error || "Refresh failed.");
       }
 
-      setData(nextData);
+      const nextPortalData = nextData as PortalData;
+      setData((current) => restorePortalAttachmentDataUrls(nextPortalData, current));
       setLoginEmail(nextData.currentUser.email);
       if (nextData.sessionToken) {
         setSessionToken(nextData.sessionToken);
