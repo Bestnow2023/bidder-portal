@@ -1967,7 +1967,7 @@ export default function PortalApp() {
       return;
     }
 
-    document.title = chatUnreadCount > 0 ? `(${chatUnreadCount}) Bidder Work Portal` : "Bidder Work Portal";
+    document.title = chatUnreadCount > 0 ? `(${chatUnreadCount}) Bidder Portal` : "Bidder Portal | Digniware";
   }, [chatUnreadCount]);
 
   useEffect(() => {
@@ -2121,7 +2121,7 @@ export default function PortalApp() {
           <section className="login-card">
             <div className="login-story">
               <DigniwareLogo className="brand-logo auth-logo" variant="dark" />
-              <h1>Bidder Work Portal</h1>
+              <h1>Bidder Portal</h1>
               <p>
                 Sign in with email, log bidder work, keep payment method details in one place,
                 and let clients manage approvals, rates, next payout dates, history, and chat.

@@ -3,7 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 test("keeps the bidder portal as the primary screen", async () => {
-  const [page, operationsPage, settingsPage, chatPage, biddersPage, postsPage, contractsPage, disputesPage, creditsPage, billingPage, helpPage, layout, portalApp, globals, packageJson] = await Promise.all([
+  const [page, operationsPage, settingsPage, chatPage, biddersPage, postsPage, contractsPage, disputesPage, creditsPage, billingPage, helpPage, layout, robots, sitemap, portalApp, globals, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/operations/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/settings/page.tsx", import.meta.url), "utf8"),
@@ -16,6 +16,8 @@ test("keeps the bidder portal as the primary screen", async () => {
     readFile(new URL("../app/billing/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/help/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/robots.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/sitemap.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -32,9 +34,17 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(creditsPage, /<PortalApp \/>/);
   assert.match(billingPage, /<PortalApp \/>/);
   assert.match(helpPage, /<PortalApp \/>/);
-  assert.match(layout, /Bidder Work Portal/);
+  assert.match(layout, /Bidder Portal \| Digniware/);
+  assert.match(layout, /bidder portal/);
+  assert.match(layout, /openGraph/);
+  assert.match(layout, /summary_large_image/);
   assert.match(layout, /favicon\.png/);
   assert.match(layout, /cryptomus: "d8702318"/);
+  assert.match(page, /application\/ld\+json/);
+  assert.match(page, /WebApplication/);
+  assert.match(robots, /sitemap\.xml/);
+  assert.match(robots, /disallow/);
+  assert.match(sitemap, /\/posts/);
   assert.match(portalApp, /digniware-logo-dark\.png/);
   assert.match(portalApp, /digniware-logo-light\.png/);
   assert.match(globals, /\.bid-profile-grid\s*\{[\s\S]*grid-template-columns: repeat\(auto-fill, minmax\(280px, 420px\)\);/);
