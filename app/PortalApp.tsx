@@ -4085,6 +4085,222 @@ function BidProfileDetailModal({
   );
 }
 
+function BidProfileShareModal({
+  profile,
+  bidders,
+  contracts,
+  busy,
+  onClose,
+  onSave,
+}: {
+  profile: BidProfileRecord;
+  bidders: PortalUser[];
+  contracts: ContractRecord[];
+  busy: boolean;
+  onClose: () => void;
+  onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+}) {
+  const originalAssignedIds = new Set(profile.assignedBidderIds || []);
+  const [query, setQuery] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(profile.assignedBidderIds || []));
+  const [saving, setSaving] = useState(false);
+  const availableBidderIds = new Set(bidders.map((bidder) => bidder.id));
+  const activeContractBidderIds = new Set(
+    contracts
+      .filter((contract) => contract.clientId === profile.clientId && contract.status === "active" && availableBidderIds.has(contract.workerId))
+      .map((contract) => contract.workerId),
+  );
+  const contractByBidder = new Map(
+    contracts
+      .filter((contract) => contract.clientId === profile.clientId && availableBidderIds.has(contract.workerId))
+      .map((contract) => [contract.workerId, contract]),
+  );
+  const filteredBidders = bidders.filter((bidder) => userMatchesSearch(bidder, query));
+  const changedCount = bidders.filter((bidder) => originalAssignedIds.has(bidder.id) !== selectedIds.has(bidder.id)).length;
+  const sharedCount = bidders.filter((bidder) => selectedIds.has(bidder.id)).length;
+
+  function toggleBidder(bidderId: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(bidderId)) {
+        next.delete(bidderId);
+      } else {
+        next.add(bidderId);
+      }
+      return next;
+    });
+  }
+
+  function shareActiveContractBidders() {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      activeContractBidderIds.forEach((bidderId) => next.add(bidderId));
+      return next;
+    });
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const changes = bidders
+      .filter((bidder) => originalAssignedIds.has(bidder.id) !== selectedIds.has(bidder.id))
+      .map((bidder) => ({ bidder, assigned: selectedIds.has(bidder.id) }));
+
+    if (!changes.length) {
+      onClose();
+      return;
+    }
+
+    setSaving(true);
+    try {
+      let latestData: PortalData | undefined;
+      for (const change of changes) {
+        latestData = await onSave("assignBidProfile", {
+          bidProfileId: profile.id,
+          bidderId: change.bidder.id,
+          assigned: change.assigned,
+        });
+        if (!latestData) {
+          return;
+        }
+      }
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <ModalFrame
+      title={`Share ${profile.profileName}`}
+      subtitle="Search bidder name, email, or User ID, then choose who can view this bid profile."
+      className="client-detail-modal share-profile-modal"
+      onClose={onClose}
+    >
+      <form className="share-profile-flow" onSubmit={submit}>
+        <div className="share-profile-summary">
+          <span className="badge bidder">{sharedCount} shared</span>
+          <span className="badge">{changedCount} pending changes</span>
+        </div>
+        <div className="share-profile-tools">
+          <label className="field">
+            <span>Find bidder</span>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search name, email, or User ID"
+              autoFocus
+            />
+          </label>
+          <div className="share-profile-actions">
+            <button
+              className="ghost-button compact-button"
+              type="button"
+              disabled={!activeContractBidderIds.size || busy || saving}
+              onClick={shareActiveContractBidders}
+            >
+              Share with active contracts
+            </button>
+            <button
+              className="ghost-button compact-button"
+              type="button"
+              disabled={busy || saving || !selectedIds.size}
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Clear sharing
+            </button>
+          </div>
+        </div>
+
+        {bidders.length ? (
+          <div className="table-wrap share-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Share</th>
+                  <th>Bidder</th>
+                  <th>User ID</th>
+                  <th>Rating</th>
+                  <th>Contract</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredBidders.map((bidder) => {
+                  const isShared = selectedIds.has(bidder.id);
+                  const bidderContract = contractByBidder.get(bidder.id);
+                  return (
+                    <tr className="clickable-row" key={bidder.id} onClick={() => toggleBidder(bidder.id)}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={isShared}
+                          aria-label={`Share ${profile.profileName} with ${bidder.name}`}
+                          onChange={() => toggleBidder(bidder.id)}
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                      </td>
+                      <td>
+                        <span className="table-member">
+                          <MemberAvatar user={bidder} size="sm" />
+                          <span>
+                            <strong>{bidder.name}</strong>
+                            <span className="table-subtext">{bidder.email}</span>
+                            {bidder.profileTitle ? <span className="table-subtext">{bidder.profileTitle}</span> : null}
+                          </span>
+                        </span>
+                      </td>
+                      <td><span className="table-subtext">{displayUserId(bidder)}</span></td>
+                      <td><RatingStars value={ratingForUser(bidder)} /></td>
+                      <td>
+                        {bidderContract ? (
+                          <span className={`badge ${contractStatusClass(bidderContract.status)}`}>{contractStatusLabel(bidderContract.status)}</span>
+                        ) : (
+                          <span className="muted">No contract</span>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          className={isShared ? "ghost-button compact-button danger" : "ghost-button compact-button"}
+                          type="button"
+                          disabled={busy || saving}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleBidder(bidder.id);
+                          }}
+                        >
+                          {isShared ? "Remove" : "Share"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!filteredBidders.length ? (
+                  <tr>
+                    <td colSpan={6}>
+                      <div className="empty-state compact">No bidders match this search.</div>
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-state">No assigned bidders are available yet.</div>
+        )}
+
+        <div className="modal-actions">
+          <button className="ghost-button" type="button" disabled={saving} onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary-button" type="submit" disabled={busy || saving}>
+            {saving ? "Saving..." : "Save sharing"}
+          </button>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}
+
 function bidProfileDraft(profile: BidProfileRecord | null, user: PortalUser) {
   const derivedName = splitLegalName(profile?.fullLegalName || user.name || "");
   return {
@@ -4129,6 +4345,7 @@ function ClientBidProfilesManager({
     .sort((left, right) => left.name.localeCompare(right.name));
   const [editingProfile, setEditingProfile] = useState<BidProfileRecord | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<BidProfileRecord | null>(null);
+  const [sharingProfile, setSharingProfile] = useState<BidProfileRecord | null>(null);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [draft, setDraft] = useState(() => bidProfileDraft(null, user));
   const draftVisaStatusOptions = visaStatusOptions.includes(draft.visaStatus)
@@ -4383,6 +4600,7 @@ function ClientBidProfilesManager({
             onOpen={() => setSelectedProfile(profile)}
             actions={[
               { label: "View details", onClick: () => setSelectedProfile(profile) },
+              { label: "Share", onClick: () => setSharingProfile(profile) },
               { label: "Edit", onClick: () => editProfile(profile) },
               { label: "Delete", danger: true, onClick: () => void deleteProfile(profile) },
             ]}
@@ -4396,6 +4614,16 @@ function ClientBidProfilesManager({
           profile={selectedProfile}
           assignedNames={attachedBidderNames(selectedProfile)}
           onClose={() => setSelectedProfile(null)}
+        />
+      ) : null}
+      {sharingProfile ? (
+        <BidProfileShareModal
+          profile={sharingProfile}
+          bidders={attachableBidders}
+          contracts={data.contracts || []}
+          busy={busy}
+          onClose={() => setSharingProfile(null)}
+          onSave={onSave}
         />
       ) : null}
     </section>

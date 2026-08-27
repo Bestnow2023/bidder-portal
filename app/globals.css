@@ -1297,6 +1297,50 @@ td > strong {
   font-size: 12px;
 }
 
+.share-profile-flow {
+  display: grid;
+  gap: 14px;
+}
+
+.share-profile-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.share-profile-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.share-profile-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.share-table-wrap {
+  max-height: min(54vh, 520px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.share-table-wrap table {
+  min-width: 760px;
+}
+
+.share-table-wrap th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+
 .profile-detail-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -2648,9 +2692,18 @@ td > strong {
   .section-heading,
   .person-title,
   .chat-toolbar,
-  .attachment-preview {
+  .attachment-preview,
+  .share-profile-tools {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .share-profile-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .share-profile-actions {
+    justify-content: flex-start;
   }
 
   .telegram-chat-title {

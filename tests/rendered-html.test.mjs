@@ -103,6 +103,10 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Publish post/);
   assert.match(portalApp, /Edit Bid Profile/);
   assert.match(portalApp, /Share with bidders/);
+  assert.match(portalApp, /BidProfileShareModal/);
+  assert.match(portalApp, /Search name, email, or User ID/);
+  assert.match(portalApp, /Share with active contracts/);
+  assert.match(portalApp, /Save sharing/);
   assert.match(portalApp, /BidProfileDetailModal/);
   assert.match(portalApp, /First name/);
   assert.match(portalApp, /Last 4 SSN/);
@@ -340,6 +344,8 @@ test("declares the requested frontend records", async () => {
     "Create Post",
     "Edit Bid Profile",
     "Share with bidders",
+    "Share with active contracts",
+    "Save sharing",
     "Client bid profile for job bidding.",
     "Notify shared bidders about this profile update",
     "Optional EEO details",
