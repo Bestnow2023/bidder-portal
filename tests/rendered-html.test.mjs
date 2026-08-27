@@ -107,6 +107,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Search name, email, or User ID/);
   assert.match(portalApp, /Share with active contracts/);
   assert.match(portalApp, /Save sharing/);
+  assert.match(portalApp, /messagesContainerRef/);
+  assert.match(portalApp, /scrollMessagesToBottom/);
+  assert.match(portalApp, /Go to latest messages/);
   assert.match(portalApp, /BidProfileDetailModal/);
   assert.match(portalApp, /First name/);
   assert.match(portalApp, /Last 4 SSN/);

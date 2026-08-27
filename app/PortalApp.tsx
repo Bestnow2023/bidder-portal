@@ -11523,8 +11523,11 @@ function ChatView({
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const [readReceipts, setReadReceipts] = useState<Record<string, string>>(() => loadChatReadReceipts(data.currentUser.id));
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const atMessageBottomRef = useRef(true);
   const markReadSignatureRef = useRef("");
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const currentUser = data.currentUser;
   const canSend = isActiveAccount(currentUser);
   const userTimeZone = browserTimeZone();
@@ -11654,10 +11657,60 @@ function ChatView({
     )
     .map((message) => message.id)
     .join("|");
+  const newestActiveMessage = activeMessages[activeMessages.length - 1];
+  const newestActiveMessageId = newestActiveMessage?.id || "";
+
+  const updateMessageBottomState = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) {
+      atMessageBottomRef.current = true;
+      setShowJumpToLatest(false);
+      return true;
+    }
+
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= 72;
+    atMessageBottomRef.current = isAtBottom;
+    setShowJumpToLatest(!isAtBottom);
+    return isAtBottom;
+  }, []);
+
+  const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior });
+    } else {
+      messagesEndRef.current?.scrollIntoView({ block: "end", behavior });
+    }
+    atMessageBottomRef.current = true;
+    setShowJumpToLatest(false);
+  }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ block: "end" });
-  }, [activeConversation?.id, activeMessages.length]);
+    atMessageBottomRef.current = true;
+    const frame = window.requestAnimationFrame(() => scrollMessagesToBottom("auto"));
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeConversation?.id, scrollMessagesToBottom]);
+
+  useEffect(() => {
+    if (!activeConversationId || !newestActiveMessageId) {
+      return;
+    }
+
+    const shouldAutoScroll = newestActiveMessage?.userId === currentUser.id || atMessageBottomRef.current;
+    if (!shouldAutoScroll) {
+      setShowJumpToLatest(true);
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      scrollMessagesToBottom(newestActiveMessage?.userId === currentUser.id ? "smooth" : "auto");
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeConversationId, currentUser.id, newestActiveMessage?.userId, newestActiveMessageId, scrollMessagesToBottom]);
+
+  function handleMessagesScroll() {
+    updateMessageBottomState();
+  }
 
   useEffect(() => {
     const conversationId = activeConversationId;
@@ -11700,6 +11753,8 @@ function ChatView({
   function selectConversation(conversationId: string) {
     setSelectedConversationId(conversationId);
     setProfilePanelOpen(false);
+    atMessageBottomRef.current = true;
+    setShowJumpToLatest(false);
     setEditingMessageId("");
     setEditBody("");
     setPendingAttachmentPreview(null);
@@ -11973,7 +12028,8 @@ function ChatView({
             </div>
           </div>
 
-          <div className="messages">
+          <div className="chat-thread-shell">
+          <div className="messages" ref={messagesContainerRef} onScroll={handleMessagesScroll}>
           {activeConversation?.monitored && activeParticipants.length ? (
             <div className="chat-context-card">
               <div className="person-title">
@@ -12074,6 +12130,18 @@ function ChatView({
           })}
           {activeConversation && !activeMessages.length ? <div className="empty-state">No messages yet.</div> : null}
           <div ref={messagesEndRef} />
+          </div>
+
+          {showJumpToLatest ? (
+            <button
+              className="jump-to-latest-button"
+              type="button"
+              aria-label="Go to latest messages"
+              onClick={() => scrollMessagesToBottom("smooth")}
+            >
+              <span aria-hidden="true">⌄</span>
+            </button>
+          ) : null}
 
           {activeConversation && !activeConversation.monitored ? (
             <form className="chat-composer" onSubmit={submit}>

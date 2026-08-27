@@ -1717,6 +1717,14 @@ td > strong {
   background: #ffffff;
 }
 
+.chat-thread-shell {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .conversation-list {
   display: grid;
   align-content: start;
@@ -1875,7 +1883,7 @@ td > strong {
   min-height: 0;
   max-height: 100%;
   overflow: auto;
-  padding: 22px 34px 0;
+  padding: 22px 34px;
   border: 0;
   border-radius: 0;
   background: #ffffff;
@@ -2179,14 +2187,44 @@ td > strong {
 }
 
 .chat-composer {
-  position: sticky;
-  bottom: 0;
   display: grid;
   gap: 10px;
   border-top: 0;
-  margin-top: auto;
-  padding: 16px 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0), #ffffff 18%);
+  padding: 12px 34px 18px;
+  background: #ffffff;
+}
+
+.jump-to-latest-button {
+  position: absolute;
+  right: 28px;
+  bottom: 96px;
+  z-index: 4;
+  width: 44px;
+  min-height: 44px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(15, 23, 42, 0.2);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #071513;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.jump-to-latest-button span {
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 0.7;
+  transform: translateY(-2px);
+}
+
+.jump-to-latest-button:hover,
+.jump-to-latest-button:focus-visible {
+  border-color: rgba(15, 118, 110, 0.42);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.22);
+  outline: none;
+  transform: translateY(-1px);
 }
 
 .read-only-composer {
