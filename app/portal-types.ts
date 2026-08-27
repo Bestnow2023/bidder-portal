@@ -318,7 +318,7 @@ export type ChatMessage = {
   recipientId?: string;
   conversationId?: string;
   channel?: "direct" | "support" | string;
-  messageType?: "text" | "contract_created" | "contract_accepted" | string;
+  messageType?: "text" | "contract_created" | "contract_updated" | "contract_accepted" | string;
   authorName: string;
   authorRole: Role;
   body: string;

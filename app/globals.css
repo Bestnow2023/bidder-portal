@@ -383,6 +383,79 @@ a:hover {
   font-weight: 700;
 }
 
+.combo-field {
+  position: relative;
+}
+
+.combo-shell {
+  position: relative;
+}
+
+.combo-shell input {
+  padding-right: 48px;
+}
+
+.combo-caret {
+  position: absolute;
+  top: 50%;
+  right: 13px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+
+.combo-menu {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  display: grid;
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(12, 20, 19, 0.16);
+  padding: 6px;
+}
+
+.combo-option {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.combo-option:hover,
+.combo-option[aria-selected="true"] {
+  background: #ecf8f6;
+}
+
+.combo-option strong {
+  font-size: 13px;
+}
+
+.combo-option small,
+.combo-empty {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.combo-empty {
+  padding: 10px;
+}
+
 input,
 select,
 textarea {

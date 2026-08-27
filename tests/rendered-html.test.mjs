@@ -3,7 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 test("keeps the bidder portal as the primary screen", async () => {
-  const [page, operationsPage, settingsPage, chatPage, biddersPage, postsPage, contractsPage, disputesPage, creditsPage, billingPage, helpPage, layout, robots, sitemap, portalApp, globals, packageJson] = await Promise.all([
+  const [page, operationsPage, settingsPage, chatPage, biddersPage, postsPage, contractsPage, disputesPage, creditsPage, billingPage, helpPage, layout, robots, sitemap, portalApp, portalTypes, globals, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/operations/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/settings/page.tsx", import.meta.url), "utf8"),
@@ -19,6 +19,7 @@ test("keeps the bidder portal as the primary screen", async () => {
     readFile(new URL("../app/robots.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/sitemap.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/portal-types.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
@@ -75,6 +76,13 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /User ID:/);
   assert.match(portalApp, /displayUserId/);
   assert.match(portalApp, /publicId/);
+  assert.match(portalApp, /SearchableSelect/);
+  assert.match(portalApp, /LocationSearchInput/);
+  assert.match(portalApp, /countryRegionCodes/);
+  assert.match(portalApp, /Search country/);
+  assert.match(portalApp, /Search city, state, or country/);
+  assert.match(portalApp, /Search timezone/);
+  assert.match(portalApp, /geocoding-api\.open-meteo\.com/);
   assert.match(portalApp, /targetUserPublicId/);
   assert.match(portalApp, /No exact User ID match yet/);
   assert.match(portalApp, /Search people/);
@@ -163,6 +171,7 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /portalNavVisible/);
   assert.match(portalApp, /ChatContractCard/);
   assert.match(portalApp, /Accept contract/);
+  assert.match(portalTypes, /contract_updated/);
   assert.match(portalApp, /profilePanelOpen/);
   assert.match(portalApp, /chat-side-panel/);
   assert.match(portalApp, /messageTimeInZone/);
@@ -316,6 +325,9 @@ test("declares the requested frontend records", async () => {
     "Security",
     "Profile settings",
     "User ID:",
+    "Search country",
+    "Search city, state, or country",
+    "Search timezone",
     "targetUserPublicId",
     "Save email",
     "Save password",
@@ -640,6 +652,9 @@ test("declares the requested frontend records", async () => {
   assert.match(globals, /\.member-avatar/);
   assert.match(globals, /\.profile-image-field/);
   assert.match(globals, /\.rating-stars/);
+  assert.match(globals, /\.combo-field/);
+  assert.match(globals, /\.combo-menu/);
+  assert.match(globals, /\.combo-option/);
   assert.match(globals, /\.chat-panel\.panel/);
   assert.match(globals, /\.content\.chat-content/);
   assert.match(globals, /\.analytics-bars/);

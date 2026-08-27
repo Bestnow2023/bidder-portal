@@ -32,6 +32,18 @@ import type {
 type AuthMode = "signIn" | "signUp" | "resetPassword";
 type PublicPortalData = { posts: PortalPost[]; users: PortalUser[] };
 type PortalView = "overview" | "dashboard" | "profile" | "clients" | "bidders" | "posts" | "contracts" | "disputes" | "people" | "bidderSettings" | "work" | "credits" | "billing" | "payments" | "chat" | "help";
+type SelectOption = { value: string; label: string; helper?: string };
+type GeoLocationResult = {
+  id: number;
+  name: string;
+  country?: string;
+  country_code?: string;
+  admin1?: string;
+  admin2?: string;
+  timezone?: string;
+  population?: number;
+};
+type LocationSelection = { label: string; country: string; timeZone: string };
 
 const payoutCurrencies = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB"];
 const signupPostCreditAmount = 10;
@@ -169,7 +181,7 @@ const visaStatusOptions = [
   "Other",
 ];
 const languageLevelOptions = ["English - native", "English - fluent", "English - conversational", "Spanish - fluent", "French - fluent"];
-const timeZoneOptions = [
+const fallbackTimeZoneOptions = [
   "America/New_York",
   "America/Chicago",
   "America/Denver",
@@ -188,6 +200,26 @@ const timeZoneOptions = [
   "Australia/Sydney",
   "UTC",
 ];
+const countryRegionCodes = [
+  "AF", "AX", "AL", "DZ", "AS", "AD", "AO", "AI", "AQ", "AG", "AR", "AM", "AW", "AU", "AT", "AZ",
+  "BS", "BH", "BD", "BB", "BY", "BE", "BZ", "BJ", "BM", "BT", "BO", "BQ", "BA", "BW", "BV", "BR",
+  "IO", "BN", "BG", "BF", "BI", "CV", "KH", "CM", "CA", "KY", "CF", "TD", "CL", "CN", "CX", "CC",
+  "CO", "KM", "CG", "CD", "CK", "CR", "CI", "HR", "CU", "CW", "CY", "CZ", "DK", "DJ", "DM", "DO",
+  "EC", "EG", "SV", "GQ", "ER", "EE", "SZ", "ET", "FK", "FO", "FJ", "FI", "FR", "GF", "PF", "TF",
+  "GA", "GM", "GE", "DE", "GH", "GI", "GR", "GL", "GD", "GP", "GU", "GT", "GG", "GN", "GW", "GY",
+  "HT", "HM", "VA", "HN", "HK", "HU", "IS", "IN", "ID", "IR", "IQ", "IE", "IM", "IL", "IT", "JM",
+  "JP", "JE", "JO", "KZ", "KE", "KI", "KP", "KR", "KW", "KG", "LA", "LV", "LB", "LS", "LR", "LY",
+  "LI", "LT", "LU", "MO", "MG", "MW", "MY", "MV", "ML", "MT", "MH", "MQ", "MR", "MU", "YT", "MX",
+  "FM", "MD", "MC", "MN", "ME", "MS", "MA", "MZ", "MM", "NA", "NR", "NP", "NL", "NC", "NZ", "NI",
+  "NE", "NG", "NU", "NF", "MK", "MP", "NO", "OM", "PK", "PW", "PS", "PA", "PG", "PY", "PE", "PH",
+  "PN", "PL", "PT", "PR", "QA", "RE", "RO", "RU", "RW", "BL", "SH", "KN", "LC", "MF", "PM", "VC",
+  "WS", "SM", "ST", "SA", "SN", "RS", "SC", "SL", "SG", "SX", "SK", "SI", "SB", "SO", "ZA", "GS",
+  "SS", "ES", "LK", "SD", "SR", "SJ", "SE", "CH", "SY", "TW", "TJ", "TZ", "TH", "TL", "TG", "TK",
+  "TO", "TT", "TN", "TR", "TM", "TC", "TV", "UG", "UA", "AE", "GB", "US", "UM", "UY", "UZ", "VU",
+  "VE", "VN", "VG", "VI", "WF", "EH", "YE", "ZM", "ZW",
+];
+const timeZoneOptions = buildTimeZoneOptions();
+const countryOptions = buildCountryOptions();
 const viewRoutes: Record<PortalView, string> = {
   overview: "/operations",
   dashboard: "/dashboard",
@@ -349,6 +381,213 @@ function DismissibleNotice({
   );
 }
 
+function SearchableSelect({
+  label,
+  value,
+  options,
+  onValueChange,
+  placeholder,
+  required = false,
+  noResultsLabel = "No matches",
+}: {
+  label: string;
+  value: string;
+  options: SelectOption[];
+  onValueChange: (value: string) => void;
+  placeholder: string;
+  required?: boolean;
+  noResultsLabel?: string;
+}) {
+  const [query, setQuery] = useState(value);
+  const [isOpen, setIsOpen] = useState(false);
+  const selectedOption = options.find((option) => option.value === value || option.label === value);
+  const inputValue = isOpen ? query : selectedOption?.label || value;
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredOptions = (normalizedQuery
+    ? options.filter((option) =>
+        `${option.label} ${option.helper || ""} ${option.value}`.toLowerCase().includes(normalizedQuery)
+      )
+    : options
+  ).slice(0, 80);
+
+  function selectOption(option: SelectOption) {
+    onValueChange(option.value);
+    setQuery(option.label);
+    setIsOpen(false);
+  }
+
+  return (
+    <label className="field combo-field">
+      <span>{label}</span>
+      <div className="combo-shell">
+        <input
+          value={inputValue}
+          onChange={(event) => {
+            const nextQuery = event.target.value;
+            setQuery(nextQuery);
+            onValueChange(nextQuery);
+            setIsOpen(true);
+          }}
+          onFocus={() => {
+            setQuery(selectedOption?.label || value);
+            setIsOpen(true);
+          }}
+          onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
+          placeholder={placeholder}
+          required={required}
+          autoComplete="off"
+        />
+        <span className="combo-caret" aria-hidden="true">v</span>
+        {isOpen ? (
+          <div className="combo-menu" role="listbox">
+            {filteredOptions.length ? (
+              filteredOptions.map((option) => (
+                <button
+                  key={`${option.value}-${option.helper || ""}`}
+                  type="button"
+                  role="option"
+                  aria-selected={option.value === value}
+                  className="combo-option"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectOption(option)}
+                >
+                  <strong>{option.label}</strong>
+                  {option.helper ? <small>{option.helper}</small> : null}
+                </button>
+              ))
+            ) : (
+              <div className="combo-empty">{noResultsLabel}</div>
+            )}
+          </div>
+        ) : null}
+      </div>
+    </label>
+  );
+}
+
+function LocationSearchInput({
+  label,
+  value,
+  country,
+  onValueChange,
+  onLocationSelect,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  country: string;
+  onValueChange: (value: string) => void;
+  onLocationSelect: (selection: LocationSelection) => void;
+  placeholder: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [results, setResults] = useState<GeoLocationResult[]>([]);
+
+  useEffect(() => {
+    const trimmedQuery = value.trim();
+    if (!isOpen || trimmedQuery.length < 2) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const searchName = country && !trimmedQuery.toLowerCase().includes(country.toLowerCase())
+      ? `${trimmedQuery}, ${country}`
+      : trimmedQuery;
+    const timer = window.setTimeout(async () => {
+      setIsLoading(true);
+      setError("");
+      try {
+        const response = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(searchName)}&count=8&language=en&format=json`,
+          { signal: controller.signal }
+        );
+        if (!response.ok) {
+          throw new Error("Location search failed.");
+        }
+        const payload = await response.json() as { results?: GeoLocationResult[] };
+        if (!controller.signal.aborted) {
+          setResults(payload.results || []);
+        }
+      } catch (locationError) {
+        if (!controller.signal.aborted) {
+          setResults([]);
+          setError(locationError instanceof Error ? locationError.message : "Location search failed.");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      }
+    }, 280);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [country, isOpen, value]);
+
+  function selectLocation(result: GeoLocationResult) {
+    const labelText = geoLocationLabel(result);
+    onLocationSelect({
+      label: labelText,
+      country: result.country || country,
+      timeZone: result.timezone || "",
+    });
+    setIsOpen(false);
+  }
+
+  return (
+    <label className="field combo-field">
+      <span>{label}</span>
+      <div className="combo-shell">
+        <input
+          value={value}
+          onChange={(event) => {
+            const nextQuery = event.target.value;
+            onValueChange(nextQuery);
+            if (nextQuery.trim().length < 2) {
+              setResults([]);
+              setIsLoading(false);
+              setError("");
+            }
+            setIsOpen(true);
+          }}
+          onFocus={() => setIsOpen(true)}
+          onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
+          placeholder={placeholder}
+          autoComplete="off"
+        />
+        <span className="combo-caret" aria-hidden="true">search</span>
+        {isOpen && value.trim().length >= 2 ? (
+          <div className="combo-menu" role="listbox">
+            {isLoading ? <div className="combo-empty">Searching locations...</div> : null}
+            {!isLoading && error ? <div className="combo-empty">{error}</div> : null}
+            {!isLoading && !error && results.length ? (
+              results.map((result) => (
+                <button
+                  key={result.id}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  className="combo-option"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectLocation(result)}
+                >
+                  <strong>{geoLocationLabel(result)}</strong>
+                  <small>{geoLocationHelper(result) || "Location result"}</small>
+                </button>
+              ))
+            ) : null}
+            {!isLoading && !error && !results.length ? <div className="combo-empty">No locations found.</div> : null}
+          </div>
+        ) : null}
+      </div>
+    </label>
+  );
+}
+
 function TableMemberCell({ user, subtitle }: { user: PortalUser; subtitle?: string }) {
   return (
     <div className="table-member">
@@ -473,6 +712,76 @@ function timeZoneDisplay(timeZone?: string, value = new Date().toISOString()) {
   } catch {
     return timeZone;
   }
+}
+
+function buildTimeZoneOptions() {
+  let supportedTimeZones: string[] = [];
+  try {
+    supportedTimeZones = typeof Intl.supportedValuesOf === "function"
+      ? Intl.supportedValuesOf("timeZone")
+      : [];
+  } catch {
+    supportedTimeZones = [];
+  }
+
+  return Array.from(new Set([...fallbackTimeZoneOptions, ...supportedTimeZones]))
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function buildCountryOptions(): SelectOption[] {
+  let displayNames: Intl.DisplayNames | null = null;
+  try {
+    displayNames = typeof Intl.DisplayNames === "function" ? new Intl.DisplayNames(["en"], { type: "region" }) : null;
+  } catch {
+    displayNames = null;
+  }
+
+  return countryRegionCodes
+    .map((code) => {
+      const label = displayNames?.of(code) || code;
+      return { value: label, label, helper: code };
+    })
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function timeZoneSelectOptions(value?: string): SelectOption[] {
+  const selectedValue = value || "";
+  const options = timeZoneOptions.map((timeZone) => ({
+    value: timeZone,
+    label: timeZoneDisplay(timeZone),
+    helper: timeZone,
+  }));
+
+  return selectedValue && !options.some((option) => option.value === selectedValue)
+    ? [{ value: selectedValue, label: timeZoneDisplay(selectedValue), helper: "Saved timezone" }, ...options]
+    : options;
+}
+
+function countrySelectOptions(value?: string): SelectOption[] {
+  const selectedValue = value || "";
+
+  return selectedValue && !countryOptions.some((option) => option.value.toLowerCase() === selectedValue.toLowerCase())
+    ? [{ value: selectedValue, label: selectedValue, helper: "Saved country" }, ...countryOptions]
+    : countryOptions;
+}
+
+function geoLocationLabel(result: GeoLocationResult) {
+  const parts = [result.name, result.admin1, result.admin2, result.country]
+    .filter((part): part is string => Boolean(part))
+    .filter((part, index, allParts) => allParts.findIndex((candidate) => candidate.toLowerCase() === part.toLowerCase()) === index);
+
+  return parts.join(", ");
+}
+
+function geoLocationHelper(result: GeoLocationResult) {
+  const helperParts = [
+    result.country_code,
+    result.timezone,
+    result.population ? `${result.population.toLocaleString()} people` : "",
+  ].filter(Boolean);
+
+  return helperParts.join(" - ");
 }
 
 function browserTimeZone() {
@@ -3262,9 +3571,6 @@ function ProfileView({
   const [accountError, setAccountError] = useState("");
   const isClientProfile = isClientRole(user.role);
   const isWorkerProfile = isWorkerUser(user);
-  const profileTimeZoneOptions = timeZoneOptions.includes(draft.profileTimeZone)
-    ? timeZoneOptions
-    : [draft.profileTimeZone, ...timeZoneOptions].filter(Boolean);
 
   function toggleClientPreference(preference: string) {
     setDraft((current) => {
@@ -3392,41 +3698,45 @@ function ProfileView({
               />
             </label>
           ) : null}
-          <label className="field">
-            <span>Country *</span>
-            <input
-              value={draft.country}
-              onChange={(event) => setDraft({ ...draft, country: event.target.value, profileLocation: event.target.value })}
-              placeholder="Country"
-              required
-            />
-          </label>
-          <label className="field">
-            <span>Timezone *</span>
-            <select
-              value={draft.profileTimeZone}
-              onChange={(event) => setDraft({ ...draft, profileTimeZone: event.target.value })}
-              required
-            >
-              {profileTimeZoneOptions.map((timeZone) => (
-                <option key={timeZone} value={timeZone}>{timeZoneDisplay(timeZone)}</option>
-              ))}
-            </select>
-          </label>
+          <SearchableSelect
+            label="Country *"
+            value={draft.country}
+            options={countrySelectOptions(draft.country)}
+            onValueChange={(country) => setDraft((current) => ({
+              ...current,
+              country,
+              profileLocation: current.profileLocation || country,
+            }))}
+            placeholder="Search country"
+            required
+          />
+          <LocationSearchInput
+            label="Location"
+            value={draft.profileLocation}
+            country={draft.country}
+            onValueChange={(profileLocation) => setDraft((current) => ({ ...current, profileLocation }))}
+            onLocationSelect={(selection) => setDraft((current) => ({
+              ...current,
+              profileLocation: selection.label,
+              country: selection.country || current.country,
+              profileTimeZone: selection.timeZone || current.profileTimeZone,
+            }))}
+            placeholder="Search city, state, or country"
+          />
+          <SearchableSelect
+            label="Timezone *"
+            value={draft.profileTimeZone}
+            options={timeZoneSelectOptions(draft.profileTimeZone)}
+            onValueChange={(profileTimeZone) => setDraft((current) => ({ ...current, profileTimeZone }))}
+            placeholder="Search timezone"
+            required
+          />
           <label className="field">
             <span>Profile title</span>
             <input
               value={draft.profileTitle}
               onChange={(event) => setDraft({ ...draft, profileTitle: event.target.value })}
               placeholder={isClientRole(user.role) ? "Hiring client for remote bidder work" : "Technical bidder for web projects"}
-            />
-          </label>
-          <label className="field">
-            <span>Location</span>
-            <input
-              value={draft.profileLocation}
-              onChange={(event) => setDraft({ ...draft, profileLocation: event.target.value })}
-              placeholder="City, country"
             />
           </label>
           {isWorkerProfile ? (
