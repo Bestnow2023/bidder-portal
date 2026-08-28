@@ -888,31 +888,6 @@ function restorePortalAttachmentDataUrls(nextData: PortalData, previousData: Por
   };
 }
 
-function chatReadStorageKey(userId: string) {
-  return `bidderPortalChatRead:${userId}`;
-}
-
-function loadChatReadReceipts(userId: string): Record<string, string> {
-  if (typeof window === "undefined" || !userId) {
-    return {};
-  }
-
-  try {
-    const stored = window.localStorage.getItem(chatReadStorageKey(userId));
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveChatReadReceipts(userId: string, receipts: Record<string, string>) {
-  if (typeof window === "undefined" || !userId) {
-    return;
-  }
-
-  window.localStorage.setItem(chatReadStorageKey(userId), JSON.stringify(receipts));
-}
-
 function titleCase(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -1286,6 +1261,35 @@ function chatConversationIdForMessage(message: ChatMessage) {
   }
 
   return message.recipientId ? inboxConversationId(message.userId, message.recipientId) : "";
+}
+
+function unreadChatCountsByConversation(messages: ChatMessage[] = [], currentUser?: PortalUser | null) {
+  const counts: Record<string, number> = {};
+  if (!currentUser || isSuperAdminRole(currentUser.role)) {
+    return counts;
+  }
+
+  messages.forEach((message) => {
+    if (
+      message.userId === currentUser.id ||
+      message.recipientId !== currentUser.id ||
+      message.deletedAt ||
+      message.readAt
+    ) {
+      return;
+    }
+
+    const conversationId = chatConversationIdForMessage(message);
+    if (conversationId) {
+      counts[conversationId] = (counts[conversationId] || 0) + 1;
+    }
+  });
+
+  return counts;
+}
+
+function totalUnreadChatCount(counts: Record<string, number>) {
+  return Object.values(counts).reduce((total, count) => total + count, 0);
 }
 
 function supportConversationIdForUser(userId: string) {
@@ -1988,7 +1992,6 @@ export default function PortalApp() {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [portalNavVisible, setPortalNavVisible] = useState(true);
   const [publicData, setPublicData] = useState<PublicPortalData>({ posts: [], users: [] });
@@ -1999,6 +2002,8 @@ export default function PortalApp() {
   const lastScrollYRef = useRef(0);
   const dataRef = useRef<PortalData | null>(null);
   const effectiveActiveView = data ? safeViewForUser(data.currentUser, activeView) : activeView;
+  const chatUnreadCounts = data ? unreadChatCountsByConversation(data.chatMessages || [], data.currentUser) : {};
+  const chatUnreadCount = totalUnreadChatCount(chatUnreadCounts);
 
   useEffect(() => {
     dataRef.current = data;
@@ -2302,7 +2307,6 @@ export default function PortalApp() {
   useEffect(() => {
     if (!data) {
       latestChatMessageIdRef.current = "";
-      window.setTimeout(() => setChatUnreadCount(0), 0);
       return;
     }
 
@@ -2310,7 +2314,6 @@ export default function PortalApp() {
     const latestMessage = messages[messages.length - 1];
     if (!latestMessage) {
       latestChatMessageIdRef.current = "";
-      window.setTimeout(() => setChatUnreadCount(0), 0);
       return;
     }
 
@@ -2328,7 +2331,6 @@ export default function PortalApp() {
       );
 
       if (incomingMessages.length && effectiveActiveView !== "chat") {
-        window.setTimeout(() => setChatUnreadCount((count) => count + incomingMessages.length), 0);
         const lastIncoming = incomingMessages[incomingMessages.length - 1];
         if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
           new Notification("Bidder Portal", { body: chatNotificationText(lastIncoming) });
@@ -2338,9 +2340,6 @@ export default function PortalApp() {
       latestChatMessageIdRef.current = latestMessage.id;
     }
 
-    if (effectiveActiveView === "chat") {
-      window.setTimeout(() => setChatUnreadCount(0), 0);
-    }
   }, [data, effectiveActiveView]);
 
   useEffect(() => {
@@ -2449,7 +2448,6 @@ export default function PortalApp() {
     setActiveView("overview");
     setChatRecipientId("");
     setChatPostId("");
-    setChatUnreadCount(0);
     latestChatMessageIdRef.current = "";
     setVerificationPendingEmail("");
     setVerificationSuccessEmail("");
@@ -2695,9 +2693,6 @@ export default function PortalApp() {
     setActiveView(view);
     setChatRecipientId("");
     setChatPostId("");
-    if (view === "chat") {
-      setChatUnreadCount(0);
-    }
     setNotificationMenuOpen(false);
     setPortalNavVisible(true);
   }
@@ -2731,7 +2726,6 @@ export default function PortalApp() {
     setChatRecipientId(userId);
     setChatPostId(relatedPostId);
     setActiveView("chat");
-    setChatUnreadCount(0);
     setPortalNavVisible(true);
   }
 
@@ -2893,6 +2887,7 @@ export default function PortalApp() {
                 data={data}
                 busy={busy}
                 onSend={postAction}
+                unreadCounts={chatUnreadCounts}
                 requestedRecipientId={chatRecipientId}
                 requestedPostId={chatPostId}
               />
@@ -11504,12 +11499,14 @@ function ChatView({
   data,
   busy,
   onSend,
+  unreadCounts,
   requestedRecipientId,
   requestedPostId,
 }: {
   data: PortalData;
   busy: boolean;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  unreadCounts: Record<string, number>;
   requestedRecipientId: string;
   requestedPostId: string;
 }) {
@@ -11521,7 +11518,6 @@ function ChatView({
   const [editBody, setEditBody] = useState("");
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
-  const [readReceipts, setReadReceipts] = useState<Record<string, string>>(() => loadChatReadReceipts(data.currentUser.id));
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -11558,12 +11554,7 @@ function ChatView({
     const conversationId = inboxConversationId(currentUser.id, contact.id);
     const messages = data.chatMessages.filter((message) => chatConversationIdForMessage(message) === conversationId);
     const latestMessage = messages[messages.length - 1];
-    const unreadCount = messages.filter(
-      (message) =>
-        message.userId !== currentUser.id &&
-        !message.deletedAt &&
-        (!readReceipts[conversationId] || message.createdAt > readReceipts[conversationId])
-    ).length;
+    const unreadCount = unreadCounts[conversationId] || 0;
 
     return {
       id: `direct:${contact.id}`,
@@ -11647,10 +11638,6 @@ function ChatView({
     activeConversation.recipientAllowsContact &&
     Boolean(activeConversation.recipientId);
   const canSubmit = activeCanSendMessage && Boolean(body.trim() || attachments.length);
-  const latestIncomingMessage = [...activeMessages]
-    .reverse()
-    .find((message) => message.userId !== currentUser.id && !message.deletedAt);
-  const latestIncomingCreatedAt = latestIncomingMessage?.createdAt || "";
   const unreadIncomingSignature = activeMessages
     .filter(
       (message) => message.userId !== currentUser.id && !message.deletedAt && !message.readAt
@@ -11713,32 +11700,16 @@ function ChatView({
   }
 
   useEffect(() => {
-    const conversationId = activeConversationId;
-    if (!conversationId || !activeMessages.length) {
-      return;
-    }
-
-    if (!latestIncomingCreatedAt || readReceipts[conversationId] === latestIncomingCreatedAt) {
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      setReadReceipts((current) => {
-        const nextReceipts = { ...current, [conversationId]: latestIncomingCreatedAt };
-        saveChatReadReceipts(currentUser.id, nextReceipts);
-        return nextReceipts;
-      });
-    }, 0);
-
-    return () => window.clearTimeout(timeout);
-  }, [activeConversationId, activeMessages.length, currentUser.id, latestIncomingCreatedAt, readReceipts]);
-
-  useEffect(() => {
     if (!activeConversationId || activeConversation?.monitored) {
       return;
     }
 
-    if (!unreadIncomingSignature || markReadSignatureRef.current === unreadIncomingSignature) {
+    if (
+      showJumpToLatest ||
+      !atMessageBottomRef.current ||
+      !unreadIncomingSignature ||
+      markReadSignatureRef.current === unreadIncomingSignature
+    ) {
       return;
     }
 
@@ -11748,7 +11719,7 @@ function ChatView({
     }, 0);
 
     return () => window.clearTimeout(timeout);
-  }, [activeConversation?.monitored, activeConversationId, onSend, unreadIncomingSignature]);
+  }, [activeConversation?.monitored, activeConversationId, onSend, showJumpToLatest, unreadIncomingSignature]);
 
   function selectConversation(conversationId: string) {
     setSelectedConversationId(conversationId);
@@ -11940,7 +11911,7 @@ function ChatView({
             const conversationUser = conversation.recipientId ? membersById.get(conversation.recipientId) : null;
             return (
               <div
-                className={`conversation-entry ${activeConversation?.id === conversation.id ? "active" : ""}`}
+                className={`conversation-entry ${activeConversation?.id === conversation.id ? "active" : ""} ${conversation.unreadCount ? "has-unread" : ""}`}
                 key={conversation.id}
               >
                 <button
@@ -11948,12 +11919,19 @@ function ChatView({
                   className="conversation-button"
                   onClick={() => selectConversation(conversation.id)}
                 >
-                  {conversationUser ? <MemberAvatar user={conversationUser} size="md" /> : <span className="conversation-avatar">{conversation.avatar}</span>}
+                  <span className="conversation-avatar-wrap">
+                    {conversationUser ? <MemberAvatar user={conversationUser} size="md" /> : <span className="conversation-avatar">{conversation.avatar}</span>}
+                    {conversation.unreadCount ? <span className="channel-unread-badge">{conversation.unreadCount}</span> : null}
+                  </span>
                   <span>
                     <strong>{conversation.title}</strong>
                     <small>{conversation.preview}</small>
                   </span>
-                  {conversation.unreadCount ? <span className="conversation-badge">{conversation.unreadCount}</span> : null}
+                  {conversation.unreadCount ? (
+                    <span className="conversation-badge" aria-label={`${conversation.unreadCount} unread messages`}>
+                      New
+                    </span>
+                  ) : null}
                 </button>
                 {isSuperAdminRole(currentUser.role) ? (
                   <ActionMenu

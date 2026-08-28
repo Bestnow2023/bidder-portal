@@ -602,7 +602,10 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /chat-main-pane/);
   assert.match(portalApp, /conversation-entry/);
   assert.match(portalApp, /conversation-badge/);
-  assert.match(portalApp, /readReceipts/);
+  assert.match(portalApp, /unreadChatCountsByConversation/);
+  assert.match(portalApp, /chatUnreadCounts/);
+  assert.match(portalApp, /channel-unread-badge/);
+  assert.match(portalApp, /has-unread/);
   assert.match(portalApp, /readAt/);
   assert.match(portalApp, /markChatConversationRead/);
   assert.match(portalApp, /allowDirectMessages/);
