@@ -1184,7 +1184,7 @@ function paymentStatusLabel(status: PaymentRecord["status"]) {
 
 function paymentStatusClass(status: PaymentRecord["status"]) {
   if (status === "paid") return "bidder";
-  if (status === "failed") return "paused";
+  if (status === "failed" || status === "denied" || status === "cancelled") return "paused";
   return "pending";
 }
 
@@ -9393,6 +9393,15 @@ function UserPayments({
     }
   }
 
+  async function cancelWithdrawal(payment: PaymentRecord) {
+    const confirmed = window.confirm("Cancel this withdrawal request? The held money credit will return to your balance.");
+    if (!confirmed) {
+      return;
+    }
+
+    await onAction("cancelWithdrawal", { paymentId: payment.id });
+  }
+
   async function convertPostCredit(payload: Record<string, unknown>) {
     const nextData = await onAction("convertMoneyToPostCredit", payload);
     if (nextData) {
@@ -9486,7 +9495,7 @@ function UserPayments({
             <p>Client-added payout records and receipt links.</p>
           </div>
         </div>
-        <PaymentTable payments={userPayments} users={[user]} />
+        <PaymentTable payments={userPayments} users={[user]} onCancelWithdrawal={cancelWithdrawal} />
       </section>
 
       {showWithdrawalModal ? (
@@ -9812,9 +9821,9 @@ function SuperAdminBillingManagementView({
   busy: boolean;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
 }) {
-  const pendingPayments = data.payments.filter((payment) => payment.status === "processing");
-  const completedPayments = data.payments.filter((payment) => payment.status === "paid");
-  const [completingPayment, setCompletingPayment] = useState<PaymentRecord | null>(null);
+  const pendingPayments = data.payments.filter((payment) => isWithdrawalPayment(payment) && payment.status === "processing");
+  const completedPayments = data.payments.filter((payment) => ["paid", "failed", "denied", "cancelled"].includes(payment.status));
+  const [reviewingPayment, setReviewingPayment] = useState<PaymentRecord | null>(null);
 
   return (
     <div className="dashboard-stack">
@@ -9829,7 +9838,7 @@ function SuperAdminBillingManagementView({
         <PaymentTable
           payments={pendingPayments}
           users={data.users}
-          onComplete={setCompletingPayment}
+          onReview={setReviewingPayment}
           emptyMessage="No pending withdrawal requests need completion."
         />
       </section>
@@ -9849,16 +9858,22 @@ function SuperAdminBillingManagementView({
         />
       </section>
 
-      {completingPayment ? (
-        <PaymentCompleteModal
-          payment={completingPayment}
-          user={userById(data.users, completingPayment.userId)}
+      {reviewingPayment ? (
+        <WithdrawalReviewModal
+          payment={reviewingPayment}
+          user={userById(data.users, reviewingPayment.userId)}
           busy={busy}
-          onClose={() => setCompletingPayment(null)}
-          onSave={async (payload) => {
+          onClose={() => setReviewingPayment(null)}
+          onComplete={async (payload) => {
             const nextData = await onAction("completePayment", payload);
             if (nextData) {
-              setCompletingPayment(null);
+              setReviewingPayment(null);
+            }
+          }}
+          onDeny={async (payload) => {
+            const nextData = await onAction("denyWithdrawal", payload);
+            if (nextData) {
+              setReviewingPayment(null);
             }
           }}
         />
@@ -10669,18 +10684,115 @@ function PaymentCompleteModal({
   );
 }
 
+function WithdrawalReviewModal({
+  payment,
+  user,
+  busy,
+  onClose,
+  onComplete,
+  onDeny,
+}: {
+  payment: PaymentRecord;
+  user?: PortalUser;
+  busy: boolean;
+  onClose: () => void;
+  onComplete: (payload: Record<string, unknown>) => Promise<void>;
+  onDeny: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const [paymentLink, setPaymentLink] = useState(payment.paymentLink || payment.payoutTxid || payment.payoutUuid || "");
+  const [denialReason, setDenialReason] = useState(payment.payoutError || "");
+  const payoutMethod = [payment.payoutCurrency, cryptoNetworkLabel(payment.payoutNetwork)].filter(Boolean).join(" - ");
+
+  async function submitComplete(event: FormEvent) {
+    event.preventDefault();
+    await onComplete({
+      paymentId: payment.id,
+      paymentLink,
+    });
+  }
+
+  async function denyWithdrawal() {
+    const confirmed = window.confirm("Deny this withdrawal request? The held money credit will return to the user.");
+    if (!confirmed) {
+      return;
+    }
+
+    await onDeny({
+      paymentId: payment.id,
+      reason: denialReason,
+    });
+  }
+
+  return (
+    <ModalFrame title="Review Withdrawal Request" subtitle="Check the payout amount and wallet before completing or denying this request." onClose={onClose}>
+      <form className="form-grid" onSubmit={submitComplete}>
+        <div className="status-strip compact full">
+          {user?.name || "Unknown user"} - {paymentTypeLabel(payment)} - {money(payment.amount)} - {paymentStatusLabel(payment.status)}
+        </div>
+        <div className="profile-detail-list full">
+          <span><strong>User ID</strong>{displayUserId(user)}</span>
+          <span><strong>Email</strong>{user?.email || "Unknown"}</span>
+          <span><strong>Amount</strong>{money(payment.amount)}</span>
+          <span><strong>Requested date</strong>{shortDate(payment.scheduledDate)}</span>
+          <span><strong>Payout coin</strong>{payment.payoutCurrency || "-"}</span>
+          <span><strong>Network</strong>{cryptoNetworkLabel(payment.payoutNetwork) || "-"}</span>
+          <span><strong>Wallet address</strong>{payment.payoutAddress || "-"}</span>
+          <span><strong>Memo</strong>{payment.memo || "-"}</span>
+        </div>
+        <label className="field full">
+          <span>Payment link *</span>
+          <input
+            value={paymentLink}
+            onChange={(event) => setPaymentLink(event.target.value)}
+            placeholder="Receipt, transaction, or transfer link"
+            required
+          />
+        </label>
+        <label className="field full">
+          <span>Deny reason</span>
+          <textarea
+            value={denialReason}
+            onChange={(event) => setDenialReason(event.target.value)}
+            placeholder="Optional note shown to the requester"
+          />
+        </label>
+        {payoutMethod || payment.payoutAddress ? (
+          <div className="status-strip compact full">
+            Payout destination: {payoutMethod || "Wallet"} - {payment.payoutAddress || "No address saved"}
+          </div>
+        ) : null}
+        <div className="actions full">
+          <button className="primary-button" type="submit" disabled={busy || !paymentLink.trim()}>
+            Mark completed
+          </button>
+          <button className="danger-button" type="button" disabled={busy} onClick={denyWithdrawal}>
+            Deny withdrawal
+          </button>
+          <button className="ghost-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}
+
 function PaymentTable({
   payments,
   users,
+  onReview,
   onEdit,
   onComplete,
+  onCancelWithdrawal,
   onDelete,
   emptyMessage = "No payment history yet.",
 }: {
   payments: PaymentRecord[];
   users: PortalUser[];
+  onReview?: (payment: PaymentRecord) => void;
   onEdit?: (payment: PaymentRecord) => void;
   onComplete?: (payment: PaymentRecord) => void;
+  onCancelWithdrawal?: (payment: PaymentRecord) => void;
   onDelete?: (payment: PaymentRecord) => void;
   emptyMessage?: string;
 }) {
@@ -10701,7 +10813,7 @@ function PaymentTable({
             <th>Status</th>
             <th>Link</th>
             <th>Memo</th>
-            {onEdit || onComplete || onDelete ? <th>Actions</th> : null}
+            {onReview || onEdit || onComplete || onCancelWithdrawal || onDelete ? <th>Actions</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -10710,12 +10822,22 @@ function PaymentTable({
             const linkValue = payment.paymentLink || payment.payoutTxid || payment.payoutUuid || "";
             const isWebLink = /^https?:\/\//i.test(linkValue);
             const actionItems: ActionMenuItem[] = [
+              ...(onReview ? [{ label: "Review request", onClick: () => onReview(payment) }] : []),
               ...(onComplete && payment.status === "processing" ? [{ label: "Mark completed", onClick: () => onComplete(payment) }] : []),
+              ...(onCancelWithdrawal && isWithdrawalPayment(payment) && payment.status === "processing"
+                ? [{ label: "Cancel withdrawal", danger: true, onClick: () => onCancelWithdrawal(payment) }]
+                : []),
               ...(onEdit ? [{ label: "Edit", onClick: () => onEdit(payment) }] : []),
               ...(onDelete ? [{ label: "Delete", danger: true, onClick: () => onDelete(payment) }] : []),
             ];
+            const opensReviewDirectly = Boolean(onReview && actionItems.length === 1);
             return (
-              <tr key={payment.id}>
+              <tr
+                className={onReview ? "clickable-row" : ""}
+                key={payment.id}
+                onClick={() => onReview?.(payment)}
+                title={onReview ? "Open withdrawal request review" : undefined}
+              >
                 <td>{user?.name || "Unknown"}</td>
                 <td>{paymentTypeLabel(payment)}</td>
                 <td>{shortDate(payment.periodStart)} - {shortDate(payment.periodEnd)}</td>
@@ -10729,7 +10851,21 @@ function PaymentTable({
                 <td>{payment.memo || "-"}</td>
                 {actionItems.length ? (
                   <td>
-                    <ActionMenu items={actionItems} />
+                    {opensReviewDirectly ? (
+                      <button
+                        type="button"
+                        aria-label="Open withdrawal request review"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-transparent bg-transparent text-xl font-black leading-none text-slate-500 transition hover:bg-slate-100 hover:text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onReview?.(payment);
+                        }}
+                      >
+                        ...
+                      </button>
+                    ) : (
+                      <ActionMenu items={actionItems} />
+                    )}
                   </td>
                 ) : null}
               </tr>

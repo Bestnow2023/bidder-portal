@@ -1,6 +1,6 @@
 export type Role = "super_admin" | "client" | "admin" | "bidder" | "developer";
 export type UserStatus = "pending_review" | "active" | "temporarily_restricted" | "suspended" | "closed";
-export type PaymentStatus = "scheduled" | "processing" | "paid" | "failed";
+export type PaymentStatus = "scheduled" | "processing" | "paid" | "failed" | "denied" | "cancelled";
 export type WorkLogReviewStatus = "pending" | "approved" | "changes_requested";
 export type PaymentFrequency = "" | "weekly" | "biweekly" | "monthly";
 export type PaymentWeekday = "" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday";
@@ -240,6 +240,10 @@ export type PaymentRecord = {
   payoutError?: string;
   completedAt?: string;
   completedByUserId?: string;
+  deniedAt?: string;
+  deniedByUserId?: string;
+  cancelledAt?: string;
+  cancelledByUserId?: string;
   createdAt: string;
   updatedAt: string;
 };

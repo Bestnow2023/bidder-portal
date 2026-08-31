@@ -222,7 +222,11 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Payout coin/);
   assert.match(portalApp, /Move client credits into the bidder money-credit wallet/);
   assert.match(portalApp, /WithdrawalRequestModal/);
+  assert.match(portalApp, /WithdrawalReviewModal/);
   assert.match(portalApp, /Request withdrawal/);
+  assert.match(portalApp, /Review Withdrawal Request/);
+  assert.match(portalApp, /Deny withdrawal/);
+  assert.match(portalApp, /Cancel withdrawal/);
   assert.match(portalApp, /Tip/);
   assert.match(portalApp, /Escrow History/);
   assert.match(portalApp, /Credit Wallet/);
@@ -496,6 +500,8 @@ test("declares the requested frontend records", async () => {
     "releasePayment",
     "completePayment",
     "requestWithdrawal",
+    "denyWithdrawal",
+    "cancelWithdrawal",
     "savePaymentMethod",
     "saveWorkLog",
     "deleteWorkLog",
@@ -534,6 +540,8 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /portalNotifications/);
   assert.match(portalApp, /paymentStatusLabel/);
   assert.match(portalApp, /paymentStatusClass/);
+  assert.match(portalApp, /denied/);
+  assert.match(portalApp, /cancelled/);
   assert.match(portalApp, /NEXT_PUBLIC_ADMIN_TIME_ZONE/);
   assert.match(portalApp, /assignedAdminId/);
   assert.match(portalApp, /profileCompletedAt/);
