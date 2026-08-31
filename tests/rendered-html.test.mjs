@@ -542,6 +542,7 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /paymentStatusClass/);
   assert.match(portalApp, /denied/);
   assert.match(portalApp, /cancelled/);
+  assert.match(portalApp, /visiblePaymentHistory/);
   assert.match(portalApp, /NEXT_PUBLIC_ADMIN_TIME_ZONE/);
   assert.match(portalApp, /assignedAdminId/);
   assert.match(portalApp, /profileCompletedAt/);

@@ -9946,6 +9946,9 @@ function AdminPayments({
   const creditBalance = paymentClientBalances?.moneyCreditBalance || 0;
   const releaseCreditBalance = depositClientBalances?.moneyCreditBalance || 0;
   const releasePostCreditBalance = depositClientBalances?.postCreditBalance || 0;
+  const visiblePaymentHistory = canModifyPayments
+    ? data.payments
+    : data.payments.filter((payment) => !isWithdrawalPayment(payment));
   const depositAmount = Number(depositDraft.amount) || 0;
   const depositFee = Math.round(depositAmount * 0.05 * 100) / 100;
   const depositCredit = Math.max(0, Math.round((depositAmount - depositFee) * 100) / 100);
@@ -10326,29 +10329,31 @@ function AdminPayments({
           <DepositList deposits={(data.deposits || []).filter((deposit) => !depositClientId || deposit.clientId === depositClientId).slice(0, 5)} users={data.users} />
         </section>
 
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <h2>Payment Methods</h2>
-              <p>Saved payout destinations from bidders and developers.</p>
+        {canModifyPayments ? (
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h2>Payment Methods</h2>
+                <p>Saved payout destinations from bidders and developers.</p>
+              </div>
             </div>
-          </div>
-          <div className="payment-method-list">
-            {payableUsers.map((user) => {
-              const methods = data.paymentMethods.filter((method) => method.userId === user.id);
-              const primary = methods.find((method) => method.isPrimary) || methods[0];
-              return (
-                <div className="method-row" key={user.id}>
-                  <div>
-                    <strong>{user.name}</strong>
-                    <span className="muted">{primary ? `${payoutMethodLabel(primary)}: ${primary.address}` : "No method saved"}</span>
+            <div className="payment-method-list">
+              {payableUsers.map((user) => {
+                const methods = data.paymentMethods.filter((method) => method.userId === user.id);
+                const primary = methods.find((method) => method.isPrimary) || methods[0];
+                return (
+                  <div className="method-row" key={user.id}>
+                    <div>
+                      <strong>{user.name}</strong>
+                      <span className="muted">{primary ? `${payoutMethodLabel(primary)}: ${primary.address}` : "No method saved"}</span>
+                    </div>
+                    <span className={`badge ${normalizeAccountStatus(user.status)}`}>{statusLabel(user.status)}</span>
                   </div>
-                  <span className={`badge ${normalizeAccountStatus(user.status)}`}>{statusLabel(user.status)}</span>
-                </div>
-              );
-            })}
-          </div>
-        </section>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
       </div>
 
       <section className="panel" style={{ gridColumn: "1 / -1" }}>
@@ -10359,7 +10364,7 @@ function AdminPayments({
           </div>
         </div>
         <PaymentTable
-          payments={data.payments}
+          payments={visiblePaymentHistory}
           users={data.users}
           onEdit={canModifyPayments ? setEditingPayment : undefined}
           onDelete={canModifyPayments ? deletePayment : undefined}
