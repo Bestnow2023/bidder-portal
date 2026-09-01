@@ -38,6 +38,9 @@ export type PortalUser = {
   profileLanguages?: string[];
   profileCompletedAt?: string;
   allowDirectMessages?: boolean;
+  hasChatHistory?: boolean;
+  chatLastMessageAt?: string;
+  chatLastMessagePreview?: string;
   clientRating?: number;
   bidderRating?: number;
   creditBalances?: CreditBalances;
@@ -340,6 +343,29 @@ export type ChatMessage = {
   deletedByUserId?: string;
 };
 
+export type PortalPageResource =
+  | "paymentMethods"
+  | "workLogs"
+  | "payments"
+  | "escrows"
+  | "deposits"
+  | "contracts"
+  | "posts"
+  | "bidProfiles"
+  | "disputes"
+  | "notifications"
+  | "chatMessages"
+  | "supportMessages";
+
+export type PortalPageInfo = {
+  resource: PortalPageResource;
+  limit: number;
+  offset: number;
+  loaded: number;
+  nextOffset: number;
+  hasMore: boolean;
+};
+
 export type PortalData = {
   currentUser: PortalUser;
   sessionToken?: string;
@@ -358,4 +384,5 @@ export type PortalData = {
   chatMessages: ChatMessage[];
   supportContacts?: PortalUser[];
   supportMessages?: ChatMessage[];
+  pagination?: Partial<Record<PortalPageResource, PortalPageInfo>>;
 };

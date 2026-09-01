@@ -319,8 +319,9 @@ test("keeps the bidder portal as the primary screen", async () => {
 });
 
 test("declares the requested frontend records", async () => {
-  const [portalApp, packageJson, vercelConfig, envExample, globals, appEntries] = await Promise.all([
+  const [portalApp, portalTypes, packageJson, vercelConfig, envExample, globals, appEntries] = await Promise.all([
     readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/portal-types.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../vercel.json", import.meta.url), "utf8"),
     readFile(new URL("../.env.local.example", import.meta.url), "utf8"),
@@ -669,10 +670,18 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /prepareChatAttachment/);
   assert.match(portalApp, /knownAttachmentIdsForPortalData/);
   assert.match(portalApp, /restorePortalAttachmentDataUrls/);
+  assert.match(portalApp, /loadPortalPage/);
+  assert.match(portalApp, /mergePortalPageIntoData/);
+  assert.match(portalApp, /PagedListFooter/);
+  assert.match(portalTypes, /PortalPageInfo/);
+  assert.match(portalTypes, /PortalPageResource/);
+  assert.match(portalTypes, /hasChatHistory/);
+  assert.match(portalTypes, /chatLastMessagePreview/);
   assert.match(portalApp, /RatingStars/);
   assert.match(globals, /\.member-avatar/);
   assert.match(globals, /\.profile-image-field/);
   assert.match(globals, /\.rating-stars/);
+  assert.match(globals, /\.pagination-footer/);
   assert.match(globals, /\.combo-field/);
   assert.match(globals, /\.combo-menu/);
   assert.match(globals, /\.combo-option/);

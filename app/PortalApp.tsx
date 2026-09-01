@@ -20,6 +20,8 @@ import type {
   PaymentRecord,
   PaymentWeekday,
   PortalData,
+  PortalPageInfo,
+  PortalPageResource,
   PortalNotification,
   PortalPost,
   PortalUser,
@@ -49,6 +51,20 @@ const payoutCurrencies = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB"];
 const signupPostCreditAmount = 10;
 const postCreditCost = 1;
 const postCreditMoneyPrice = 0.1;
+const portalPageResources: PortalPageResource[] = [
+  "paymentMethods",
+  "workLogs",
+  "payments",
+  "escrows",
+  "deposits",
+  "contracts",
+  "posts",
+  "bidProfiles",
+  "disputes",
+  "notifications",
+  "chatMessages",
+  "supportMessages",
+];
 const payoutNetworkOptions = [
   { value: "TRON", label: "TRC20 - TRON" },
   { value: "BSC", label: "BEP20 - BSC" },
@@ -888,6 +904,80 @@ function restorePortalAttachmentDataUrls(nextData: PortalData, previousData: Por
   };
 }
 
+type PortalPageResult = {
+  resource: PortalPageResource;
+  items: Array<{ id?: string; createdAt?: string }>;
+  pageInfo: PortalPageInfo;
+};
+
+function mergePortalRecords<T extends { id?: string; createdAt?: string }>(
+  currentItems: T[] = [],
+  nextItems: T[] = [],
+  sortAscendingByCreatedAt = false
+) {
+  const merged = new Map<string, T>();
+  [...currentItems, ...nextItems].forEach((item, index) => {
+    merged.set(item.id || `row-${index}`, item);
+  });
+  const records = Array.from(merged.values());
+
+  if (sortAscendingByCreatedAt) {
+    return records.sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
+  }
+
+  return records;
+}
+
+function mergePortalPageIntoData(currentData: PortalData, page: PortalPageResult): PortalData {
+  const resource = page.resource;
+  const currentItems = (currentData[resource] || []) as Array<{ id?: string; createdAt?: string }>;
+  const sortChatByTime = resource === "chatMessages" || resource === "supportMessages";
+
+  return {
+    ...currentData,
+    [resource]: mergePortalRecords(currentItems, page.items, sortChatByTime),
+    pagination: {
+      ...(currentData.pagination || {}),
+      [resource]: page.pageInfo,
+    },
+  };
+}
+
+function preserveLoadedPortalPages(nextData: PortalData, previousData: PortalData | null): PortalData {
+  if (!previousData) {
+    return nextData;
+  }
+
+  return portalPageResources.reduce((draft, resource) => {
+    const previousItems = (previousData[resource] || []) as Array<{ id?: string; createdAt?: string }>;
+    const nextItems = (draft[resource] || []) as Array<{ id?: string; createdAt?: string }>;
+    if (previousItems.length <= nextItems.length) {
+      return draft;
+    }
+
+    const previousPage = previousData.pagination?.[resource];
+    const nextPage = draft.pagination?.[resource];
+    const sortChatByTime = resource === "chatMessages" || resource === "supportMessages";
+
+    return {
+      ...draft,
+      [resource]: mergePortalRecords(nextItems, previousItems, sortChatByTime),
+      pagination: {
+        ...(draft.pagination || {}),
+        [resource]: {
+          ...(nextPage || previousPage),
+          resource,
+          limit: nextPage?.limit || previousPage?.limit || nextItems.length || previousItems.length,
+          offset: 0,
+          loaded: Math.max(nextPage?.loaded || nextItems.length, previousPage?.loaded || previousItems.length),
+          nextOffset: Math.max(nextPage?.nextOffset || nextItems.length, previousPage?.nextOffset || previousItems.length),
+          hasMore: previousPage?.hasMore ?? nextPage?.hasMore ?? false,
+        },
+      },
+    };
+  }, nextData);
+}
+
 function titleCase(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -1616,6 +1706,31 @@ function ActionMenu({ label = "...", items }: { label?: string; items: ActionMen
   );
 }
 
+function PagedListFooter({
+  pageInfo,
+  loading,
+  noun = "records",
+  onLoadMore,
+}: {
+  pageInfo?: PortalPageInfo;
+  loading?: boolean;
+  noun?: string;
+  onLoadMore?: () => void;
+}) {
+  if (!pageInfo?.hasMore || !onLoadMore) {
+    return null;
+  }
+
+  return (
+    <div className="pagination-footer">
+      <span>Showing {pageInfo.loaded} {noun}. More are available.</span>
+      <button className="ghost-button compact-button" type="button" disabled={loading} onClick={onLoadMore}>
+        {loading ? "Loading..." : `Load more ${noun}`}
+      </button>
+    </div>
+  );
+}
+
 function ModalFrame({
   title,
   subtitle,
@@ -1994,6 +2109,7 @@ export default function PortalApp() {
   const [error, setError] = useState("");
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [portalNavVisible, setPortalNavVisible] = useState(true);
+  const [loadingPages, setLoadingPages] = useState<Partial<Record<PortalPageResource, boolean>>>({});
   const [publicData, setPublicData] = useState<PublicPortalData>({ posts: [], users: [] });
   const [publicLoading, setPublicLoading] = useState(false);
   const [publicError, setPublicError] = useState("");
@@ -2244,7 +2360,7 @@ export default function PortalApp() {
       }
 
       const nextPortalData = nextData as PortalData;
-      setData((current) => restorePortalAttachmentDataUrls(nextPortalData, current));
+      setData((current) => restorePortalAttachmentDataUrls(preserveLoadedPortalPages(nextPortalData, current), current));
       setLoginEmail(nextData.currentUser.email);
       if (nextData.sessionToken) {
         setSessionToken(nextData.sessionToken);
@@ -2267,6 +2383,73 @@ export default function PortalApp() {
       }
     }
   }, [handleEmailVerificationRequired]);
+
+  const loadPortalPage = useCallback(async (
+    resource: PortalPageResource,
+    options: { conversationId?: string; limit?: number; force?: boolean } = {}
+  ) => {
+    const currentData = dataRef.current;
+    if (!currentData || !sessionToken || loadingPages[resource]) {
+      return;
+    }
+
+    const isConversationPage = Boolean(options.conversationId && (resource === "chatMessages" || resource === "supportMessages"));
+    const pageInfo = currentData.pagination?.[resource];
+    if (!isConversationPage && !options.force && pageInfo && !pageInfo.hasMore) {
+      return;
+    }
+
+    const currentItems = (currentData[resource] || []) as Array<{ id?: string }>;
+    const offset = isConversationPage
+      ? ((currentItems as ChatMessage[]).filter((message) => chatConversationIdForMessage(message) === options.conversationId).length)
+      : pageInfo?.nextOffset ?? currentItems.length;
+
+    setLoadingPages((current) => ({ ...current, [resource]: true }));
+    setError("");
+    try {
+      const response = await fetch(portalApiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "loadPortalPage",
+          email: currentData.currentUser.email,
+          sessionToken,
+          resource,
+          offset,
+          limit: options.limit,
+          conversationId: options.conversationId,
+          knownAttachmentIds: resource === "chatMessages" || resource === "supportMessages"
+            ? knownAttachmentIdsForPortalData(currentData)
+            : [],
+        }),
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Portal API returned ${contentType || "non-JSON"} from ${portalApiUrl}. Check NEXT_PUBLIC_API_BASE_URL.`);
+      }
+
+      const page = await response.json();
+      if (!response.ok) {
+        throw new Error(page.error || "Could not load more records.");
+      }
+
+      setData((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return restorePortalAttachmentDataUrls(
+          mergePortalPageIntoData(current, page as PortalPageResult),
+          current
+        );
+      });
+      return page as PortalPageResult;
+    } catch (pageError) {
+      setError(pageError instanceof Error ? pageError.message : "Could not load more records.");
+    } finally {
+      setLoadingPages((current) => ({ ...current, [resource]: false }));
+    }
+  }, [loadingPages, sessionToken]);
 
   useEffect(() => {
     if (!data?.currentUser.email || !sessionToken) {
@@ -2872,21 +3055,23 @@ export default function PortalApp() {
             {safeView === "profile" ? <ProfileView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "clients" ? <ClientDirectoryView data={data} onMessageClient={openInboxForUser} /> : null}
             {safeView === "bidders" ? <BiddersDirectoryView data={data} onMessageBidder={openInboxForUser} /> : null}
-            {safeView === "posts" ? <PostsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
-            {safeView === "contracts" ? <ContractsView data={data} busy={busy} onAction={postAction} onMessageUser={openInboxForUser} /> : null}
-            {safeView === "disputes" ? <DisputesView data={data} busy={busy} onAction={postAction} /> : null}
+            {safeView === "posts" ? <PostsView data={data} busy={busy} loadingPages={loadingPages} onAction={postAction} onLoadPage={loadPortalPage} onMessageUser={openInboxForUser} /> : null}
+            {safeView === "contracts" ? <ContractsView data={data} busy={busy} loadingPages={loadingPages} onAction={postAction} onLoadPage={loadPortalPage} onMessageUser={openInboxForUser} /> : null}
+            {safeView === "disputes" ? <DisputesView data={data} busy={busy} loadingPages={loadingPages} onAction={postAction} onLoadPage={loadPortalPage} /> : null}
             {safeView === "people" && isSuperAdmin ? <PeopleView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "bidderSettings" && isSuperAdmin ? <BidderSettingsView data={data} busy={busy} onSave={postAction} /> : null}
             {safeView === "dashboard" && currentUser.role === "bidder" ? <BidderDashboard data={data} /> : null}
-            {safeView === "work" ? <WorkView data={data} busy={busy} onSave={postAction} /> : null}
+            {safeView === "work" ? <WorkView data={data} busy={busy} loadingPages={loadingPages} onSave={postAction} onLoadPage={loadPortalPage} /> : null}
             {safeView === "credits" && isSuperAdmin ? <SuperAdminCreditManagementView data={data} busy={busy} onAction={postAction} /> : null}
-            {safeView === "billing" || safeView === "payments" ? <PaymentsView data={data} busy={busy} onAction={postAction} /> : null}
-            {safeView === "help" ? <HelpView data={data} busy={busy} onSend={postAction} /> : null}
+            {safeView === "billing" || safeView === "payments" ? <PaymentsView data={data} busy={busy} loadingPages={loadingPages} onAction={postAction} onLoadPage={loadPortalPage} /> : null}
+            {safeView === "help" ? <HelpView data={data} busy={busy} loadingPages={loadingPages} onSend={postAction} onLoadPage={loadPortalPage} /> : null}
             {safeView === "chat" ? (
               <ChatView
                 data={data}
                 busy={busy}
+                loadingPages={loadingPages}
                 onSend={postAction}
+                onLoadPage={loadPortalPage}
                 unreadCounts={chatUnreadCounts}
                 requestedRecipientId={chatRecipientId}
                 requestedPostId={chatPostId}
@@ -5260,12 +5445,16 @@ function CollaborationSummaryList({
 function PostsView({
   data,
   busy,
+  loadingPages,
   onAction,
+  onLoadPage,
   onMessageUser,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
   onMessageUser: (userId: string, relatedPostId?: string) => void;
 }) {
   const currentUser = data.currentUser;
@@ -5689,6 +5878,9 @@ function PostsView({
           emptyMessage={hasPostFilters ? "No posts match these filters." : "No posts are available for this view."}
           onSelect={setSelectedPost}
           actionItemsForPost={postActionItems}
+          pageInfo={data.pagination?.posts}
+          loadingMore={loadingPages.posts}
+          onLoadMore={() => void onLoadPage("posts")}
         />
       </section>
 
@@ -5706,6 +5898,9 @@ function PostsView({
           emptyMessage="No posts published yet."
           onSelect={setSelectedPost}
           actionItemsForPost={postActionItems}
+          pageInfo={data.pagination?.posts}
+          loadingMore={loadingPages.posts}
+          onLoadMore={() => void onLoadPage("posts")}
         />
       </section>
       ) : null}
@@ -5801,73 +5996,82 @@ function PostTable({
   emptyMessage,
   onSelect,
   actionItemsForPost,
+  pageInfo,
+  loadingMore,
+  onLoadMore,
 }: {
   posts: PortalPost[];
   users: PortalUser[];
   emptyMessage: string;
   onSelect: (post: PortalPost) => void;
   actionItemsForPost?: (post: PortalPost) => ActionMenuItem[];
+  pageInfo?: PortalPageInfo;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   if (!posts.length) {
     return <div className="empty-state">{emptyMessage}</div>;
   }
 
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Post</th>
-            <th>Author</th>
-            <th>Audience</th>
-            <th>Budget</th>
-            <th>Rate</th>
-            <th>Bonus</th>
-            <th>Schedule</th>
-            <th>Status</th>
-            <th>Created</th>
-            {actionItemsForPost ? <th>Actions</th> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {posts.map((post) => {
-            const author = userById(users, post.authorId);
-            const actionItems = actionItemsForPost?.(post) || [];
-            return (
-              <tr
-                className="clickable-row"
-                key={post.id}
-                tabIndex={0}
-                onClick={() => onSelect(post)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    onSelect(post);
-                  }
-                }}
-              >
-                <td>
-                  <strong>{post.title}</strong>
-                  <span className="table-subtext">{post.criteria}</span>
-                </td>
-                <td>{author?.name || "Unknown"}</td>
-                <td>{postAudienceLabel(post)}</td>
-                <td>{money(post.budgetAmount || 0)}</td>
-                <td>{money(post.preferredRate || 0)}</td>
-                <td>{money(post.bonusPerInterview || 0)}</td>
-                <td>{paymentScheduleLabel(post.paymentFrequency, post.paymentWeekday) || "Flexible"}</td>
-                <td><span className={`badge ${post.status === "active" ? "approved" : "paused"}`}>{titleCase(post.status)}</span></td>
-                <td>{dateTime(post.createdAt)}</td>
-                {actionItemsForPost ? (
+    <>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Post</th>
+              <th>Author</th>
+              <th>Audience</th>
+              <th>Budget</th>
+              <th>Rate</th>
+              <th>Bonus</th>
+              <th>Schedule</th>
+              <th>Status</th>
+              <th>Created</th>
+              {actionItemsForPost ? <th>Actions</th> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {posts.map((post) => {
+              const author = userById(users, post.authorId);
+              const actionItems = actionItemsForPost?.(post) || [];
+              return (
+                <tr
+                  className="clickable-row"
+                  key={post.id}
+                  tabIndex={0}
+                  onClick={() => onSelect(post)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      onSelect(post);
+                    }
+                  }}
+                >
                   <td>
-                    {actionItems.length ? <ActionMenu items={actionItems} /> : "-"}
+                    <strong>{post.title}</strong>
+                    <span className="table-subtext">{post.criteria}</span>
                   </td>
-                ) : null}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                  <td>{author?.name || "Unknown"}</td>
+                  <td>{postAudienceLabel(post)}</td>
+                  <td>{money(post.budgetAmount || 0)}</td>
+                  <td>{money(post.preferredRate || 0)}</td>
+                  <td>{money(post.bonusPerInterview || 0)}</td>
+                  <td>{paymentScheduleLabel(post.paymentFrequency, post.paymentWeekday) || "Flexible"}</td>
+                  <td><span className={`badge ${post.status === "active" ? "approved" : "paused"}`}>{titleCase(post.status)}</span></td>
+                  <td>{dateTime(post.createdAt)}</td>
+                  {actionItemsForPost ? (
+                    <td>
+                      {actionItems.length ? <ActionMenu items={actionItems} /> : "-"}
+                    </td>
+                  ) : null}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <PagedListFooter pageInfo={pageInfo} loading={loadingMore} noun="posts" onLoadMore={onLoadMore} />
+    </>
   );
 }
 
@@ -6046,12 +6250,16 @@ function PostEditModal({
 function ContractsView({
   data,
   busy,
+  loadingPages,
   onAction,
+  onLoadPage,
   onMessageUser,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
   onMessageUser: (userId: string) => void;
 }) {
   const currentUser = data.currentUser;
@@ -6404,6 +6612,12 @@ function ContractsView({
             </tbody>
           </table>
         </div>
+        <PagedListFooter
+          pageInfo={data.pagination?.contracts}
+          loading={loadingPages.contracts}
+          noun="contracts"
+          onLoadMore={() => void onLoadPage("contracts")}
+        />
         {!contracts.length ? <div className="empty-state">No contracts yet.</div> : null}
         {contracts.length && !filteredContracts.length ? <div className="empty-state">No contracts match these filters.</div> : null}
       </section>
@@ -6873,11 +7087,15 @@ function disputeStatusClass(status: string) {
 function DisputesView({
   data,
   busy,
+  loadingPages,
   onAction,
+  onLoadPage,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
 }) {
   const currentUser = data.currentUser;
   const canCreateDispute = isClientRole(currentUser.role);
@@ -7141,6 +7359,12 @@ function DisputesView({
             </tbody>
           </table>
         </div>
+        <PagedListFooter
+          pageInfo={data.pagination?.disputes}
+          loading={loadingPages.disputes}
+          noun="disputes"
+          onLoadMore={() => void onLoadPage("disputes")}
+        />
         {!disputes.length ? <div className="empty-state">No disputes yet.</div> : null}
         {disputes.length && !filteredDisputes.length ? <div className="empty-state">No disputes match these filters.</div> : null}
       </section>
@@ -8483,14 +8707,18 @@ function BidderDashboard({ data }: { data: PortalData }) {
 function WorkView({
   data,
   busy,
+  loadingPages,
   onSave,
+  onLoadPage,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
 }) {
   if (canViewManagedRecords(data.currentUser.role)) {
-    return <AdminWorkLogs data={data} busy={busy} onAction={onSave} />;
+    return <AdminWorkLogs data={data} busy={busy} loadingPages={loadingPages} onAction={onSave} onLoadPage={onLoadPage} />;
   }
 
   if (data.currentUser.role === "developer") {
@@ -8501,17 +8729,21 @@ function WorkView({
     );
   }
 
-  return <BidderWorkLog data={data} busy={busy} onSave={onSave} />;
+  return <BidderWorkLog data={data} busy={busy} loadingPages={loadingPages} onSave={onSave} onLoadPage={onLoadPage} />;
 }
 
 function BidderWorkLog({
   data,
   busy,
+  loadingPages,
   onSave,
+  onLoadPage,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onSave: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
 }) {
   const [draft, setDraft] = useState({
     workDate: today(),
@@ -8651,6 +8883,9 @@ function BidderWorkLog({
           emptyMessage="No work logs match these filters."
           onEditLog={setEditingWorkLog}
           onDeleteLog={deleteWorkLog}
+          pageInfo={data.pagination?.workLogs}
+          loadingMore={loadingPages.workLogs}
+          onLoadMore={() => void onLoadPage("workLogs")}
         />
       </section>
 
@@ -8685,11 +8920,15 @@ function BidderWorkLog({
 function AdminWorkLogs({
   data,
   busy,
+  loadingPages,
   onAction,
+  onLoadPage,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
 }) {
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
   const [selectedUserId, setSelectedUserId] = useState("all");
@@ -8734,6 +8973,9 @@ function AdminWorkLogs({
         emptyMessage="No work logs match this date filter."
         onApproveLog={canReviewWorkLogs ? approveWorkLog : undefined}
         onRequestEditLog={canReviewWorkLogs ? setReviewingWorkLog : undefined}
+        pageInfo={data.pagination?.workLogs}
+        loadingMore={loadingPages.workLogs}
+        onLoadMore={() => void onLoadPage("workLogs")}
       />
       {reviewingWorkLog ? (
         <WorkLogReviewModal
@@ -9019,6 +9261,9 @@ function WorkLogTable({
   onDeleteLog,
   onApproveLog,
   onRequestEditLog,
+  pageInfo,
+  loadingMore,
+  onLoadMore,
 }: {
   logs: WorkLog[];
   users: PortalUser[];
@@ -9030,94 +9275,104 @@ function WorkLogTable({
   onDeleteLog?: (log: WorkLog) => void;
   onApproveLog?: (log: WorkLog) => void;
   onRequestEditLog?: (log: WorkLog) => void;
+  pageInfo?: PortalPageInfo;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   if (!logs.length) {
     return <div className="empty-state">{emptyMessage}</div>;
   }
 
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>User</th>
-            {clientLabelForLog ? <th>Client</th> : null}
-            <th>Sheet</th>
-            <th>Applied</th>
-            <th>Interviews</th>
-            <th>Review</th>
-            {showPaymentStatus ? <th>Status</th> : null}
-            <th>Notes</th>
-            {onEditLog || onDeleteLog || onApproveLog || onRequestEditLog ? <th>Actions</th> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {logs.map((log) => {
-            const user = userById(users, log.userId);
-            const paid = isWorkLogPaid(log, payments);
-            const reviewStatus = workLogReviewStatus(log, paid);
-            const actionItems: ActionMenuItem[] = [
-              ...(onApproveLog
-                ? [{ label: "Approve", disabled: paid || reviewStatus === "approved", onClick: () => onApproveLog(log) }]
-                : []),
-              ...(onRequestEditLog
-                ? [{ label: "Request edit", disabled: paid, onClick: () => onRequestEditLog(log) }]
-                : []),
-              ...(onEditLog ? [{ label: "Edit", disabled: paid, onClick: () => onEditLog(log) }] : []),
-              ...(onDeleteLog ? [{ label: "Delete", danger: true, disabled: paid, onClick: () => onDeleteLog(log) }] : []),
-            ];
-            return (
-              <tr key={log.id}>
-                <td>{shortDate(log.workDate)}</td>
-                <td>{user?.name || "Unknown"}</td>
-                {clientLabelForLog ? <td>{clientLabelForLog(log)}</td> : null}
-                <td><a href={log.sheetLink} target="_blank" rel="noreferrer">Open sheet</a></td>
-                <td>{log.appliedJobs}</td>
-                <td>{log.interviewsScheduled}</td>
-                <td>
-                  <span className={`badge ${workLogReviewClass(log, paid)}`}>{workLogReviewLabel(log, paid)}</span>
-                  {log.reviewedAt ? <span className="table-subtext">{dateTime(log.reviewedAt)}</span> : null}
-                </td>
-                {showPaymentStatus ? (
-                  <td><span className={`badge ${paid ? "bidder" : "pending"}`}>{paid ? "Paid" : "Unpaid"}</span></td>
-                ) : null}
-                <td>
-                  {log.notes || "-"}
-                  {log.reviewNote ? <span className="table-subtext">Suggestion: {log.reviewNote}</span> : null}
-                </td>
-                {actionItems.length ? (
+    <>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>User</th>
+              {clientLabelForLog ? <th>Client</th> : null}
+              <th>Sheet</th>
+              <th>Applied</th>
+              <th>Interviews</th>
+              <th>Review</th>
+              {showPaymentStatus ? <th>Status</th> : null}
+              <th>Notes</th>
+              {onEditLog || onDeleteLog || onApproveLog || onRequestEditLog ? <th>Actions</th> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {logs.map((log) => {
+              const user = userById(users, log.userId);
+              const paid = isWorkLogPaid(log, payments);
+              const reviewStatus = workLogReviewStatus(log, paid);
+              const actionItems: ActionMenuItem[] = [
+                ...(onApproveLog
+                  ? [{ label: "Approve", disabled: paid || reviewStatus === "approved", onClick: () => onApproveLog(log) }]
+                  : []),
+                ...(onRequestEditLog
+                  ? [{ label: "Request edit", disabled: paid, onClick: () => onRequestEditLog(log) }]
+                  : []),
+                ...(onEditLog ? [{ label: "Edit", disabled: paid, onClick: () => onEditLog(log) }] : []),
+                ...(onDeleteLog ? [{ label: "Delete", danger: true, disabled: paid, onClick: () => onDeleteLog(log) }] : []),
+              ];
+              return (
+                <tr key={log.id}>
+                  <td>{shortDate(log.workDate)}</td>
+                  <td>{user?.name || "Unknown"}</td>
+                  {clientLabelForLog ? <td>{clientLabelForLog(log)}</td> : null}
+                  <td><a href={log.sheetLink} target="_blank" rel="noreferrer">Open sheet</a></td>
+                  <td>{log.appliedJobs}</td>
+                  <td>{log.interviewsScheduled}</td>
                   <td>
-                    <ActionMenu items={actionItems} />
+                    <span className={`badge ${workLogReviewClass(log, paid)}`}>{workLogReviewLabel(log, paid)}</span>
+                    {log.reviewedAt ? <span className="table-subtext">{dateTime(log.reviewedAt)}</span> : null}
                   </td>
-                ) : null}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                  {showPaymentStatus ? (
+                    <td><span className={`badge ${paid ? "bidder" : "pending"}`}>{paid ? "Paid" : "Unpaid"}</span></td>
+                  ) : null}
+                  <td>
+                    {log.notes || "-"}
+                    {log.reviewNote ? <span className="table-subtext">Suggestion: {log.reviewNote}</span> : null}
+                  </td>
+                  {actionItems.length ? (
+                    <td>
+                      <ActionMenu items={actionItems} />
+                    </td>
+                  ) : null}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <PagedListFooter pageInfo={pageInfo} loading={loadingMore} noun="work logs" onLoadMore={onLoadMore} />
+    </>
   );
 }
 
 function PaymentsView({
   data,
   busy,
+  loadingPages,
   onAction,
+  onLoadPage,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
 }) {
   if (isSuperAdminRole(data.currentUser.role)) {
-    return <SuperAdminBillingManagementView data={data} busy={busy} onAction={onAction} />;
+    return <SuperAdminBillingManagementView data={data} busy={busy} loadingPages={loadingPages} onAction={onAction} onLoadPage={onLoadPage} />;
   }
 
   if (isClientRole(data.currentUser.role)) {
-    return <AdminPayments data={data} busy={busy} onAction={onAction} />;
+    return <AdminPayments data={data} busy={busy} loadingPages={loadingPages} onAction={onAction} onLoadPage={onLoadPage} />;
   }
 
-  return <UserPayments data={data} busy={busy} onAction={onAction} />;
+  return <UserPayments data={data} busy={busy} loadingPages={loadingPages} onAction={onAction} onLoadPage={onLoadPage} />;
 }
 
 function PaymentMethodForm({
@@ -9367,11 +9622,15 @@ function ConvertPostCreditModal({
 function UserPayments({
   data,
   busy,
+  loadingPages,
   onAction,
+  onLoadPage,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
 }) {
   const user = data.currentUser;
   const methods = data.paymentMethods.filter((method) => method.userId === user.id);
@@ -9495,7 +9754,14 @@ function UserPayments({
             <p>Client-added payout records and receipt links.</p>
           </div>
         </div>
-        <PaymentTable payments={userPayments} users={[user]} onCancelWithdrawal={cancelWithdrawal} />
+        <PaymentTable
+          payments={userPayments}
+          users={[user]}
+          onCancelWithdrawal={cancelWithdrawal}
+          pageInfo={data.pagination?.payments}
+          loadingMore={loadingPages.payments}
+          onLoadMore={() => void onLoadPage("payments")}
+        />
       </section>
 
       {showWithdrawalModal ? (
@@ -9815,11 +10081,15 @@ function CreditAdjustmentModal({
 function SuperAdminBillingManagementView({
   data,
   busy,
+  loadingPages,
   onAction,
+  onLoadPage,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
 }) {
   const pendingPayments = data.payments.filter((payment) => isWithdrawalPayment(payment) && payment.status === "processing");
   const completedPayments = data.payments.filter((payment) => ["paid", "failed", "denied", "cancelled"].includes(payment.status));
@@ -9840,6 +10110,9 @@ function SuperAdminBillingManagementView({
           users={data.users}
           onReview={setReviewingPayment}
           emptyMessage="No pending withdrawal requests need completion."
+          pageInfo={data.pagination?.payments}
+          loadingMore={loadingPages.payments}
+          onLoadMore={() => void onLoadPage("payments")}
         />
       </section>
 
@@ -9855,6 +10128,9 @@ function SuperAdminBillingManagementView({
           payments={completedPayments}
           users={data.users}
           emptyMessage="No completed payouts yet."
+          pageInfo={data.pagination?.payments}
+          loadingMore={loadingPages.payments}
+          onLoadMore={() => void onLoadPage("payments")}
         />
       </section>
 
@@ -9885,11 +10161,15 @@ function SuperAdminBillingManagementView({
 function AdminPayments({
   data,
   busy,
+  loadingPages,
   onAction,
+  onLoadPage,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
 }) {
   const payableUsers = data.users.filter((user) =>
     isWorkerUser(user) &&
@@ -10368,6 +10648,9 @@ function AdminPayments({
           users={data.users}
           onEdit={canModifyPayments ? setEditingPayment : undefined}
           onDelete={canModifyPayments ? deletePayment : undefined}
+          pageInfo={data.pagination?.payments}
+          loadingMore={loadingPages.payments}
+          onLoadMore={() => void onLoadPage("payments")}
         />
       </section>
 
@@ -10791,6 +11074,9 @@ function PaymentTable({
   onCancelWithdrawal,
   onDelete,
   emptyMessage = "No payment history yet.",
+  pageInfo,
+  loadingMore,
+  onLoadMore,
 }: {
   payments: PaymentRecord[];
   users: PortalUser[];
@@ -10800,85 +11086,91 @@ function PaymentTable({
   onCancelWithdrawal?: (payment: PaymentRecord) => void;
   onDelete?: (payment: PaymentRecord) => void;
   emptyMessage?: string;
+  pageInfo?: PortalPageInfo;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   if (!payments.length) {
     return <div className="empty-state">{emptyMessage}</div>;
   }
 
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>User</th>
-            <th>Type</th>
-            <th>Period</th>
-            <th>Payment date</th>
-            <th>Amount</th>
-            <th>Status</th>
-            <th>Link</th>
-            <th>Memo</th>
-            {onReview || onEdit || onComplete || onCancelWithdrawal || onDelete ? <th>Actions</th> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {payments.map((payment) => {
-            const user = userById(users, payment.userId);
-            const linkValue = payment.paymentLink || payment.payoutTxid || payment.payoutUuid || "";
-            const isWebLink = /^https?:\/\//i.test(linkValue);
-            const actionItems: ActionMenuItem[] = [
-              ...(onReview ? [{ label: "Review request", onClick: () => onReview(payment) }] : []),
-              ...(onComplete && payment.status === "processing" ? [{ label: "Mark completed", onClick: () => onComplete(payment) }] : []),
-              ...(onCancelWithdrawal && isWithdrawalPayment(payment) && payment.status === "processing"
-                ? [{ label: "Cancel withdrawal", danger: true, onClick: () => onCancelWithdrawal(payment) }]
-                : []),
-              ...(onEdit ? [{ label: "Edit", onClick: () => onEdit(payment) }] : []),
-              ...(onDelete ? [{ label: "Delete", danger: true, onClick: () => onDelete(payment) }] : []),
-            ];
-            const opensReviewDirectly = Boolean(onReview && actionItems.length === 1);
-            return (
-              <tr
-                className={onReview ? "clickable-row" : ""}
-                key={payment.id}
-                onClick={() => onReview?.(payment)}
-                title={onReview ? "Open withdrawal request review" : undefined}
-              >
-                <td>{user?.name || "Unknown"}</td>
-                <td>{paymentTypeLabel(payment)}</td>
-                <td>{shortDate(payment.periodStart)} - {shortDate(payment.periodEnd)}</td>
-                <td>{shortDate(payment.scheduledDate)}</td>
-                <td>
-                  {money(payment.amount)}
-                  {payment.tipAmount ? <span className="table-subtext">Tip: {money(payment.tipAmount)}</span> : null}
-                </td>
-                <td><span className={`badge ${paymentStatusClass(payment.status)}`}>{paymentStatusLabel(payment.status)}</span></td>
-                <td>{linkValue ? (isWebLink ? <a href={linkValue} target="_blank" rel="noreferrer">Open link</a> : <span>{linkValue}</span>) : "-"}</td>
-                <td>{payment.memo || "-"}</td>
-                {actionItems.length ? (
+    <>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Type</th>
+              <th>Period</th>
+              <th>Payment date</th>
+              <th>Amount</th>
+              <th>Status</th>
+              <th>Link</th>
+              <th>Memo</th>
+              {onReview || onEdit || onComplete || onCancelWithdrawal || onDelete ? <th>Actions</th> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {payments.map((payment) => {
+              const user = userById(users, payment.userId);
+              const linkValue = payment.paymentLink || payment.payoutTxid || payment.payoutUuid || "";
+              const isWebLink = /^https?:\/\//i.test(linkValue);
+              const actionItems: ActionMenuItem[] = [
+                ...(onReview ? [{ label: "Review request", onClick: () => onReview(payment) }] : []),
+                ...(onComplete && payment.status === "processing" ? [{ label: "Mark completed", onClick: () => onComplete(payment) }] : []),
+                ...(onCancelWithdrawal && isWithdrawalPayment(payment) && payment.status === "processing"
+                  ? [{ label: "Cancel withdrawal", danger: true, onClick: () => onCancelWithdrawal(payment) }]
+                  : []),
+                ...(onEdit ? [{ label: "Edit", onClick: () => onEdit(payment) }] : []),
+                ...(onDelete ? [{ label: "Delete", danger: true, onClick: () => onDelete(payment) }] : []),
+              ];
+              const opensReviewDirectly = Boolean(onReview && actionItems.length === 1);
+              return (
+                <tr
+                  className={onReview ? "clickable-row" : ""}
+                  key={payment.id}
+                  onClick={() => onReview?.(payment)}
+                  title={onReview ? "Open withdrawal request review" : undefined}
+                >
+                  <td>{user?.name || "Unknown"}</td>
+                  <td>{paymentTypeLabel(payment)}</td>
+                  <td>{shortDate(payment.periodStart)} - {shortDate(payment.periodEnd)}</td>
+                  <td>{shortDate(payment.scheduledDate)}</td>
                   <td>
-                    {opensReviewDirectly ? (
-                      <button
-                        type="button"
-                        aria-label="Open withdrawal request review"
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-transparent bg-transparent text-xl font-black leading-none text-slate-500 transition hover:bg-slate-100 hover:text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onReview?.(payment);
-                        }}
-                      >
-                        ...
-                      </button>
-                    ) : (
-                      <ActionMenu items={actionItems} />
-                    )}
+                    {money(payment.amount)}
+                    {payment.tipAmount ? <span className="table-subtext">Tip: {money(payment.tipAmount)}</span> : null}
                   </td>
-                ) : null}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                  <td><span className={`badge ${paymentStatusClass(payment.status)}`}>{paymentStatusLabel(payment.status)}</span></td>
+                  <td>{linkValue ? (isWebLink ? <a href={linkValue} target="_blank" rel="noreferrer">Open link</a> : <span>{linkValue}</span>) : "-"}</td>
+                  <td>{payment.memo || "-"}</td>
+                  {actionItems.length ? (
+                    <td>
+                      {opensReviewDirectly ? (
+                        <button
+                          type="button"
+                          aria-label="Open withdrawal request review"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-transparent bg-transparent text-xl font-black leading-none text-slate-500 transition hover:bg-slate-100 hover:text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onReview?.(payment);
+                          }}
+                        >
+                          ...
+                        </button>
+                      ) : (
+                        <ActionMenu items={actionItems} />
+                      )}
+                    </td>
+                  ) : null}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <PagedListFooter pageInfo={pageInfo} loading={loadingMore} noun="payments" onLoadMore={onLoadMore} />
+    </>
   );
 }
 
@@ -11289,11 +11581,15 @@ function AttachmentPreviewModal({
 function HelpView({
   data,
   busy,
+  loadingPages,
   onSend,
+  onLoadPage,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
 }) {
   const isSuperAdmin = isSuperAdminRole(data.currentUser.role);
 
@@ -11331,7 +11627,7 @@ function HelpView({
         </div>
       </section>
 
-      <SupportCenter data={data} busy={busy} onSend={onSend} />
+      <SupportCenter data={data} busy={busy} loadingPages={loadingPages} onSend={onSend} onLoadPage={onLoadPage} />
     </div>
   );
 }
@@ -11339,11 +11635,15 @@ function HelpView({
 function SupportCenter({
   data,
   busy,
+  loadingPages,
   onSend,
+  onLoadPage,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
 }) {
   const currentUser = data.currentUser;
   const isSuperAdmin = isSuperAdminRole(currentUser.role);
@@ -11421,6 +11721,14 @@ function SupportCenter({
         ) : null}
 
         <div className="messages support-messages">
+          {activeConversationId ? (
+            <PagedListFooter
+              pageInfo={data.pagination?.supportMessages}
+              loading={loadingPages.supportMessages}
+              noun="older messages"
+              onLoadMore={() => void onLoadPage("supportMessages", { conversationId: activeConversationId, limit: 50, force: true })}
+            />
+          ) : null}
           {selectedSupportUser ? (
             <div className="chat-context-card">
               <div className="person-title">
@@ -11639,14 +11947,18 @@ function ChatContractCard({
 function ChatView({
   data,
   busy,
+  loadingPages,
   onSend,
+  onLoadPage,
   unreadCounts,
   requestedRecipientId,
   requestedPostId,
 }: {
   data: PortalData;
   busy: boolean;
+  loadingPages: Partial<Record<PortalPageResource, boolean>>;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
   unreadCounts: Record<string, number>;
   requestedRecipientId: string;
   requestedPostId: string;
@@ -11679,6 +11991,7 @@ function ChatView({
 
     const conversationId = inboxConversationId(currentUser.id, user.id);
     const hasConversation = data.chatMessages.some((message) => chatConversationIdForMessage(message) === conversationId);
+    const hasChatHistory = Boolean(user.hasChatHistory);
     const isRequestedRecipient = user.id === requestedRecipientId;
 
     if (isClientRole(currentUser.role) && !isWorkerUser(user)) {
@@ -11689,13 +12002,14 @@ function ChatView({
       return false;
     }
 
-    return hasConversation || isRequestedRecipient;
+    return hasConversation || hasChatHistory || isRequestedRecipient;
   });
   const directConversations = contactUsers.map((contact) => {
     const conversationId = inboxConversationId(currentUser.id, contact.id);
     const messages = data.chatMessages.filter((message) => chatConversationIdForMessage(message) === conversationId);
     const latestMessage = messages[messages.length - 1];
     const unreadCount = unreadCounts[conversationId] || 0;
+    const latestAt = latestMessage?.createdAt || contact.chatLastMessageAt || "";
 
     return {
       id: `direct:${contact.id}`,
@@ -11704,15 +12018,21 @@ function ChatView({
       recipientAllowsContact: contact.allowDirectMessages !== false,
       title: userDisplayName(contact),
       subtitle: contact.companyName || contact.profileTitle || contact.email,
-      preview: latestMessage?.deletedAt ? "Message deleted" : latestMessage?.body || latestMessage?.attachments?.[0]?.name || "No messages yet",
+      preview: latestMessage?.deletedAt
+        ? "Message deleted"
+        : latestMessage?.body || latestMessage?.attachments?.[0]?.name || contact.chatLastMessagePreview || "No messages yet",
       avatar: initialsForName(contact.name),
       unreadCount,
+      latestAt,
       monitored: false,
     };
   }).sort((left, right) => {
     if (left.recipientId === requestedRecipientId) return -1;
     if (right.recipientId === requestedRecipientId) return 1;
-    return right.unreadCount - left.unreadCount;
+    if (right.unreadCount !== left.unreadCount) {
+      return right.unreadCount - left.unreadCount;
+    }
+    return (Date.parse(right.latestAt) || 0) - (Date.parse(left.latestAt) || 0);
   });
   const directConversationIds = new Set(directConversations.map((conversation) => conversation.conversationId));
   const monitoredConversations = isSuperAdminRole(currentUser.role)
@@ -12149,6 +12469,14 @@ function ChatView({
 
           <div className="chat-thread-shell">
           <div className="messages" ref={messagesContainerRef} onScroll={handleMessagesScroll}>
+          {activeConversationId ? (
+            <PagedListFooter
+              pageInfo={data.pagination?.chatMessages}
+              loading={loadingPages.chatMessages}
+              noun="older messages"
+              onLoadMore={() => void onLoadPage("chatMessages", { conversationId: activeConversationId, limit: 50, force: true })}
+            />
+          ) : null}
           {activeConversation?.monitored && activeParticipants.length ? (
             <div className="chat-context-card">
               <div className="person-title">
