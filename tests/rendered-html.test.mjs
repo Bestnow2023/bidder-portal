@@ -622,6 +622,10 @@ test("declares the requested frontend records", async () => {
   assert.match(portalApp, /requestedRecipientId/);
   assert.match(portalApp, /methodId/);
   assert.match(portalApp, /sessionToken/);
+  assert.match(portalApp, /useState<AuthMode>\("signIn"\)/);
+  assert.match(portalApp, /sessionRestoring/);
+  assert.match(portalApp, /SessionRestoreScreen/);
+  assert.match(portalApp, /Signing you in/);
   assert.match(portalApp, /workLogId/);
   assert.match(portalApp, /ActionMenu/);
   assert.match(portalApp, /AccountMenu/);

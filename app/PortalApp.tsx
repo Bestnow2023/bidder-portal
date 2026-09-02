@@ -1768,6 +1768,29 @@ function ModalFrame({
   );
 }
 
+function SessionRestoreScreen() {
+  return (
+    <main className="app login-page">
+      <section className="login-card">
+        <div className="login-story">
+          <DigniwareLogo className="brand-logo auth-logo" variant="dark" />
+          <h1>Bidder Portal</h1>
+          <p>
+            Sign in with email, log bidder work, keep payment method details in one place,
+            and let clients manage approvals, rates, next payout dates, history, and chat.
+          </p>
+        </div>
+
+        <section className="login-form public-auth-card">
+          <h2>Signing you in</h2>
+          <p>Restoring your saved session.</p>
+          <div className="status-strip compact">Checking session...</div>
+        </section>
+      </section>
+    </main>
+  );
+}
+
 function daysUntil(value: string) {
   const target = dateAtMidnight(value);
   const current = dateAtMidnight(today());
@@ -2059,7 +2082,7 @@ function workLogReviewClass(log: WorkLog, paid = false) {
 
 export default function PortalApp() {
   const [data, setData] = useState<PortalData | null>(null);
-  const [authMode, setAuthMode] = useState<AuthMode>(isLiveMode ? "signUp" : "signIn");
+  const [authMode, setAuthMode] = useState<AuthMode>("signIn");
   const [loginEmail, setLoginEmail] = useState(() => {
     if (typeof window === "undefined") {
       return isLiveMode ? "" : "admin@portal.local";
@@ -2086,7 +2109,24 @@ export default function PortalApp() {
       return "";
     }
 
+    const storedEmail = window.localStorage.getItem("bidderPortalEmail") || "";
+    const storedDemoEmail = demoAccounts.some((account) => account.email === storedEmail);
+    if (!storedEmail || (isLiveMode && storedDemoEmail)) {
+      window.localStorage.removeItem("bidderPortalSessionToken");
+      return "";
+    }
+
     return window.localStorage.getItem("bidderPortalSessionToken") || "";
+  });
+  const [sessionRestoring, setSessionRestoring] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    const storedEmail = window.localStorage.getItem("bidderPortalEmail") || "";
+    const storedToken = window.localStorage.getItem("bidderPortalSessionToken") || "";
+    const storedDemoEmail = demoAccounts.some((account) => account.email === storedEmail);
+    return Boolean(storedEmail && storedToken && (!isLiveMode || !storedDemoEmail));
   });
   const [activeView, setActiveView] = useState<PortalView>(() =>
     typeof window === "undefined" ? "overview" : viewFromPath(window.location.pathname)
@@ -2139,6 +2179,7 @@ export default function PortalApp() {
 
     setData(null);
     setSessionToken("");
+    setSessionRestoring(false);
     setLoginEmail(nextEmail);
     setLoginPassword("");
     setAuthMode("signIn");
@@ -2174,6 +2215,7 @@ export default function PortalApp() {
 
       if (nextData.currentUser) {
         setData(nextData);
+        setSessionRestoring(false);
         setLoginEmail(nextData.currentUser.email);
         if (nextData.sessionToken) {
           setSessionToken(nextData.sessionToken);
@@ -2186,6 +2228,7 @@ export default function PortalApp() {
         setVerificationSuccessEmail(verifiedEmail);
         setLoginEmail(verifiedEmail);
         setAuthMode("signIn");
+        setSessionRestoring(false);
       } else {
         setAuthNotice(payload.successMessage || nextData.message || "Done.");
       }
@@ -2361,6 +2404,7 @@ export default function PortalApp() {
 
       const nextPortalData = nextData as PortalData;
       setData((current) => restorePortalAttachmentDataUrls(preserveLoadedPortalPages(nextPortalData, current), current));
+      setSessionRestoring(false);
       setLoginEmail(nextData.currentUser.email);
       if (nextData.sessionToken) {
         setSessionToken(nextData.sessionToken);
@@ -2477,14 +2521,29 @@ export default function PortalApp() {
 
   useEffect(() => {
     if (data || !loginEmail || !sessionToken) {
+      setSessionRestoring(false);
       return;
     }
 
+    let active = true;
+    setSessionRestoring(true);
     const timeout = window.setTimeout(() => {
-      void refreshPortalData(loginEmail, sessionToken, true);
+      void refreshPortalData(loginEmail, sessionToken, true).then((restoredData) => {
+        if (!restoredData && active) {
+          setSessionToken("");
+          window.localStorage.removeItem("bidderPortalSessionToken");
+        }
+      }).finally(() => {
+        if (active) {
+          setSessionRestoring(false);
+        }
+      });
     }, 0);
 
-    return () => window.clearTimeout(timeout);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
   }, [data, loginEmail, refreshPortalData, sessionToken]);
 
   useEffect(() => {
@@ -2598,6 +2657,7 @@ export default function PortalApp() {
       }
 
       setData(nextData);
+      setSessionRestoring(false);
       setLoginEmail(nextData.currentUser.email);
       if (nextData.sessionToken) {
         setSessionToken(nextData.sessionToken);
@@ -2627,6 +2687,7 @@ export default function PortalApp() {
     window.history.pushState({}, "", "/");
     setData(null);
     setSessionToken("");
+    setSessionRestoring(false);
     setLoginPassword(isLiveMode ? "" : demoPassword);
     setActiveView("overview");
     setChatRecipientId("");
@@ -2674,6 +2735,10 @@ export default function PortalApp() {
   }
 
   if (!data) {
+    if (sessionRestoring && !verificationPendingEmail && !verificationSuccessEmail) {
+      return <SessionRestoreScreen />;
+    }
+
     if (verificationPendingEmail || verificationSuccessEmail) {
       const verified = Boolean(verificationSuccessEmail);
       const email = verificationSuccessEmail || verificationPendingEmail;
