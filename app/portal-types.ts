@@ -6,6 +6,7 @@ export type PaymentFrequency = "" | "weekly" | "biweekly" | "monthly";
 export type PaymentWeekday = "" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday";
 export type ContractStatus = "requested" | "active" | "rejected" | "ended";
 export type ContractPaymentStyle = "fixed" | "hourly" | "per_bid" | "per_bid_bonus" | "regular";
+export type ContractWorkDays = "weekdays" | "weekends" | "all";
 export type ContractEndType = "completed" | "cancelled";
 export type PostStatus = "active" | "closed";
 export type PostType = "client" | "bidder";
@@ -90,6 +91,7 @@ export type ContractRecord = {
   bonusPerInterview: number;
   paymentFrequency: PaymentFrequency;
   paymentWeekday: PaymentWeekday;
+  workDays?: ContractWorkDays;
   nextPaymentDate: string;
   startDate: string;
   endDate?: string;
@@ -204,6 +206,7 @@ export type PaymentMethod = {
 export type WorkLog = {
   id: string;
   userId: string;
+  contractId?: string;
   workDate: string;
   sheetLink: string;
   appliedJobs: number;

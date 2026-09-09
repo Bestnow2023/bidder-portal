@@ -118,10 +118,14 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Start Contract/);
   assert.match(portalApp, /Contract Management/);
   assert.match(portalApp, /contractPaymentStyles/);
+  assert.match(portalApp, /contractWorkDayOptions/);
   assert.match(portalApp, /Payment style/);
   assert.match(portalApp, /Fixed budget/);
   assert.match(portalApp, /Hourly rate/);
   assert.match(portalApp, /Monthly salary/);
+  assert.match(portalApp, /Allowed work days/);
+  assert.match(portalApp, /Every day \(weekend allowed\)/);
+  assert.match(portalApp, /contractWorkDaysLabel/);
   assert.match(portalApp, /End date/);
   assert.match(portalApp, /contractPayTerms/);
   assert.match(portalApp, /contractTimelineLabel/);
@@ -151,9 +155,14 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /All Work Logs/);
   assert.match(portalApp, /Work Log History/);
   assert.match(portalApp, /Add Work Log/);
+  assert.match(portalApp, /Contract \/ client/);
+  assert.match(portalApp, /activeContractsForWorker/);
   assert.match(portalApp, /Client filter/);
   assert.match(portalApp, /Paid status/);
+  assert.match(portalApp, /Review status/);
   assert.match(portalApp, /Select bidder/);
+  assert.match(portalApp, /All active bidders/);
+  assert.match(portalApp, /Pending review only/);
   assert.match(portalApp, /Date filter/);
   assert.match(portalApp, /Specific date/);
   assert.match(portalApp, /This week/);
@@ -168,6 +177,8 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Request edit/);
   assert.match(portalApp, /Request Work Log Edit/);
   assert.match(portalApp, /Send edit request/);
+  assert.match(portalTypes, /ContractWorkDays/);
+  assert.match(portalTypes, /contractId\?: string/);
   assert.match(portalApp, /Payment History/);
   assert.match(portalApp, /Payday Reminder/);
   assert.match(portalApp, /Upcoming Payments/);

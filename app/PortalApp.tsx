@@ -11,6 +11,7 @@ import type {
   ContractRecord,
   ContractStatus,
   ContractPaymentStyle,
+  ContractWorkDays,
   DisputeRecord,
   DisputeStatus,
   DepositRecord,
@@ -29,6 +30,7 @@ import type {
   Role,
   UserStatus,
   WorkLog,
+  WorkLogReviewStatus,
 } from "./portal-types";
 
 type AuthMode = "signIn" | "signUp" | "resetPassword";
@@ -104,6 +106,18 @@ const contractPaymentStyles: { value: ContractPaymentStyle; label: string }[] = 
   { value: "per_bid", label: "Per bid" },
   { value: "per_bid_bonus", label: "Per bid + bonus" },
   { value: "regular", label: "Regular monthly" },
+];
+const contractWorkDayOptions: { value: ContractWorkDays; label: string; helper: string }[] = [
+  { value: "weekdays", label: "Weekdays only", helper: "Bidders can log work Monday through Friday." },
+  { value: "all", label: "Every day (weekend allowed)", helper: "Bidders can log work on weekdays and weekends." },
+  { value: "weekends", label: "Weekends only", helper: "Bidders can only log work on Saturday and Sunday." },
+];
+type WorkLogReviewFilter = "all" | WorkLogReviewStatus;
+const workLogReviewFilterOptions: { value: WorkLogReviewFilter; label: string }[] = [
+  { value: "all", label: "All review states" },
+  { value: "pending", label: "Pending review only" },
+  { value: "changes_requested", label: "Edit requested only" },
+  { value: "approved", label: "Approved only" },
 ];
 const paymentWeekdays: { value: PaymentWeekday; label: string }[] = [
   { value: "monday", label: "Monday" },
@@ -1025,6 +1039,15 @@ function normalizeContractPaymentStyle(value?: string): ContractPaymentStyle {
 function contractPaymentStyleLabel(value?: string) {
   const style = normalizeContractPaymentStyle(value);
   return contractPaymentStyles.find((item) => item.value === style)?.label || "Per bid + bonus";
+}
+
+function normalizeContractWorkDays(value?: string): ContractWorkDays {
+  return value === "all" || value === "weekends" ? value : "weekdays";
+}
+
+function contractWorkDaysLabel(value?: string) {
+  const workDays = normalizeContractWorkDays(value);
+  return contractWorkDayOptions.find((option) => option.value === workDays)?.label || "Weekdays only";
 }
 
 function contractPayTerms(contract: Pick<ContractRecord, "paymentStyle" | "fixedBudget" | "hourlyRate" | "regularSalary" | "ratePerApplication" | "bonusPerInterview">) {
@@ -1957,18 +1980,50 @@ function contractCoversWorkDate(contract: ContractRecord, workDate: string) {
     return false;
   }
 
-  const endedDate = contract.endedAt ? contract.endedAt.slice(0, 10) : "";
+  const endedDate = contract.endedAt ? contract.endedAt.slice(0, 10) : contract.endDate || "";
   return !endedDate || workDate <= endedDate;
+}
+
+function isWeekendDate(value: string) {
+  const date = dateAtMidnight(value);
+  if (!date) {
+    return false;
+  }
+  const day = date.getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function contractAllowsWorkDate(contract: ContractRecord, workDate: string) {
+  const workDays = normalizeContractWorkDays(contract.workDays);
+  if (workDays === "all") {
+    return true;
+  }
+
+  const weekend = isWeekendDate(workDate);
+  return workDays === "weekends" ? weekend : !weekend;
+}
+
+function activeContractsForWorker(workerId: string, contracts: ContractRecord[], workDate?: string) {
+  return contracts
+    .filter((contract) => contract.workerId === workerId && contract.status === "active")
+    .filter((contract) => !workDate || contractCoversWorkDate(contract, workDate));
 }
 
 function clientIdsForWorkLog(log: WorkLog, contracts: ContractRecord[], payments: PaymentRecord[]) {
   const clientIds = new Set<string>();
+  const linkedContract = log.contractId
+    ? contracts.find((contract) => contract.id === log.contractId && contract.workerId === log.userId)
+    : null;
 
-  contracts.forEach((contract) => {
-    if (contract.workerId === log.userId && contractCoversWorkDate(contract, log.workDate)) {
-      clientIds.add(contract.clientId);
-    }
-  });
+  if (linkedContract) {
+    clientIds.add(linkedContract.clientId);
+  } else {
+    contracts.forEach((contract) => {
+      if (contract.workerId === log.userId && contractCoversWorkDate(contract, log.workDate)) {
+        clientIds.add(contract.clientId);
+      }
+    });
+  }
 
   payments.forEach((payment) => {
     if (
@@ -6344,6 +6399,7 @@ function ContractsView({
     bonusPerInterview: "",
     paymentFrequency: "weekly" as PaymentFrequency,
     paymentWeekday: "friday" as PaymentWeekday,
+    workDays: "weekdays" as ContractWorkDays,
     nextPaymentDate: contractNextPaymentDateDefault("weekly", "friday", today()),
     startDate: today(),
     endDate: "",
@@ -6379,6 +6435,7 @@ function ContractsView({
       contractPaymentStyleLabel(contract.paymentStyle),
       contractPayTerms(contract),
       paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday),
+      contractWorkDaysLabel(contract.workDays),
       client?.name,
       client?.email,
       displayUserId(client),
@@ -6421,6 +6478,7 @@ function ContractsView({
       bonusPerInterview: Number(draft.bonusPerInterview),
       paymentFrequency: draft.paymentFrequency,
       paymentWeekday: draft.paymentWeekday,
+      workDays: draft.workDays,
       nextPaymentDate: draft.nextPaymentDate,
       startDate: draft.startDate,
       endDate: draft.endDate,
@@ -6437,6 +6495,7 @@ function ContractsView({
         regularSalary: "",
         ratePerApplication: "",
         bonusPerInterview: "",
+        workDays: "weekdays",
         nextPaymentDate: contractNextPaymentDateDefault(draft.paymentFrequency, draft.paymentWeekday, draft.startDate),
         endDate: "",
       });
@@ -6669,6 +6728,7 @@ function ContractsView({
                     <td>
                       {paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday) || "Not set"}
                       <span className="table-subtext">Next {shortDate(contract.nextPaymentDate)}</span>
+                      <span className="table-subtext">{contractWorkDaysLabel(contract.workDays)}</span>
                     </td>
                     <td>{contractTimelineLabel(contract)}</td>
                   </tr>
@@ -6760,6 +6820,17 @@ function ContractsView({
                   <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
                 ))}
               </select>
+            </label>
+            <label className="field">
+              <span>Allowed work days</span>
+              <select value={draft.workDays} onChange={(event) => setDraft({ ...draft, workDays: event.target.value as ContractWorkDays })}>
+                {contractWorkDayOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <span className="table-subtext">
+                {contractWorkDayOptions.find((option) => option.value === draft.workDays)?.helper}
+              </span>
             </label>
             <label className="field">
               <span>Next payday</span>
@@ -6964,6 +7035,7 @@ function ContractDetailModal({
           <span><strong>{contractPaymentStyleLabel(contract.paymentStyle)}</strong> style</span>
           <span><strong>{contractPayTerms(contract)}</strong> pay terms</span>
           <span><strong>{paymentScheduleLabel(contract.paymentFrequency, contract.paymentWeekday) || "Not set"}</strong> schedule</span>
+          <span><strong>{contractWorkDaysLabel(contract.workDays)}</strong> work days</span>
           <span><strong>{shortDate(contract.nextPaymentDate)}</strong> next payday</span>
           <span><strong>{contractTimelineLabel(contract)}</strong> timeline</span>
         </div>
@@ -7056,6 +7128,7 @@ function ContractEditModal({
     bonusPerInterview: String(contract.bonusPerInterview || 0),
     paymentFrequency: (contract.paymentFrequency || "weekly") as PaymentFrequency,
     paymentWeekday: (contract.paymentWeekday || "friday") as PaymentWeekday,
+    workDays: normalizeContractWorkDays(contract.workDays),
     nextPaymentDate: contract.nextPaymentDate || contractNextPaymentDateDefault(contract.paymentFrequency, contract.paymentWeekday, contract.startDate),
     startDate: contract.startDate || today(),
     endDate: contract.endDate || "",
@@ -7083,6 +7156,7 @@ function ContractEditModal({
       bonusPerInterview: Number(draft.bonusPerInterview),
       paymentFrequency: draft.paymentFrequency,
       paymentWeekday: draft.paymentWeekday,
+      workDays: draft.workDays,
       nextPaymentDate: draft.nextPaymentDate,
       startDate: draft.startDate,
       endDate: draft.endDate,
@@ -7112,6 +7186,17 @@ function ContractEditModal({
               <option key={weekday.value} value={weekday.value}>{weekday.label}</option>
             ))}
           </select>
+        </label>
+        <label className="field">
+          <span>Allowed work days</span>
+          <select value={draft.workDays} onChange={(event) => setDraft({ ...draft, workDays: event.target.value as ContractWorkDays })}>
+            {contractWorkDayOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <span className="table-subtext">
+            {contractWorkDayOptions.find((option) => option.value === draft.workDays)?.helper}
+          </span>
         </label>
         <label className="field">
           <span>Next payday</span>
@@ -8811,6 +8896,7 @@ function BidderWorkLog({
   onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
 }) {
   const [draft, setDraft] = useState({
+    contractId: "",
     workDate: today(),
     sheetLink: "",
     appliedJobs: "",
@@ -8822,11 +8908,30 @@ function BidderWorkLog({
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
   const [selectedClientId, setSelectedClientId] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "unpaid">("all");
+  const [reviewFilter, setReviewFilter] = useState<WorkLogReviewFilter>("all");
 
   const user = data.currentUser;
   const allLogs = workLogsForUser(user, data.workLogs);
   const userPayments = paymentsForUser(user, data.payments);
   const clientOptions = connectedClientsForWorker(user, data.users, data.contracts || [], data.payments || []);
+  const activeWorkLogContracts = activeContractsForWorker(user.id, data.contracts || []);
+  const activeContractsForDraftDate = activeContractsForWorker(user.id, data.contracts || [], draft.workDate);
+  const activeContractOptions: SelectOption[] = activeContractsForDraftDate.map((contract) => {
+    const client = userById(data.users, contract.clientId);
+    return {
+      value: contract.id,
+      label: `${client?.name || "Client"} - ${contract.title}`,
+      helper: `${contract.id} - ${contractWorkDaysLabel(contract.workDays)}`,
+    };
+  });
+  const clientSelectOptions: SelectOption[] = [
+    { value: "all", label: "All clients", helper: "Every client connected to your work history" },
+    ...clientOptions.map((client) => ({
+      value: client.id,
+      label: client.name,
+      helper: `${roleLabel(client.role)} - ${displayUserId(client)}`,
+    })),
+  ];
   const clientFilteredLogs = selectedClientId === "all"
     ? allLogs
     : allLogs.filter((log) => {
@@ -8834,7 +8939,13 @@ function BidderWorkLog({
       return relatedClientIds.length ? relatedClientIds.includes(selectedClientId) : user.assignedAdminId === selectedClientId;
     });
   const dateFilteredLogs = filterWorkLogsByDate(clientFilteredLogs, dateRange);
-  const logs = dateFilteredLogs.filter((log) => {
+  const reviewFilteredLogs = dateFilteredLogs.filter((log) => {
+    if (reviewFilter === "all") {
+      return true;
+    }
+    return workLogReviewStatus(log, isWorkLogPaid(log, userPayments)) === reviewFilter;
+  });
+  const logs = reviewFilteredLogs.filter((log) => {
     const paid = isWorkLogPaid(log, userPayments);
     if (paymentFilter === "paid") return paid;
     if (paymentFilter === "unpaid") return !paid;
@@ -8847,15 +8958,30 @@ function BidderWorkLog({
     event.preventDefault();
     const nextData = await onSave("saveWorkLog", {
       workDate: draft.workDate,
+      contractId: draft.contractId,
       sheetLink: draft.sheetLink,
       appliedJobs: Number(draft.appliedJobs),
       interviewsScheduled: Number(draft.interviewsScheduled),
       notes: draft.notes,
     });
     if (nextData) {
-      setDraft({ workDate: today(), sheetLink: "", appliedJobs: "", interviewsScheduled: "", notes: "" });
+      setDraft({ contractId: "", workDate: today(), sheetLink: "", appliedJobs: "", interviewsScheduled: "", notes: "" });
       setShowCreateModal(false);
     }
+  }
+
+  function openCreateWorkLogModal() {
+    const workDate = today();
+    const availableContracts = activeContractsForWorker(user.id, data.contracts || [], workDate);
+    setDraft({
+      contractId: availableContracts[0]?.id || "",
+      workDate,
+      sheetLink: "",
+      appliedJobs: "",
+      interviewsScheduled: "",
+      notes: "",
+    });
+    setShowCreateModal(true);
   }
 
   async function deleteWorkLog(log: WorkLog) {
@@ -8874,7 +9000,7 @@ function BidderWorkLog({
             <h2>Work Logs</h2>
             <p>Add daily work, then review every paid and unpaid log by client and date.</p>
           </div>
-          <button className="primary-button compact-button" type="button" disabled={busy} onClick={() => setShowCreateModal(true)}>
+          <button className="primary-button compact-button" type="button" disabled={busy || !activeWorkLogContracts.length} onClick={openCreateWorkLogModal}>
             Add work log
           </button>
         </div>
@@ -8921,21 +9047,28 @@ function BidderWorkLog({
         </div>
         <div className="filter-bar">
           <DateRangeFilter range={dateRange} onChange={setDateRange} embedded />
-          <label className="field">
-            <span>Client filter</span>
-            <select value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)}>
-              <option value="all">All clients</option>
-              {clientOptions.map((client) => (
-                <option key={client.id} value={client.id}>{client.name}</option>
-              ))}
-            </select>
-          </label>
+          <SearchableSelect
+            label="Client filter"
+            value={selectedClientId}
+            options={clientSelectOptions}
+            onValueChange={setSelectedClientId}
+            placeholder="Search clients"
+            noResultsLabel="No clients found"
+          />
           <label className="field">
             <span>Paid status</span>
             <select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value as "all" | "paid" | "unpaid")}>
               <option value="all">Paid and unpaid</option>
               <option value="unpaid">Unpaid only</option>
               <option value="paid">Paid only</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Review status</span>
+            <select value={reviewFilter} onChange={(event) => setReviewFilter(event.target.value as WorkLogReviewFilter)}>
+              {workLogReviewFilterOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </label>
         </div>
@@ -8957,6 +9090,9 @@ function BidderWorkLog({
       {showCreateModal ? (
         <WorkLogCreateModal
           draft={draft}
+          workerId={user.id}
+          contractOptions={activeContractOptions}
+          contracts={data.contracts || []}
           busy={busy}
           onChange={setDraft}
           onClose={() => setShowCreateModal(false)}
@@ -8968,6 +9104,8 @@ function BidderWorkLog({
         <WorkLogEditModal
           key={editingWorkLog.id}
           log={editingWorkLog}
+          contracts={data.contracts || []}
+          users={data.users}
           busy={busy}
           onClose={() => setEditingWorkLog(null)}
           onSave={async (payload) => {
@@ -8997,10 +9135,35 @@ function AdminWorkLogs({
 }) {
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: "", endDate: "" });
   const [selectedUserId, setSelectedUserId] = useState("all");
+  const [reviewFilter, setReviewFilter] = useState<WorkLogReviewFilter>("all");
   const [reviewingWorkLog, setReviewingWorkLog] = useState<WorkLog | null>(null);
-  const logUsers = data.users.filter(isWorkerUser);
-  const userFilteredLogs = data.workLogs.filter((log) => selectedUserId === "all" || log.userId === selectedUserId);
-  const logs = filterWorkLogsByDate(userFilteredLogs, dateRange);
+  const currentWorkDate = today();
+  const activeContractWorkerIds = new Set(
+    (data.contracts || [])
+      .filter((contract) => contract.status === "active" && contractCoversWorkDate(contract, currentWorkDate))
+      .map((contract) => contract.workerId)
+  );
+  const logUsers = data.users
+    .filter((user) => isWorkerUser(user) && activeContractWorkerIds.has(user.id))
+    .sort((left, right) => userDisplayName(left).localeCompare(userDisplayName(right)));
+  const bidderFilterOptions: SelectOption[] = [
+    { value: "all", label: "All active bidders", helper: "Currently contracted bidders only" },
+    ...logUsers.map((user) => ({
+      value: user.id,
+      label: user.name,
+      helper: `${displayUserId(user)} - ${user.profileTitle || roleLabel(user.role)}`,
+    })),
+  ];
+  const userFilteredLogs = data.workLogs.filter((log) =>
+    selectedUserId === "all" ? activeContractWorkerIds.has(log.userId) : log.userId === selectedUserId
+  );
+  const dateFilteredLogs = filterWorkLogsByDate(userFilteredLogs, dateRange);
+  const logs = dateFilteredLogs.filter((log) => {
+    if (reviewFilter === "all") {
+      return true;
+    }
+    return workLogReviewStatus(log, isWorkLogPaid(log, data.payments)) === reviewFilter;
+  });
   const canReviewWorkLogs = isClientRole(data.currentUser.role);
 
   async function approveWorkLog(log: WorkLog) {
@@ -9020,22 +9183,29 @@ function AdminWorkLogs({
         </div>
       </div>
       <div className="filter-bar">
+        <SearchableSelect
+          label="Select bidder"
+          value={selectedUserId}
+          options={bidderFilterOptions}
+          onValueChange={setSelectedUserId}
+          placeholder="Search active bidders"
+          noResultsLabel="No active contract bidders found"
+        />
+        <DateRangeFilter range={dateRange} onChange={setDateRange} embedded />
         <label className="field">
-          <span>Select bidder</span>
-          <select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)}>
-            <option value="all">All bidders</option>
-            {logUsers.map((user) => (
-              <option key={user.id} value={user.id}>{user.name}</option>
+          <span>Review status</span>
+          <select value={reviewFilter} onChange={(event) => setReviewFilter(event.target.value as WorkLogReviewFilter)}>
+            {workLogReviewFilterOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
         </label>
-        <DateRangeFilter range={dateRange} onChange={setDateRange} embedded />
       </div>
       <WorkLogTable
         logs={logs}
         users={data.users}
         payments={data.payments}
-        emptyMessage="No work logs match this date filter."
+        emptyMessage="No work logs match these filters."
         onApproveLog={canReviewWorkLogs ? approveWorkLog : undefined}
         onRequestEditLog={canReviewWorkLogs ? setReviewingWorkLog : undefined}
         pageInfo={data.pagination?.workLogs}
@@ -9143,6 +9313,7 @@ function DateRangeFilter({
 }
 
 type WorkLogDraft = {
+  contractId: string;
   workDate: string;
   sheetLink: string;
   appliedJobs: string;
@@ -9152,23 +9323,56 @@ type WorkLogDraft = {
 
 function WorkLogCreateModal({
   draft,
+  workerId,
+  contractOptions,
+  contracts,
   busy,
   onChange,
   onClose,
   onSubmit,
 }: {
   draft: WorkLogDraft;
+  workerId: string;
+  contractOptions: SelectOption[];
+  contracts: ContractRecord[];
   busy: boolean;
   onChange: (draft: WorkLogDraft) => void;
   onClose: () => void;
   onSubmit: (event: FormEvent) => void;
 }) {
+  const selectedContract = contracts.find((contract) => contract.id === draft.contractId);
+  const selectedDateAllowed = selectedContract
+    ? selectedContract.status === "active" && contractCoversWorkDate(selectedContract, draft.workDate) && contractAllowsWorkDate(selectedContract, draft.workDate)
+    : false;
+
+  function updateWorkDate(workDate: string) {
+    const availableContract = contracts.find((contract) => contract.id === draft.contractId && contract.workerId === workerId && contract.status === "active" && contractCoversWorkDate(contract, workDate));
+    const fallbackContract = contracts.find((contract) => contract.workerId === workerId && contract.status === "active" && contractCoversWorkDate(contract, workDate));
+    onChange({ ...draft, workDate, contractId: availableContract?.id || fallbackContract?.id || "" });
+  }
+
   return (
     <ModalFrame title="Add Work Log" subtitle="Attach the Google Sheet and enter daily totals." onClose={onClose}>
       <form className="form-grid" onSubmit={onSubmit}>
+        <SearchableSelect
+          label="Contract / client"
+          value={draft.contractId}
+          options={contractOptions}
+          onValueChange={(contractId) => onChange({ ...draft, contractId })}
+          placeholder="Search active contracts"
+          required
+          noResultsLabel="No active contracts for this date"
+        />
         <label className="field">
           <span>Date</span>
-          <input type="date" value={draft.workDate} onChange={(event) => onChange({ ...draft, workDate: event.target.value })} required />
+          <input type="date" value={draft.workDate} onChange={(event) => updateWorkDate(event.target.value)} required />
+          <span className="table-subtext">
+            {selectedContract
+              ? selectedDateAllowed
+                ? `${contractWorkDaysLabel(selectedContract.workDays)} allowed`
+                : `${contractWorkDaysLabel(selectedContract.workDays)} does not allow this date`
+              : "Select an active contract before saving."}
+          </span>
         </label>
         <label className="field">
           <span>Applied jobs</span>
@@ -9187,7 +9391,7 @@ function WorkLogCreateModal({
           <textarea value={draft.notes} onChange={(event) => onChange({ ...draft, notes: event.target.value })} />
         </label>
         <div className="actions full">
-          <button className="primary-button" type="submit" disabled={busy}>
+          <button className="primary-button" type="submit" disabled={busy || !selectedContract || !selectedDateAllowed}>
             Save daily log
           </button>
           <button className="ghost-button" type="button" onClick={onClose}>
@@ -9201,27 +9405,53 @@ function WorkLogCreateModal({
 
 function WorkLogEditModal({
   log,
+  contracts,
+  users,
   busy,
   onClose,
   onSave,
 }: {
   log: WorkLog;
+  contracts: ContractRecord[];
+  users: PortalUser[];
   busy: boolean;
   onClose: () => void;
   onSave: (payload: Record<string, unknown>) => Promise<void>;
 }) {
+  const availableContracts = activeContractsForWorker(log.userId, contracts, log.workDate);
   const [draft, setDraft] = useState({
+    contractId: log.contractId || availableContracts[0]?.id || "",
     workDate: log.workDate,
     sheetLink: log.sheetLink,
     appliedJobs: String(log.appliedJobs),
     interviewsScheduled: String(log.interviewsScheduled),
     notes: log.notes,
   });
+  const contractsForDraftDate = activeContractsForWorker(log.userId, contracts, draft.workDate);
+  const contractOptions: SelectOption[] = contractsForDraftDate.map((contract) => {
+    const client = userById(users, contract.clientId);
+    return {
+      value: contract.id,
+      label: `${client?.name || "Client"} - ${contract.title}`,
+      helper: `${contract.id} - ${contractWorkDaysLabel(contract.workDays)}`,
+    };
+  });
+  const selectedContract = contracts.find((contract) => contract.id === draft.contractId);
+  const selectedDateAllowed = selectedContract
+    ? selectedContract.status === "active" && contractCoversWorkDate(selectedContract, draft.workDate) && contractAllowsWorkDate(selectedContract, draft.workDate)
+    : false;
+
+  function updateWorkDate(workDate: string) {
+    const availableContract = contracts.find((contract) => contract.id === draft.contractId && contract.workerId === log.userId && contract.status === "active" && contractCoversWorkDate(contract, workDate));
+    const fallbackContract = contracts.find((contract) => contract.workerId === log.userId && contract.status === "active" && contractCoversWorkDate(contract, workDate));
+    setDraft({ ...draft, workDate, contractId: availableContract?.id || fallbackContract?.id || "" });
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     await onSave({
       workLogId: log.id,
+      contractId: draft.contractId,
       workDate: draft.workDate,
       sheetLink: draft.sheetLink,
       appliedJobs: Number(draft.appliedJobs),
@@ -9233,9 +9463,25 @@ function WorkLogEditModal({
   return (
     <ModalFrame title="Edit Work Log" subtitle="Update this unpaid work log before it is paid." onClose={onClose}>
       <form className="form-grid" onSubmit={submit}>
+          <SearchableSelect
+            label="Contract / client"
+            value={draft.contractId}
+            options={contractOptions}
+            onValueChange={(contractId) => setDraft({ ...draft, contractId })}
+            placeholder="Search active contracts"
+            required
+            noResultsLabel="No active contracts for this date"
+          />
           <label className="field">
             <span>Date</span>
-            <input type="date" value={draft.workDate} onChange={(event) => setDraft({ ...draft, workDate: event.target.value })} required />
+            <input type="date" value={draft.workDate} onChange={(event) => updateWorkDate(event.target.value)} required />
+            <span className="table-subtext">
+              {selectedContract
+                ? selectedDateAllowed
+                  ? `${contractWorkDaysLabel(selectedContract.workDays)} allowed`
+                  : `${contractWorkDaysLabel(selectedContract.workDays)} does not allow this date`
+                : "Select an active contract before saving."}
+            </span>
           </label>
           <label className="field">
             <span>Applied jobs</span>
@@ -9254,7 +9500,7 @@ function WorkLogEditModal({
             <textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
           </label>
           <div className="actions full">
-            <button className="primary-button" type="submit" disabled={busy}>
+            <button className="primary-button" type="submit" disabled={busy || !selectedContract || !selectedDateAllowed}>
               Save changes
             </button>
             <button className="ghost-button" type="button" onClick={onClose}>
