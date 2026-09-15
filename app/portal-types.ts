@@ -231,6 +231,7 @@ export type PaymentRecord = {
   scheduledDate: string;
   amount: number;
   baseAmount?: number;
+  paymentPortion?: "full" | "half" | string;
   tipAmount?: number;
   creditAmountUsed?: number;
   status: PaymentStatus;
@@ -328,7 +329,7 @@ export type ChatMessage = {
   recipientId?: string;
   conversationId?: string;
   channel?: "direct" | "support" | string;
-  messageType?: "text" | "contract_created" | "contract_updated" | "contract_accepted" | string;
+  messageType?: "text" | "admin_alert" | "contract_created" | "contract_updated" | "contract_accepted" | string;
   authorName: string;
   authorRole: Role;
   body: string;

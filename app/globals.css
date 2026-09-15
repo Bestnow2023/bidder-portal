@@ -2113,6 +2113,20 @@ td > strong {
   background: #eef1ff;
 }
 
+.message.admin-alert-message,
+.message.mine.admin-alert-message {
+  border-left: 3px solid #b45309;
+  background: #fff7ed;
+}
+
+.admin-alert-label {
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 1000;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
 .message.deleted {
   opacity: 0.72;
 }
@@ -2163,6 +2177,19 @@ td > strong {
 
 .message-check.read {
   color: #1d9bf0;
+}
+
+.attachment-loading {
+  display: inline-grid;
+  min-height: 48px;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--muted);
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .analytics-bars {
@@ -2260,6 +2287,28 @@ td > strong {
   border-top: 0;
   padding: 12px 34px 18px;
   background: #ffffff;
+}
+
+.admin-alert-composer {
+  border-top: 1px solid var(--line);
+  background: #fffaf0;
+}
+
+.admin-alert-shell {
+  grid-template-columns: minmax(180px, 260px) 1fr auto;
+}
+
+.compact-field {
+  margin: 0;
+}
+
+.compact-field span {
+  font-size: 11px;
+}
+
+.compact-field select {
+  min-height: 44px;
+  padding: 9px 10px;
 }
 
 .jump-to-latest-button {

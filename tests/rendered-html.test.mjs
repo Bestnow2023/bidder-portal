@@ -195,6 +195,13 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /messageTimeInZone/);
   assert.match(portalApp, /message-time/);
   assert.match(portalApp, /compact-text-message/);
+  assert.match(portalApp, /addChatAlertMessage/);
+  assert.match(portalApp, /Super admin alert/);
+  assert.match(portalApp, /Alert recipient/);
+  assert.match(portalApp, /Send alert/);
+  assert.match(portalApp, /unsafeInboxTerms/);
+  assert.match(portalApp, /This message contains blocked unsafe words/);
+  assert.match(globals, /\.admin-alert-message/);
   assert.doesNotMatch(portalApp, /message-author/);
   assert.match(portalApp, /Sent/);
   assert.match(portalApp, /Read/);
@@ -230,6 +237,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /ClientAnalyticsChart/);
   assert.match(portalApp, /Release Payment/);
   assert.match(portalApp, /Release payment/);
+  assert.match(portalApp, /Full worked amount/);
+  assert.match(portalApp, /Half worked amount/);
+  assert.match(portalApp, /Base release/);
   assert.match(portalApp, /Payout coin/);
   assert.match(portalApp, /Move client credits into the bidder money-credit wallet/);
   assert.match(portalApp, /WithdrawalRequestModal/);
@@ -426,6 +436,9 @@ test("declares the requested frontend records", async () => {
     "Billing",
     "Release Payment",
     "Release payment",
+    "Full worked amount",
+    "Half worked amount",
+    "Base release",
     "Move client credits into the bidder money-credit wallet",
     "Request withdrawal",
     "Payout coin",
@@ -511,6 +524,7 @@ test("declares the requested frontend records", async () => {
     "updateContractPayday",
     "markNotificationsRead",
     "addSupportMessage",
+    "addChatAlertMessage",
     "markChatConversationRead",
     "releasePayment",
     "completePayment",

@@ -147,6 +147,17 @@ const chatPollIntervalMs = 30000;
 const chatAttachmentLimit = 3;
 const maxChatAttachmentBytes = 2 * 1024 * 1024;
 const maxChatImageDimension = 1280;
+const unsafeInboxTerms = [
+  "fuck",
+  "shit",
+  "bitch",
+  "asshole",
+  "bastard",
+  "cunt",
+  "dick",
+  "kill yourself",
+  "kys",
+];
 const demoPassword = "demo1234";
 
 const demoAccounts = [
@@ -996,6 +1007,26 @@ function titleCase(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function unsafeInboxTermMatches(text: string, term: string) {
+  const escapedTerm = escapeRegExp(term.trim()).replace(/\s+/g, "\\s+");
+  return escapedTerm ? new RegExp(`(^|[^a-z0-9])${escapedTerm}(s|ed|ing)?([^a-z0-9]|$)`, "i").test(text) : false;
+}
+
+function inboxMessageSafetyError(...values: string[]) {
+  const text = values.map((value) => value.trim()).filter(Boolean).join(" ");
+  if (!text) {
+    return "";
+  }
+
+  return unsafeInboxTerms.some((term) => unsafeInboxTermMatches(text, term))
+    ? "This message contains blocked unsafe words. Edit the message before sending."
+    : "";
+}
+
 function normalizePaymentFrequency(value?: string): PaymentFrequency {
   return value === "weekly" || value === "biweekly" || value === "monthly" ? value : "";
 }
@@ -1366,6 +1397,10 @@ function userById(users: PortalUser[], userId: string) {
 
 function inboxConversationId(userId: string, recipientId: string) {
   return [userId, recipientId].sort().join("__");
+}
+
+function chatParticipantIdsFromConversationId(conversationId: string) {
+  return conversationId.split("__").map((id) => id.trim()).filter(Boolean);
 }
 
 function chatConversationIdForMessage(message: ChatMessage) {
@@ -2499,8 +2534,14 @@ export default function PortalApp() {
     }
 
     const currentItems = (currentData[resource] || []) as Array<{ id?: string }>;
+    const currentConversationItems = isConversationPage
+      ? (currentItems as ChatMessage[]).filter((message) => chatConversationIdForMessage(message) === options.conversationId)
+      : [];
+    const hasMissingConversationAttachmentData = currentConversationItems.some((message) =>
+      (message.attachments || []).some((attachment) => attachment.id && !attachment.dataUrl)
+    );
     const offset = isConversationPage
-      ? ((currentItems as ChatMessage[]).filter((message) => chatConversationIdForMessage(message) === options.conversationId).length)
+      ? (hasMissingConversationAttachmentData ? 0 : currentConversationItems.length)
       : pageInfo?.nextOffset ?? currentItems.length;
 
     setLoadingPages((current) => ({ ...current, [resource]: true }));
@@ -3072,6 +3113,18 @@ export default function PortalApp() {
     }
 
     if (notification.relatedMessageId || type.includes("message") || type.includes("chat")) {
+      const relatedMessage = (data?.chatMessages || []).find((message) => message.id === notification.relatedMessageId);
+      if (relatedMessage) {
+        const conversationParticipantId = chatParticipantIdsFromConversationId(chatConversationIdForMessage(relatedMessage))
+          .find((participantId) => participantId !== currentUser.id);
+        const fallbackRecipientId = relatedMessage.userId === currentUser.id ? relatedMessage.recipientId : relatedMessage.userId;
+        const recipientId = conversationParticipantId || fallbackRecipientId || "";
+        if (recipientId && recipientId !== currentUser.id) {
+          openInboxForUser(recipientId, notification.relatedPostId || relatedMessage.relatedPostId || "");
+          return;
+        }
+      }
+
       if (notification.actorUserId && notification.actorUserId !== currentUser.id) {
         openInboxForUser(notification.actorUserId, notification.relatedPostId || "");
         return;
@@ -10521,6 +10574,7 @@ function AdminPayments({
     periodStart: today(),
     periodEnd: today(),
     baseAmount: "",
+    paymentPortion: "full",
     tipAmount: "",
     sourcePaymentId: "",
     memo: "",
@@ -10561,11 +10615,15 @@ function AdminPayments({
   const depositAmount = Number(depositDraft.amount) || 0;
   const depositFee = Math.round(depositAmount * 0.05 * 100) / 100;
   const depositCredit = Math.max(0, Math.round((depositAmount - depositFee) * 100) / 100);
-  const releaseBaseAmount = releaseDraft.baseAmount !== ""
+  const releaseWorkedAmount = releaseDraft.baseAmount !== ""
     ? Number(releaseDraft.baseAmount) || 0
     : selectedReleaseUser
       ? estimateForUserInRange(selectedReleaseUser, data.workLogs, releaseDraft.periodStart, releaseDraft.periodEnd)
       : 0;
+  const releaseBaseAmount = Math.max(
+    0,
+    Math.round((releaseDraft.paymentPortion === "half" ? releaseWorkedAmount / 2 : releaseWorkedAmount) * 100) / 100
+  );
   const releaseTipAmount = Number(releaseDraft.tipAmount) || 0;
   const releaseTotalAmount = Math.max(0, Math.round((releaseBaseAmount + releaseTipAmount) * 100) / 100);
   const suggestedAmount = selectedUser
@@ -10657,12 +10715,13 @@ function AdminPayments({
       periodStart: releaseDraft.periodStart,
       periodEnd: releaseDraft.periodEnd,
       baseAmount: releaseBaseAmount,
+      paymentPortion: releaseDraft.paymentPortion,
       tipAmount: Number(releaseDraft.tipAmount),
       sourcePaymentId: releaseDraft.sourcePaymentId,
       memo: releaseDraft.memo,
     });
     if (nextData) {
-      setReleaseDraft({ ...releaseDraft, tipAmount: "", memo: "", sourcePaymentId: "" });
+      setReleaseDraft({ ...releaseDraft, paymentPortion: "full", tipAmount: "", memo: "", sourcePaymentId: "" });
       setShowReleaseModal(false);
     }
   }
@@ -10707,11 +10766,11 @@ function AdminPayments({
   }
 
   function handleReleaseUserChange(userId: string) {
-    setReleaseDraft({ ...releaseDraft, userId, baseAmount: "", sourcePaymentId: "" });
+    setReleaseDraft({ ...releaseDraft, userId, baseAmount: "", paymentPortion: "full", sourcePaymentId: "" });
   }
 
   function setReleasePeriod(field: "periodStart" | "periodEnd", value: string) {
-    setReleaseDraft({ ...releaseDraft, [field]: value, baseAmount: "", sourcePaymentId: "" });
+    setReleaseDraft({ ...releaseDraft, [field]: value, baseAmount: "", paymentPortion: "full", sourcePaymentId: "" });
   }
 
   function openReleaseModal(item?: UpcomingPaymentItem) {
@@ -10725,6 +10784,7 @@ function AdminPayments({
       periodStart: item?.periodStart || today(),
       periodEnd: item?.periodEnd || today(),
       baseAmount: item ? item.amount.toFixed(2) : "",
+      paymentPortion: "full",
       tipAmount: "",
       sourcePaymentId: item?.sourcePaymentId || "",
       memo: item ? `${item.sourceLabel} - ${item.description}` : "",
@@ -10741,7 +10801,7 @@ function AdminPayments({
           <div className="panel-header">
             <div>
               <h2>Release Payment</h2>
-              <p>Click an upcoming payment to autofill the payout, or release a custom date range.</p>
+              <p>Click an upcoming payment to autofill the payout, or release full or half payment for an active or ended contract.</p>
             </div>
             <div className="actions">
               <span className="badge paid">{money(releaseCreditBalance)} credits</span>
@@ -11025,7 +11085,21 @@ function AdminPayments({
               <input type="date" value={releaseDraft.periodEnd} onChange={(event) => setReleasePeriod("periodEnd", event.target.value)} required />
             </label>
             <label className="field">
-              <span>Work amount</span>
+              <span>Worked amount</span>
+              <input value={money(releaseWorkedAmount)} readOnly />
+            </label>
+            <label className="field">
+              <span>Payment amount</span>
+              <select
+                value={releaseDraft.paymentPortion}
+                onChange={(event) => setReleaseDraft({ ...releaseDraft, paymentPortion: event.target.value })}
+              >
+                <option value="full">Full worked amount</option>
+                <option value="half">Half worked amount</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Base release</span>
               <input value={money(releaseBaseAmount)} readOnly />
             </label>
             <label className="field">
@@ -11468,6 +11542,7 @@ function PaymentTable({
                   <td>{shortDate(payment.scheduledDate)}</td>
                   <td>
                     {money(payment.amount)}
+                    {payment.paymentPortion === "half" ? <span className="table-subtext">Half worked amount</span> : null}
                     {payment.tipAmount ? <span className="table-subtext">Tip: {money(payment.tipAmount)}</span> : null}
                   </td>
                   <td><span className={`badge ${paymentStatusClass(payment.status)}`}>{paymentStatusLabel(payment.status)}</span></td>
@@ -11773,11 +11848,13 @@ function ChatAttachmentView({ attachment, onPreview }: { attachment: ChatAttachm
 
   return (
     <div className={`chat-attachment ${isImage ? "image" : ""}`}>
-      {isImage ? (
+      {isImage && attachment.dataUrl ? (
         <button className="attachment-image-button" type="button" onClick={() => onPreview?.(attachment)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={attachment.dataUrl} alt={attachment.name} />
         </button>
+      ) : isImage ? (
+        <span className="attachment-loading">Loading preview</span>
       ) : isAudio ? (
         <audio controls preload="metadata" src={attachment.dataUrl} />
       ) : (
@@ -12293,6 +12370,8 @@ function ChatView({
   requestedPostId: string;
 }) {
   const [body, setBody] = useState("");
+  const [alertBody, setAlertBody] = useState("");
+  const [alertRecipientId, setAlertRecipientId] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachmentDraft[]>([]);
   const [pendingAttachmentPreview, setPendingAttachmentPreview] = useState<PendingAttachmentPreview | null>(null);
   const [chatError, setChatError] = useState("");
@@ -12370,9 +12449,7 @@ function ChatView({
         .map((conversationId) => {
           const messages = data.chatMessages.filter((message) => chatConversationIdForMessage(message) === conversationId);
           const latestMessage = messages[messages.length - 1];
-          const participantIds = Array.from(
-            new Set(messages.flatMap((message) => [message.userId, message.recipientId || ""]).filter(Boolean))
-          );
+          const participantIds = chatParticipantIdsFromConversationId(conversationId);
           const participantNames = participantIds.map((id) => userDisplayName(membersById.get(id)));
           const participantAvatar = participantIds
             .map((id) => initialsForName(membersById.get(id)?.name || ""))
@@ -12403,11 +12480,17 @@ function ChatView({
     : [];
   const activeRecipient = activeConversation?.recipientId ? membersById.get(activeConversation.recipientId) : null;
   const activeParticipantIds = activeConversation?.monitored
-    ? Array.from(new Set(activeMessages.flatMap((message) => [message.userId, message.recipientId || ""]).filter(Boolean)))
+    ? chatParticipantIdsFromConversationId(activeConversationId)
     : [];
   const activeParticipants = activeParticipantIds
     .map((participantId) => membersById.get(participantId))
     .filter((participant): participant is PortalUser => Boolean(participant));
+  const adminAlertRecipients = activeConversation?.monitored
+    ? activeParticipants.filter((participant) => !isSuperAdminRole(participant.role))
+    : [];
+  const selectedAlertRecipientId = adminAlertRecipients.some((participant) => participant.id === alertRecipientId)
+    ? alertRecipientId
+    : adminAlertRecipients[0]?.id || "";
   const activeRelatedPostId =
     requestedPostId ||
     [...activeMessages].reverse().find((message) => message.relatedPostId)?.relatedPostId ||
@@ -12428,6 +12511,10 @@ function ChatView({
     activeConversation.recipientAllowsContact &&
     Boolean(activeConversation.recipientId);
   const canSubmit = activeCanSendMessage && Boolean(body.trim() || attachments.length);
+  const canSendAdminAlert =
+    canSend &&
+    isSuperAdminRole(currentUser.role) &&
+    Boolean(activeConversation?.monitored && activeConversationId && selectedAlertRecipientId && alertBody.trim());
   const unreadIncomingSignature = activeMessages
     .filter(
       (message) => message.userId !== currentUser.id && !message.deletedAt && !message.readAt
@@ -12436,6 +12523,9 @@ function ChatView({
     .join("|");
   const newestActiveMessage = activeMessages[activeMessages.length - 1];
   const newestActiveMessageId = newestActiveMessage?.id || "";
+  const missingActiveAttachmentDataKey = activeMessages
+    .flatMap((message) => (message.attachments || []).filter((attachment) => attachment.id && !attachment.dataUrl).map((attachment) => attachment.id))
+    .join("|");
 
   const updateMessageBottomState = useCallback(() => {
     const container = messagesContainerRef.current;
@@ -12485,6 +12575,18 @@ function ChatView({
     return () => window.cancelAnimationFrame(frame);
   }, [activeConversationId, currentUser.id, newestActiveMessage?.userId, newestActiveMessageId, scrollMessagesToBottom]);
 
+  useEffect(() => {
+    if (!activeConversationId || !missingActiveAttachmentDataKey || loadingPages.chatMessages) {
+      return;
+    }
+
+    void onLoadPage("chatMessages", {
+      conversationId: activeConversationId,
+      limit: Math.max(50, Math.min(100, activeMessages.length || 50)),
+      force: true,
+    });
+  }, [activeConversationId, activeMessages.length, loadingPages.chatMessages, missingActiveAttachmentDataKey, onLoadPage]);
+
   function handleMessagesScroll() {
     updateMessageBottomState();
   }
@@ -12518,12 +12620,19 @@ function ChatView({
     setShowJumpToLatest(false);
     setEditingMessageId("");
     setEditBody("");
+    setAlertBody("");
+    setAlertRecipientId("");
     setPendingAttachmentPreview(null);
     setChatError("");
   }
 
   async function sendMessageWithContent(messageBody: string, messageAttachments: ChatAttachmentDraft[]) {
     if (!activeCanSendMessage || busy || (!messageBody.trim() && !messageAttachments.length)) {
+      return;
+    }
+    const safetyError = inboxMessageSafetyError(messageBody, ...messageAttachments.map((attachment) => attachment.name || ""));
+    if (safetyError) {
+      setChatError(safetyError);
       return;
     }
 
@@ -12542,6 +12651,29 @@ function ChatView({
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+    }
+  }
+
+  async function sendAdminAlert(event: FormEvent) {
+    event.preventDefault();
+    if (!canSendAdminAlert) {
+      return;
+    }
+    const safetyError = inboxMessageSafetyError(alertBody);
+    if (safetyError) {
+      setChatError(safetyError);
+      return;
+    }
+
+    const nextData = await onSend("addChatAlertMessage", {
+      conversationId: activeConversationId,
+      recipientId: selectedAlertRecipientId,
+      body: alertBody,
+      authorTimeZone: userTimeZone,
+    });
+    if (nextData) {
+      setAlertBody("");
+      setChatError("");
     }
   }
 
@@ -12649,6 +12781,12 @@ function ChatView({
   }
 
   async function saveEditedMessage(message: ChatMessage) {
+    const safetyError = inboxMessageSafetyError(editBody);
+    if (safetyError) {
+      setChatError(safetyError);
+      return;
+    }
+
     const nextData = await onSend("editChatMessage", {
       messageId: message.id,
       body: editBody,
@@ -12811,9 +12949,9 @@ function ChatView({
               <div className="person-title">
                 <div>
                   <h3>Monitored conversation</h3>
-                  <p>Super admin can review client-bidder communication but cannot send direct messages.</p>
+                  <p>Super admin can review client-bidder communication and send targeted alert messages.</p>
                 </div>
-                <span className="badge super_admin">Read only</span>
+                <span className="badge super_admin">Monitoring</span>
               </div>
               <div className="badge-row">
                 {activeParticipants.map((participant) => (
@@ -12836,7 +12974,8 @@ function ChatView({
             const messageAttachments = message.attachments || [];
             const menuItems: ActionMenuItem[] = [];
             const authorUser = membersById.get(message.userId);
-            const isCompactTextMessage = !deleted && !isEditing && Boolean(message.body) && !relatedContract && !messageAttachments.length;
+            const isAdminAlert = message.messageType === "admin_alert";
+            const isCompactTextMessage = !isAdminAlert && !deleted && !isEditing && Boolean(message.body) && !relatedContract && !messageAttachments.length;
 
             if (canEdit) {
               menuItems.push({ label: "Edit", onClick: () => startEditing(message) });
@@ -12848,7 +12987,7 @@ function ChatView({
             return (
               <div className={`message-row ${isMine ? "mine" : ""}`} key={message.id}>
                 {!isMine ? <MemberAvatar user={authorUser} size="sm" /> : null}
-                <div className={`message ${isMine ? "mine" : ""} ${deleted ? "deleted" : ""} ${isCompactTextMessage ? "compact-text-message" : ""}`}>
+                <div className={`message ${isMine ? "mine" : ""} ${deleted ? "deleted" : ""} ${isAdminAlert ? "admin-alert-message" : ""} ${isCompactTextMessage ? "compact-text-message" : ""}`}>
                   {deleted ? (
                     <p className="muted">Message deleted</p>
                   ) : isEditing ? (
@@ -12870,6 +13009,7 @@ function ChatView({
                     </div>
                   ) : (
                     <>
+                      {isAdminAlert ? <span className="admin-alert-label">Super admin alert</span> : null}
                       {message.body ? <p>{message.body}</p> : null}
                       {relatedContract ? (
                         <ChatContractCard
@@ -12919,7 +13059,39 @@ function ChatView({
             </button>
           ) : null}
 
-          {activeConversation && !activeConversation.monitored ? (
+          {activeConversation?.monitored && isSuperAdminRole(currentUser.role) ? (
+            <form className="chat-composer admin-alert-composer" onSubmit={sendAdminAlert}>
+              <div className="composer-shell admin-alert-shell">
+                <label className="field compact-field">
+                  <span>Alert recipient</span>
+                  <select
+                    value={selectedAlertRecipientId}
+                    onChange={(event) => setAlertRecipientId(event.target.value)}
+                    disabled={busy || !adminAlertRecipients.length}
+                  >
+                    {adminAlertRecipients.map((participant) => (
+                      <option key={participant.id} value={participant.id}>
+                        {userDisplayName(participant)} - {roleLabel(participant.role)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <textarea
+                  aria-label="Alert message"
+                  placeholder="Alert message"
+                  value={alertBody}
+                  onChange={(event) => setAlertBody(event.target.value)}
+                  disabled={busy || !adminAlertRecipients.length}
+                  required
+                />
+                <button className="primary-button" type="submit" disabled={busy || !canSendAdminAlert}>
+                  Send alert
+                </button>
+              </div>
+              <span className="muted">The alert is visible only to the selected bidder or client.</span>
+              {chatError ? <div className="error full">{chatError}</div> : null}
+            </form>
+          ) : activeConversation && !activeConversation.monitored ? (
             <form className="chat-composer" onSubmit={submit}>
               {attachments.length ? (
                 <div className="attachment-preview-list">
@@ -12992,7 +13164,7 @@ function ChatView({
             <div className="chat-composer read-only-composer">
               <span className="muted">
                 {activeConversation?.monitored
-                  ? "Read-only monitoring. Client and bidder messages stay in their own direct thread."
+                  ? "Client and bidder messages stay in their own direct thread."
                   : "No active inbox contacts are available yet."}
               </span>
             </div>
