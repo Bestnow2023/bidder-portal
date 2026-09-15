@@ -14,6 +14,8 @@ export type DisputeStatus = "open" | "reviewing" | "resolved" | "closed";
 
 export type CreditBalances = {
   moneyCreditBalance: number;
+  withdrawableBalance?: number;
+  heldMoneyCreditBalance?: number;
   postCreditBalance: number;
   giftCreditBalance?: number;
   postingCreditBalance: number;

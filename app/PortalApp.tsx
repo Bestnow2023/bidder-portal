@@ -1386,6 +1386,8 @@ function userCreditBalances(user: PortalUser, data: PortalData) {
 
   return {
     moneyCreditBalance,
+    withdrawableBalance: 0,
+    heldMoneyCreditBalance: 0,
     postCreditBalance,
     postingCreditBalance: postCreditBalance,
   };
@@ -7325,7 +7327,7 @@ function DisputesView({
   }, [showCreateModal, data.pagination, loadingPages, onLoadPage]);
   const [editingDispute, setEditingDispute] = useState<DisputeRecord | null>(null);
   const [draft, setDraft] = useState({
-    targetUserId: clientWorkers[0]?.id || "",
+    targetUserId: isWorkerUser(currentUser) ? currentUser.id : "",
     contractId: "",
     paymentId: "",
     subject: "",
@@ -7395,7 +7397,7 @@ function DisputesView({
     event.preventDefault();
     const nextData = await onAction("createDispute", draft);
     if (nextData) {
-      setDraft({ targetUserId: clientWorkers[0]?.id || "", contractId: "", paymentId: "", subject: "", body: "" });
+      setDraft({ targetUserId: isWorkerUser(currentUser) ? currentUser.id : "", contractId: "", paymentId: "", subject: "", body: "" });
       setShowCreateModal(false);
     }
   }
@@ -7609,7 +7611,7 @@ function DisputesView({
             <label className="field">
               <span>Bidder</span>
               <select disabled={isWorkerUser(currentUser)} value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value, contractId: "", paymentId: "" })}>
-                <option value="">General issue</option>
+                <option value="">Select bidder</option>
                 {clientWorkers.map((worker) => (
                   <option key={worker.id} value={worker.id}>{worker.name}</option>
                 ))}
@@ -7617,9 +7619,9 @@ function DisputesView({
             </label>
             <label className="field">
               <span>Contract</span>
-              <select required={isWorkerUser(currentUser)} value={draft.contractId} onChange={(event) => setDraft({ ...draft, contractId: event.target.value, targetUserId: clientContracts.find((contract) => contract.id === event.target.value)?.workerId || draft.targetUserId, paymentId: "" })}>
+              <select disabled={!draft.targetUserId} required={isWorkerUser(currentUser)} value={draft.contractId} onChange={(event) => setDraft({ ...draft, contractId: event.target.value, paymentId: "" })}>
                 <option value="">No contract selected</option>
-                {clientContracts.filter((contract) => !draft.targetUserId || contract.workerId === draft.targetUserId).map((contract) => (
+                {clientContracts.filter((contract) => contract.workerId === draft.targetUserId).map((contract) => (
                   <option key={contract.id} value={contract.id}>{contract.title} - {contract.id} - {titleCase(contract.status)}</option>
                 ))}
               </select>
@@ -10076,7 +10078,7 @@ function UserPayments({
           <button
             className="primary-button compact-button"
             type="button"
-            disabled={busy || !methods.length || balances.moneyCreditBalance <= 0}
+            disabled={busy || !methods.length || (balances.withdrawableBalance ?? 0) <= 0}
             onClick={() => setShowWithdrawalModal(true)}
           >
             Request withdrawal
@@ -10141,6 +10143,14 @@ function UserPayments({
             <span>Pending withdrawal</span>
             <strong>{money(pendingWithdrawals.reduce((total, payment) => total + payment.amount, 0))}</strong>
           </div>
+          <div className="metric">
+            <span>Available to withdraw</span>
+            <strong>{money(balances.withdrawableBalance ?? 0)}</strong>
+          </div>
+          <div className="metric">
+            <span>On hold (3 business days)</span>
+            <strong>{money(balances.heldMoneyCreditBalance ?? 0)}</strong>
+          </div>
         </div>
       </section>
 
@@ -10165,7 +10175,7 @@ function UserPayments({
       {showWithdrawalModal ? (
         <WithdrawalRequestModal
           methods={methods}
-          balance={balances.moneyCreditBalance}
+          balance={balances.withdrawableBalance ?? 0}
           busy={busy}
           onClose={() => setShowWithdrawalModal(false)}
           onSave={requestWithdrawal}
