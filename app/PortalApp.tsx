@@ -7308,6 +7308,21 @@ function DisputesView({
   const clientPayments = data.payments.filter((payment) => payment.clientId === currentUser.id || payment.userId === currentUser.id);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedDispute, setSelectedDispute] = useState<DisputeRecord | null>(null);
+  const requestedDisputePages = useRef(new Set<string>());
+  useEffect(() => {
+    if (!showCreateModal) {
+      requestedDisputePages.current.clear();
+      return;
+    }
+    for (const resource of ["contracts", "payments"] as const) {
+      const page = data.pagination?.[resource];
+      const key = `${resource}:${page?.nextOffset}`;
+      if (page?.hasMore && !loadingPages[resource] && !requestedDisputePages.current.has(key)) {
+        requestedDisputePages.current.add(key);
+        void onLoadPage(resource, { limit: 100 });
+      }
+    }
+  }, [showCreateModal, data.pagination, loadingPages, onLoadPage]);
   const [editingDispute, setEditingDispute] = useState<DisputeRecord | null>(null);
   const [draft, setDraft] = useState({
     targetUserId: clientWorkers[0]?.id || "",
@@ -7593,7 +7608,7 @@ function DisputesView({
           <form className="form-grid" onSubmit={submitDispute}>
             <label className="field">
               <span>Bidder</span>
-              <select disabled={Boolean(draft.contractId) || isWorkerUser(currentUser)} value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value, paymentId: "" })}>
+              <select disabled={isWorkerUser(currentUser)} value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value, contractId: "", paymentId: "" })}>
                 <option value="">General issue</option>
                 {clientWorkers.map((worker) => (
                   <option key={worker.id} value={worker.id}>{worker.name}</option>
@@ -7602,10 +7617,10 @@ function DisputesView({
             </label>
             <label className="field">
               <span>Contract</span>
-              <select required={isWorkerUser(currentUser)} value={draft.contractId} onChange={(event) => setDraft({ ...draft, contractId: event.target.value, targetUserId: clientContracts.find((contract) => contract.id === event.target.value)?.workerId || "", paymentId: "" })}>
+              <select required={isWorkerUser(currentUser)} value={draft.contractId} onChange={(event) => setDraft({ ...draft, contractId: event.target.value, targetUserId: clientContracts.find((contract) => contract.id === event.target.value)?.workerId || draft.targetUserId, paymentId: "" })}>
                 <option value="">No contract selected</option>
-                {clientContracts.map((contract) => (
-                  <option key={contract.id} value={contract.id}>{contract.title}</option>
+                {clientContracts.filter((contract) => !draft.targetUserId || contract.workerId === draft.targetUserId).map((contract) => (
+                  <option key={contract.id} value={contract.id}>{contract.title} - {contract.id} - {titleCase(contract.status)}</option>
                 ))}
               </select>
             </label>
@@ -7613,11 +7628,11 @@ function DisputesView({
               <span>Payment</span>
               <select value={draft.paymentId} onChange={(event) => setDraft({ ...draft, paymentId: event.target.value })}>
                 <option value="">Unpaid work / no payment selected</option>
-                {clientPayments.filter((payment) => (!draft.targetUserId || payment.userId === draft.targetUserId) && (!draft.contractId || payment.clientId === clientContracts.find((contract) => contract.id === draft.contractId)?.clientId)).map((payment) => {
+                {clientPayments.filter((payment) => !isWithdrawalPayment(payment) && (!draft.targetUserId || payment.userId === draft.targetUserId) && (!draft.contractId || payment.clientId === clientContracts.find((contract) => contract.id === draft.contractId)?.clientId)).map((payment) => {
                   const worker = userById(data.users, payment.userId);
                   return (
                     <option key={payment.id} value={payment.id}>
-                      {worker?.name || "Bidder"} - {money(payment.amount)} - {shortDate(payment.scheduledDate)}
+                      {worker?.name || "Bidder"} - {money(payment.amount)} - {shortDate(payment.scheduledDate)} - {payment.status === "paid" ? "Paid" : payment.status === "scheduled" ? "To be paid" : titleCase(payment.status)} - {payment.id}
                     </option>
                   );
                 })}
