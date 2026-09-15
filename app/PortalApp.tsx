@@ -10154,6 +10154,7 @@ function UserPayments({
         <PaymentTable
           payments={userPayments}
           users={[user]}
+          onDispute={async (payload) => Boolean(await onAction("createDispute", payload))}
           onCancelWithdrawal={cancelWithdrawal}
           pageInfo={data.pagination?.payments}
           loadingMore={loadingPages.payments}
@@ -11054,6 +11055,7 @@ function AdminPayments({
         <PaymentTable
           payments={visiblePaymentHistory}
           users={data.users}
+          onDispute={canReleasePayments ? async (payload) => Boolean(await onAction("createDispute", payload)) : undefined}
           onEdit={canModifyPayments ? setEditingPayment : undefined}
           onDelete={canModifyPayments ? deletePayment : undefined}
           pageInfo={data.pagination?.payments}
@@ -11490,6 +11492,7 @@ function WithdrawalReviewModal({
 function PaymentTable({
   payments,
   users,
+  onDispute,
   onReview,
   onEdit,
   onComplete,
@@ -11502,6 +11505,7 @@ function PaymentTable({
 }: {
   payments: PaymentRecord[];
   users: PortalUser[];
+  onDispute?: (payload: Record<string, unknown>) => Promise<boolean>;
   onReview?: (payment: PaymentRecord) => void;
   onEdit?: (payment: PaymentRecord) => void;
   onComplete?: (payment: PaymentRecord) => void;
@@ -11512,6 +11516,30 @@ function PaymentTable({
   loadingMore?: boolean;
   onLoadMore?: () => void;
 }) {
+  const [disputedPayment, setDisputedPayment] = useState<PaymentRecord | null>(null);
+  const [disputeSubject, setDisputeSubject] = useState("");
+  const [disputeDetails, setDisputeDetails] = useState("");
+  const [submittingDispute, setSubmittingDispute] = useState(false);
+  const [disputeError, setDisputeError] = useState("");
+
+  async function submitPaymentDispute(event: FormEvent) {
+    event.preventDefault();
+    if (!onDispute || !disputedPayment || submittingDispute) return;
+    setSubmittingDispute(true);
+    setDisputeError("");
+    try {
+      if (await onDispute({ paymentId: disputedPayment.id, subject: disputeSubject, body: disputeDetails })) {
+        setDisputedPayment(null);
+      } else {
+        setDisputeError("Could not open the dispute. Please check the details and try again.");
+      }
+    } catch {
+      setDisputeError("Could not open the dispute. Please try again.");
+    } finally {
+      setSubmittingDispute(false);
+    }
+  }
+
   if (!payments.length) {
     return <div className="empty-state">{emptyMessage}</div>;
   }
@@ -11530,7 +11558,7 @@ function PaymentTable({
               <th>Status</th>
               <th>Link</th>
               <th>Memo</th>
-              {onReview || onEdit || onComplete || onCancelWithdrawal || onDelete ? <th>Actions</th> : null}
+              {onReview || onEdit || onComplete || onCancelWithdrawal || onDelete || onDispute ? <th>Actions</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -11539,6 +11567,12 @@ function PaymentTable({
               const linkValue = payment.paymentLink || payment.payoutTxid || payment.payoutUuid || "";
               const isWebLink = /^https?:\/\//i.test(linkValue);
               const actionItems: ActionMenuItem[] = [
+                ...(onDispute && payment.clientId && !isWithdrawalPayment(payment) ? [{ label: "Open dispute", onClick: () => {
+                  setDisputedPayment(payment);
+                  setDisputeSubject(`Payment dispute - ${payment.id}`);
+                  setDisputeDetails("");
+                  setDisputeError("");
+                } }] : []),
                 ...(onReview ? [{ label: "Review request", onClick: () => onReview(payment) }] : []),
                 ...(onComplete && payment.status === "processing" ? [{ label: "Mark completed", onClick: () => onComplete(payment) }] : []),
                 ...(onCancelWithdrawal && isWithdrawalPayment(payment) && payment.status === "processing"
@@ -11585,7 +11619,7 @@ function PaymentTable({
                         <ActionMenu items={actionItems} />
                       )}
                     </td>
-                  ) : null}
+                  ) : (onReview || onEdit || onComplete || onCancelWithdrawal || onDelete || onDispute) ? <td /> : null}
                 </tr>
               );
             })}
@@ -11593,6 +11627,16 @@ function PaymentTable({
         </table>
       </div>
       <PagedListFooter pageInfo={pageInfo} loading={loadingMore} noun="payments" onLoadMore={onLoadMore} />
+      {disputedPayment ? (
+        <ModalFrame title="Open Payment Dispute" subtitle={`${money(disputedPayment.amount)} - ${paymentStatusLabel(disputedPayment.status)} - ${disputedPayment.id}`} onClose={() => { if (!submittingDispute) setDisputedPayment(null); }}>
+          <form className="form-grid" onSubmit={submitPaymentDispute}>
+            <label className="field full"><span>Subject</span><input required maxLength={140} value={disputeSubject} onChange={(event) => setDisputeSubject(event.target.value)} /></label>
+            <label className="field full"><span>Details</span><textarea required maxLength={1200} value={disputeDetails} onChange={(event) => setDisputeDetails(event.target.value)} /></label>
+            {disputeError ? <div className="error full" role="alert">{disputeError}</div> : null}
+            <div className="actions full"><button className="primary-button" type="submit" disabled={submittingDispute || !disputeSubject.trim() || !disputeDetails.trim()}>Submit dispute</button></div>
+          </form>
+        </ModalFrame>
+      ) : null}
     </>
   );
 }
