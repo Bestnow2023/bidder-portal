@@ -1169,6 +1169,12 @@ td > strong {
   display: inline-flex;
 }
 
+.inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .people-list {
   display: grid;
   gap: 14px;

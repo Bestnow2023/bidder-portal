@@ -273,6 +273,9 @@ test("keeps the bidder portal as the primary screen", async () => {
   assert.match(portalApp, /Role filter/);
   assert.match(portalApp, /Status filter/);
   assert.match(portalApp, /Clear filters/);
+  assert.match(portalApp, /Approve access/);
+  assert.match(portalApp, /inline-actions/);
+  assert.match(globals, /\.inline-actions/);
   assert.match(portalApp, /Mark email verified/);
   assert.match(portalApp, /Edit Payment/);
   assert.match(portalApp, /Edit User/);

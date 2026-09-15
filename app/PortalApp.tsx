@@ -8190,64 +8190,82 @@ function PeopleView({
             </tr>
           </thead>
           <tbody>
-            {visibleUsers.map((user) => (
+            {visibleUsers.map((user) => {
+              const normalizedStatus = normalizeAccountStatus(user.status);
+              return (
               <tr className="clickable-row" key={user.id} onClick={() => setSelectedProfileUserId(user.id)}>
                 <td>
                   <TableMemberCell user={user} subtitle={user.email} />
                 </td>
                 <td><span className="table-subtext">{displayUserId(user)}</span></td>
                 <td><span className={`badge ${user.role}`}>{roleLabel(user.role)}</span></td>
-                <td><span className={`badge ${normalizeAccountStatus(user.status)}`}>{statusLabel(user.status)}</span></td>
+                <td><span className={`badge ${normalizedStatus}`}>{statusLabel(user.status)}</span></td>
                 <td>{assignedClientName(data.users, user)}</td>
                 <td>{user.passwordSet ? "Set" : "Not set"}</td>
                 <td>{user.emailVerifiedAt ? "Verified" : "Not verified"}</td>
                 <td>{optionalDateTime(user.passwordUpdatedAt)}</td>
                 <td>
-                  <ActionMenu
-                    items={[
-                      { label: "View profile", onClick: () => setSelectedProfileUserId(user.id) },
-                      { label: "Edit", onClick: () => setEditingUser(user) },
-                      {
-                        label: "Move to pending review",
-                        disabled: busy || normalizeAccountStatus(user.status) === "pending_review",
-                        onClick: () => updateUser(user, { status: "pending_review" }),
-                      },
-                      {
-                        label: "Activate",
-                        disabled: busy || normalizeAccountStatus(user.status) === "active",
-                        onClick: () => updateUser(user, { status: "active" }),
-                      },
-                      {
-                        label: "Temporarily restrict",
-                        disabled: busy || normalizeAccountStatus(user.status) === "temporarily_restricted",
-                        onClick: () => updateUser(user, { status: "temporarily_restricted" }),
-                      },
-                      {
-                        label: "Suspend",
-                        disabled: busy || normalizeAccountStatus(user.status) === "suspended",
-                        onClick: () => updateUser(user, { status: "suspended" }),
-                      },
-                      {
-                        label: "Close",
-                        disabled: busy || normalizeAccountStatus(user.status) === "closed",
-                        onClick: () => updateUser(user, { status: "closed" }),
-                      },
-                      {
-                        label: "Send verification",
-                        disabled: busy || Boolean(user.emailVerifiedAt),
-                        onClick: () => onSave("requestEmailVerification", { targetUserId: user.id }),
-                      },
-                      {
-                        label: "Remove",
-                        danger: true,
-                        disabled: busy || user.id === data.currentUser.id,
-                        onClick: () => void removeUser(user),
-                      },
-                    ]}
-                  />
+                  <div className="inline-actions">
+                    {normalizedStatus === "pending_review" ? (
+                      <button
+                        className="primary-button compact-button"
+                        type="button"
+                        disabled={busy}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void updateUser(user, { status: "active" });
+                        }}
+                      >
+                        Approve
+                      </button>
+                    ) : null}
+                    <ActionMenu
+                      items={[
+                        { label: "View profile", onClick: () => setSelectedProfileUserId(user.id) },
+                        { label: "Edit", onClick: () => setEditingUser(user) },
+                        {
+                          label: "Move to pending review",
+                          disabled: busy || normalizedStatus === "pending_review",
+                          onClick: () => updateUser(user, { status: "pending_review" }),
+                        },
+                        {
+                          label: normalizedStatus === "pending_review" ? "Approve access" : "Activate",
+                          disabled: busy || normalizedStatus === "active",
+                          onClick: () => updateUser(user, { status: "active" }),
+                        },
+                        {
+                          label: "Temporarily restrict",
+                          disabled: busy || normalizedStatus === "temporarily_restricted",
+                          onClick: () => updateUser(user, { status: "temporarily_restricted" }),
+                        },
+                        {
+                          label: "Suspend",
+                          disabled: busy || normalizedStatus === "suspended",
+                          onClick: () => updateUser(user, { status: "suspended" }),
+                        },
+                        {
+                          label: "Close",
+                          disabled: busy || normalizedStatus === "closed",
+                          onClick: () => updateUser(user, { status: "closed" }),
+                        },
+                        {
+                          label: "Send verification",
+                          disabled: busy || Boolean(user.emailVerifiedAt),
+                          onClick: () => onSave("requestEmailVerification", { targetUserId: user.id }),
+                        },
+                        {
+                          label: "Remove",
+                          danger: true,
+                          disabled: busy || user.id === data.currentUser.id,
+                          onClick: () => void removeUser(user),
+                        },
+                      ]}
+                    />
+                  </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
