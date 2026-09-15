@@ -7301,11 +7301,11 @@ function DisputesView({
   onLoadPage: (resource: PortalPageResource, options?: { conversationId?: string; limit?: number; force?: boolean }) => Promise<PortalPageResult | undefined>;
 }) {
   const currentUser = data.currentUser;
-  const canCreateDispute = isClientRole(currentUser.role);
+  const canCreateDispute = isClientRole(currentUser.role) || isWorkerUser(currentUser);
   const canResolveDisputes = isSuperAdminRole(currentUser.role);
-  const clientWorkers = data.users.filter((user) => isWorkerUser(user) && user.assignedAdminId === currentUser.id);
-  const clientPayments = data.payments.filter((payment) => payment.clientId === currentUser.id);
-  const clientContracts = data.contracts.filter((contract) => contract.clientId === currentUser.id);
+  const clientContracts = data.contracts.filter((contract) => contract.clientId === currentUser.id || contract.workerId === currentUser.id);
+  const clientWorkers = data.users.filter((user) => isWorkerUser(user) && (user.assignedAdminId === currentUser.id || clientContracts.some((contract) => contract.workerId === user.id)));
+  const clientPayments = data.payments.filter((payment) => payment.clientId === currentUser.id || payment.userId === currentUser.id);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedDispute, setSelectedDispute] = useState<DisputeRecord | null>(null);
   const [editingDispute, setEditingDispute] = useState<DisputeRecord | null>(null);
@@ -7593,7 +7593,7 @@ function DisputesView({
           <form className="form-grid" onSubmit={submitDispute}>
             <label className="field">
               <span>Bidder</span>
-              <select value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value })}>
+              <select disabled={Boolean(draft.contractId) || isWorkerUser(currentUser)} value={draft.targetUserId} onChange={(event) => setDraft({ ...draft, targetUserId: event.target.value, paymentId: "" })}>
                 <option value="">General issue</option>
                 {clientWorkers.map((worker) => (
                   <option key={worker.id} value={worker.id}>{worker.name}</option>
@@ -7602,7 +7602,7 @@ function DisputesView({
             </label>
             <label className="field">
               <span>Contract</span>
-              <select value={draft.contractId} onChange={(event) => setDraft({ ...draft, contractId: event.target.value })}>
+              <select required={isWorkerUser(currentUser)} value={draft.contractId} onChange={(event) => setDraft({ ...draft, contractId: event.target.value, targetUserId: clientContracts.find((contract) => contract.id === event.target.value)?.workerId || "", paymentId: "" })}>
                 <option value="">No contract selected</option>
                 {clientContracts.map((contract) => (
                   <option key={contract.id} value={contract.id}>{contract.title}</option>
@@ -7612,8 +7612,8 @@ function DisputesView({
             <label className="field">
               <span>Payment</span>
               <select value={draft.paymentId} onChange={(event) => setDraft({ ...draft, paymentId: event.target.value })}>
-                <option value="">No payment selected</option>
-                {clientPayments.map((payment) => {
+                <option value="">Unpaid work / no payment selected</option>
+                {clientPayments.filter((payment) => (!draft.targetUserId || payment.userId === draft.targetUserId) && (!draft.contractId || payment.clientId === clientContracts.find((contract) => contract.id === draft.contractId)?.clientId)).map((payment) => {
                   const worker = userById(data.users, payment.userId);
                   return (
                     <option key={payment.id} value={payment.id}>
@@ -10555,7 +10555,11 @@ function AdminPayments({
 }) {
   const payableUsers = data.users.filter((user) =>
     isWorkerUser(user) &&
-    (isSuperAdminRole(data.currentUser.role) || user.assignedAdminId === data.currentUser.id)
+    (isSuperAdminRole(data.currentUser.role) || user.assignedAdminId === data.currentUser.id ||
+      data.contracts.some((contract) =>
+        contract.clientId === data.currentUser.id && contract.workerId === user.id &&
+        (contract.status === "active" || contract.status === "ended")
+      ))
   );
   const canAddManualPayment = isSuperAdminRole(data.currentUser.role);
   const canReleasePayments = isClientRole(data.currentUser.role);
@@ -12981,6 +12985,18 @@ function ChatView({
               menuItems.push({ label: "Edit", onClick: () => startEditing(message) });
             }
             if (canDelete) {
+              if (authorUser && !isSuperAdminRole(authorUser.role) && activeConversation?.monitored) {
+                menuItems.push({
+                  label: "Alert for disrespect",
+                  disabled: busy,
+                  onClick: () => {
+                    setAlertRecipientId(message.userId);
+                    setAlertBody("Please keep your messages respectful and professional. Disrespectful language is not acceptable in this conversation.");
+                    setChatError("");
+                    document.querySelector<HTMLTextAreaElement>('.admin-alert-composer textarea')?.focus();
+                  },
+                });
+              }
               menuItems.push({ label: "Delete", danger: true, disabled: busy, onClick: () => void deleteMessage(message) });
             }
 
