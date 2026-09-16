@@ -10486,6 +10486,40 @@ function CreditAdjustmentModal({
   );
 }
 
+function AdminWorkPaymentModal({ data, busy, onAction, onClose }: {
+  data: PortalData;
+  busy: boolean;
+  onAction: (action: string, payload: Record<string, unknown>) => Promise<PortalData | undefined>;
+  onClose: () => void;
+}) {
+  const [clientId, setClientId] = useState("");
+  const [userId, setUserId] = useState("");
+  const [periodStart, setPeriodStart] = useState(today());
+  const [periodEnd, setPeriodEnd] = useState(today());
+  const [error, setError] = useState("");
+  const contracts = data.contracts.filter((contract) => contract.clientId === clientId && ["active", "ended"].includes(contract.status));
+  const bidders = data.users.filter((user) => contracts.some((contract) => contract.workerId === user.id));
+  const client = userById(data.users, clientId);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    const result = await onAction("releasePayment", { clientId, userId, periodStart, periodEnd });
+    if (result) onClose();
+    else setError("Payment could not be released. Check the client credit and approved unpaid work for this period.");
+  }
+  return <ModalFrame title="Pay Unpaid Work" subtitle="Release approved work from client credit to the bidder balance." onClose={onClose}>
+    <form className="form-grid" onSubmit={submit}>
+      <label className="field"><span>Client</span><select required value={clientId} onChange={(event) => { setClientId(event.target.value); setUserId(""); }}><option value="">Select client</option>{data.users.filter((user) => isClientRole(user.role)).map((user) => <option key={user.id} value={user.id}>{user.name} - {displayUserId(user)}</option>)}</select></label>
+      <label className="field"><span>Bidder</span><select required disabled={!clientId} value={userId} onChange={(event) => setUserId(event.target.value)}><option value="">Select bidder</option>{bidders.map((user) => <option key={user.id} value={user.id}>{user.name} - {displayUserId(user)}</option>)}</select></label>
+      <label className="field"><span>From</span><input required type="date" value={periodStart} onChange={(event) => setPeriodStart(event.target.value)} /></label>
+      <label className="field"><span>Through</span><input required type="date" min={periodStart} value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} /></label>
+      {client ? <p className="full">Client available credit: {money(userCreditBalances(client, data).moneyCreditBalance)}</p> : null}
+      {error ? <div className="error full" role="alert">{error}</div> : null}
+      <div className="actions full"><button type="submit" className="primary-button" disabled={busy || !clientId || !userId || periodStart > periodEnd}>Pay approved unpaid work</button></div>
+    </form>
+  </ModalFrame>;
+}
+
 function SuperAdminBillingManagementView({
   data,
   busy,
@@ -10502,9 +10536,12 @@ function SuperAdminBillingManagementView({
   const pendingPayments = data.payments.filter((payment) => isWithdrawalPayment(payment) && payment.status === "processing");
   const completedPayments = data.payments.filter((payment) => ["paid", "failed", "denied", "cancelled"].includes(payment.status));
   const [reviewingPayment, setReviewingPayment] = useState<PaymentRecord | null>(null);
+  const [showWorkPayment, setShowWorkPayment] = useState(false);
 
   return (
     <div className="dashboard-stack">
+      <div className="actions"><button className="primary-button" type="button" disabled={busy} onClick={() => setShowWorkPayment(true)}>Pay unpaid work</button></div>
+      {showWorkPayment ? <AdminWorkPaymentModal data={data} busy={busy} onAction={onAction} onClose={() => setShowWorkPayment(false)} /> : null}
       <section className="panel">
         <div className="panel-header">
           <div>
