@@ -10494,28 +10494,29 @@ function AdminWorkPaymentModal({ data, busy, onAction, onClose }: {
 }) {
   const [clientId, setClientId] = useState("");
   const [userId, setUserId] = useState("");
-  const [periodStart, setPeriodStart] = useState(today());
-  const [periodEnd, setPeriodEnd] = useState(today());
+  const [paymentId, setPaymentId] = useState("");
   const [error, setError] = useState("");
-  const contracts = data.contracts.filter((contract) => contract.clientId === clientId && ["active", "ended"].includes(contract.status));
-  const bidders = data.users.filter((user) => contracts.some((contract) => contract.workerId === user.id));
+  const overduePayments = data.payments.filter((payment) => payment.status === "scheduled" && !isWithdrawalPayment(payment) && payment.scheduledDate < new Date().toISOString().slice(0, 10) && payment.clientId === clientId);
+  const bidders = data.users.filter((user) => overduePayments.some((payment) => payment.userId === user.id));
+  const selectedPayment = overduePayments.find((payment) => payment.id === paymentId && payment.userId === userId);
   const client = userById(data.users, clientId);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
-    const result = await onAction("releasePayment", { clientId, userId, periodStart, periodEnd });
+    if (!selectedPayment) return;
+    const result = await onAction("releasePayment", { clientId, userId, sourcePaymentId: selectedPayment.id, periodStart: selectedPayment.periodStart, periodEnd: selectedPayment.periodEnd });
     if (result) onClose();
-    else setError("Payment could not be released. Check the client credit and approved unpaid work for this period.");
+    else setError("Payment could not be released. Refresh and check that it is still overdue and unpaid.");
   }
-  return <ModalFrame title="Pay Unpaid Work" subtitle="Release approved work from client credit to the bidder balance." onClose={onClose}>
+  return <ModalFrame title="Pay Overdue Payment" subtitle="Deduct the full overdue amount from client credit, including when the balance becomes negative." onClose={onClose}>
     <form className="form-grid" onSubmit={submit}>
-      <label className="field"><span>Client</span><select required value={clientId} onChange={(event) => { setClientId(event.target.value); setUserId(""); }}><option value="">Select client</option>{data.users.filter((user) => isClientRole(user.role)).map((user) => <option key={user.id} value={user.id}>{user.name} - {displayUserId(user)}</option>)}</select></label>
-      <label className="field"><span>Bidder</span><select required disabled={!clientId} value={userId} onChange={(event) => setUserId(event.target.value)}><option value="">Select bidder</option>{bidders.map((user) => <option key={user.id} value={user.id}>{user.name} - {displayUserId(user)}</option>)}</select></label>
-      <label className="field"><span>From</span><input required type="date" value={periodStart} onChange={(event) => setPeriodStart(event.target.value)} /></label>
-      <label className="field"><span>Through</span><input required type="date" min={periodStart} value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} /></label>
-      {client ? <p className="full">Client available credit: {money(userCreditBalances(client, data).moneyCreditBalance)}</p> : null}
+      <label className="field"><span>Client</span><select required value={clientId} onChange={(event) => { setClientId(event.target.value); setUserId(""); setPaymentId(""); }}><option value="">Select client</option>{data.users.filter((user) => isClientRole(user.role)).map((user) => <option key={user.id} value={user.id}>{user.name} - {displayUserId(user)}</option>)}</select></label>
+      <label className="field"><span>Bidder</span><select required disabled={!clientId} value={userId} onChange={(event) => { setUserId(event.target.value); setPaymentId(""); }}><option value="">Select bidder</option>{bidders.map((user) => <option key={user.id} value={user.id}>{user.name} - {displayUserId(user)}</option>)}</select></label>
+      <label className="field full"><span>Overdue payment</span><select required disabled={!userId} value={paymentId} onChange={(event) => setPaymentId(event.target.value)}><option value="">Select overdue payment</option>{overduePayments.filter((payment) => payment.userId === userId).map((payment) => <option key={payment.id} value={payment.id}>{payment.id} - {money(payment.amount)} - Due {shortDate(payment.scheduledDate)}</option>)}</select></label>
+      {client ? <p className="full">Client credit: {money(userCreditBalances(client, data).moneyCreditBalance)}{selectedPayment ? ` | After payment: ${money(userCreditBalances(client, data).moneyCreditBalance - selectedPayment.amount)}` : ""}</p> : null}
+      {selectedPayment ? <p className="full">Full payment: {money(selectedPayment.amount)}. Work period: {shortDate(selectedPayment.periodStart)} - {shortDate(selectedPayment.periodEnd)}.</p> : null}
       {error ? <div className="error full" role="alert">{error}</div> : null}
-      <div className="actions full"><button type="submit" className="primary-button" disabled={busy || !clientId || !userId || periodStart > periodEnd}>Pay approved unpaid work</button></div>
+      <div className="actions full"><button type="submit" className="primary-button" disabled={busy || !selectedPayment}>Pay full overdue amount</button></div>
     </form>
   </ModalFrame>;
 }
@@ -10537,10 +10538,20 @@ function SuperAdminBillingManagementView({
   const completedPayments = data.payments.filter((payment) => ["paid", "failed", "denied", "cancelled"].includes(payment.status));
   const [reviewingPayment, setReviewingPayment] = useState<PaymentRecord | null>(null);
   const [showWorkPayment, setShowWorkPayment] = useState(false);
+  const requestedPaymentPages = useRef(new Set<number>());
+  useEffect(() => {
+    const page = data.pagination?.payments;
+    if (!showWorkPayment) {
+      requestedPaymentPages.current.clear();
+    } else if (page?.hasMore && !loadingPages.payments && !requestedPaymentPages.current.has(page.nextOffset)) {
+      requestedPaymentPages.current.add(page.nextOffset);
+      void onLoadPage("payments", { limit: 100 });
+    }
+  }, [showWorkPayment, data.pagination, loadingPages.payments, onLoadPage]);
 
   return (
     <div className="dashboard-stack">
-      <div className="actions"><button className="primary-button" type="button" disabled={busy} onClick={() => setShowWorkPayment(true)}>Pay unpaid work</button></div>
+      <div className="actions"><button className="primary-button" type="button" disabled={busy} onClick={() => setShowWorkPayment(true)}>Pay overdue payments</button></div>
       {showWorkPayment ? <AdminWorkPaymentModal data={data} busy={busy} onAction={onAction} onClose={() => setShowWorkPayment(false)} /> : null}
       <section className="panel">
         <div className="panel-header">
