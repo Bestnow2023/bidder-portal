@@ -10687,6 +10687,13 @@ function AdminPayments({
   const creditBalance = paymentClientBalances?.moneyCreditBalance || 0;
   const releaseCreditBalance = depositClientBalances?.moneyCreditBalance || 0;
   const releasePostCreditBalance = depositClientBalances?.postCreditBalance || 0;
+  const releaseContractIds = new Set(data.contracts
+    .filter((contract) => contract.clientId === data.currentUser.id && ["active", "ended"].includes(contract.status))
+    .map((contract) => contract.id));
+  const releaseWorkLogs = data.workLogs.filter((log) =>
+    isSuperAdminRole(data.currentUser.role) ||
+    (log.contractId ? releaseContractIds.has(log.contractId) : log.reviewedByUserId === data.currentUser.id)
+  );
   const visiblePaymentHistory = canModifyPayments
     ? data.payments
     : data.payments.filter((payment) => !isWithdrawalPayment(payment));
@@ -10696,7 +10703,7 @@ function AdminPayments({
   const releaseWorkedAmount = releaseDraft.baseAmount !== ""
     ? Number(releaseDraft.baseAmount) || 0
     : selectedReleaseUser
-      ? estimateForUserInRange(selectedReleaseUser, data.workLogs, releaseDraft.periodStart, releaseDraft.periodEnd)
+      ? estimateForUserInRange(selectedReleaseUser, releaseWorkLogs, releaseDraft.periodStart, releaseDraft.periodEnd)
       : 0;
   const releaseBaseAmount = Math.max(
     0,
@@ -10730,7 +10737,7 @@ function AdminPayments({
   const paydayItems: UpcomingPaymentItem[] = payableUsers
     .filter((user) => user.nextPaymentDate && !scheduledKeys.has(`${user.id}:${user.nextPaymentDate}`))
     .map((user) => {
-      const unpaidLogs = data.workLogs
+      const unpaidLogs = releaseWorkLogs
         .filter((log) => log.userId === user.id && isWorkLogApproved(log) && !isWorkLogPaid(log, data.payments))
         .sort((left, right) => left.workDate.localeCompare(right.workDate));
       const periodStart = unpaidLogs[0]?.workDate || user.nextPaymentDate;
